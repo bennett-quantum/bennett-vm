@@ -1,0 +1,9 @@
+# Spec versions this repo implements. Contract = the published specs, nothing else.
+status = "skeleton"
+isa = "0.3"
+object = "0.3"
+launch = "0.3"
+sched = "0.3"
+cert = "0.3"
+coverage = "0.3"
+target = "0.3"

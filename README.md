@@ -41,12 +41,20 @@ synchronization; execution advances at `wait` or `run_step`. VM extensions add
 immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
 [tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
 
-The current gate has **34 passing Rust tests**, including 160 C ABI checks,
-**1,054 agreeing CLI comparisons** and 21,888 complete one-row inverse checks.
-The unchanged published conformance harness reports **445 pass / 0 fail /
-45 unavailable** (exit 2); suite C is **339/339**. Exact support and cleanliness
-use symbolic amplitudes; display amplitudes are compared phase-sensitively at
-absolute tolerance 2e-12. No global phase is discarded.
+The current gate has **56 passing Rust tests**, including 160 launch C checks
+and a scheduler C consumer calling all 15 published functions, **1,076 agreeing
+CLI comparisons** and the existing 21,888 one-row inverse checks. Raw published
+conformance is **445 pass / 2 fail / 43 unavailable** (exit 1). Both FAILs are
+obsolete staging-prose probes; full details and deciding sentences are in PROGRESS.
 
-Next: milestone 4, devices/targets/lowering/schedules, then milestone 5 JIT.
+Milestone 4 is **partial and blocked**: target-backed gate-only actions execute
+native leaves from actual scheme expansion; exact-rational target evaluation,
+class capacity/history and event-list accounting are available. Target input is
+exactly ISA §8 JCS, without vendor extensions. Scheduler request/response exports
+consume the published header; requests return explicit UNSUPPORTED because the
+mandatory `ref` expansion document is not published. No schedules/certificates
+are fabricated. Use the Rust `target`/`sched` modules and `run-program --target`;
+full row lowering and integrated scheduled execution/accounting remain M4.
+
+Next: resolve ISA gaps and finish milestone 4, then milestone 5 JIT.
 No future North-Star capability is removed from scope.

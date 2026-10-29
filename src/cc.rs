@@ -170,6 +170,9 @@ impl Data {
                 d.write(&g.base, &from_hex(&obj.data[name])?);
             }
             if let Some(name) = &l.block_image {
+                if !obj.data[name].len().is_multiple_of(1024) {
+                    return Err("§7.3: block image must have complete 512-byte sectors".into());
+                }
                 for (i, bytes) in from_hex(&obj.data[name])?.chunks(512).enumerate() {
                     d.block.insert(i as u64, bytes.to_vec());
                 }

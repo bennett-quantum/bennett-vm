@@ -143,3 +143,108 @@ fn lower_specificity_ties_do_not_invalidate_unique_maximum() {
         Some(2)
     );
 }
+
+#[test]
+fn all_schedule_bindings_are_checked_before_consumption() {
+    use bennett_vm::{sched::Bindings, target::Target};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("bennett-isa-spec/conformance/cases");
+    let (object, ids) = bennett_vm::load(
+        &std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap(),
+        false,
+    )
+    .unwrap();
+    let t = Target::parse(
+        std::fs::read_to_string(root.join("E/E-matching-first-entry/target.json"))
+            .unwrap()
+            .trim_end(),
+    )
+    .unwrap();
+    let params = j("{}");
+    let epsilon = "0".parse().unwrap();
+    let b = Bindings {
+        region: "inc8",
+        variant: "forward",
+        inherited_controls: 0,
+        budget: [3, 0, 0, 0],
+        params: &params,
+        epsilon: &epsilon,
+    };
+    let binding = Json::obj(vec![
+        (
+            "closure_hash",
+            Json::Str(ids.closure["inc8"].clone().unwrap()),
+        ),
+        ("target_hash", Json::Str(t.hash.clone())),
+        ("region", Json::Str("inc8".into())),
+        ("variant", Json::Str("forward".into())),
+        ("inherited_controls", Json::u64(0)),
+        ("budget", j("[3,0,0,0]")),
+        (
+            "params_hash",
+            Json::Str(bennett_vm::sha256::sha256_hex(b"{}")),
+        ),
+        ("epsilon", Json::u64(0)),
+        ("scheduler", j(r#"{"name":"test","version":"0.8"}"#)),
+    ]);
+    let doc = Json::obj(vec![("bindings", binding), ("entries", j("[]"))]);
+    assert!(
+        sched::consume(&doc, &object, &ids, &t, &b)
+            .unwrap_err()
+            .contains("ref@0.8")
+    );
+    for field in [
+        "closure_hash",
+        "target_hash",
+        "region",
+        "variant",
+        "inherited_controls",
+        "budget",
+        "params_hash",
+        "epsilon",
+    ] {
+        let mut bad = doc.clone();
+        if let Json::Obj(m) = &mut bad
+            && let Json::Obj(binding) = m.get_mut("bindings").unwrap()
+        {
+            let value = match field {
+                "inherited_controls" | "epsilon" => Json::u64(1),
+                "budget" => j("[4,0,0,0]"),
+                _ => Json::Str("wrong".into()),
+            };
+            binding.insert(field.into(), value);
+        }
+        let error = sched::consume(&bad, &object, &ids, &t, &b).unwrap_err();
+        assert!(
+            error.contains(&format!("binding {field} mismatch")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn data_symbol_is_not_an_instruction_path() {
+    // §11 path is a chain of program points, never a data entry.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let (obj, ids) = bennett_vm::load(
+        &std::fs::read_to_string(
+            root.join("bennett-isa-spec/conformance/cases/objects/actions.bisa"),
+        )
+        .unwrap(),
+        false,
+    )
+    .unwrap();
+    let doc = j(&format!(
+        r#"{{"entries":[{{"kind":"start","start":{{"time":0}},"path":[{{"symbol":"{}","point":"entry:0","iteration":[]}}],"step":"*","phase":"*","generated":"*"}}]}}"#,
+        ids.interface["image"]
+    ));
+    assert!(
+        sched::validate_entries(&doc, &obj, &ids)
+            .unwrap_err()
+            .contains("not a function")
+    );
+}

@@ -1407,3 +1407,22 @@ fn published_d_and_g_cli_cases_differential() {
     }
     assert_eq!(compared, 17, "all 7 D and 10 G CLI cases must participate");
 }
+
+#[path = "support/device.rs"]
+mod device_fixture;
+#[test]
+fn block_image_boundaries_differential() {
+    let raw = device_fixture::block_object(true);
+    let path = temp_object("full-sector-block", &raw); // includes independent check comparison
+    for command in ["run-cc", "reverse"] {
+        assert_outcome("whole block sector", &s(&[command, &path, "effects"]));
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".tmp/incomplete-sector.bisa");
+    std::fs::write(&path, device_fixture::block_object(false)).unwrap();
+    let path = path.to_str().unwrap();
+    assert_bytes("reject incomplete sector", &s(&["check", path]));
+    assert_outcome(
+        "reject incomplete sector before run",
+        &s(&["run-cc", path, "effects"]),
+    );
+}

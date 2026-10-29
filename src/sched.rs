@@ -249,6 +249,9 @@ pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result
                             .map(|(n, _)| n)
                     })
                     .ok_or(error("path symbol is not in object"))?;
+                if object.function(name).is_none() {
+                    return Err(error("path symbol is not a function"));
+                }
                 let depth = points(object, name)
                     .into_iter()
                     .find(|p| &p.0 == point)

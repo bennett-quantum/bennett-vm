@@ -33,7 +33,99 @@ ISA gaps: `47t` missing ref expansion; `cxg` undefined eps_decade table indexing
 JCS hash file has a trailing newline, and hashes the newline). No conformance
 fixture/expected value was changed. All remaining staged APIs name milestone 5
 for rigorous certificates/estimates/coverage; milestone 4 target paths name their
-specific expansion/pool/index item. Full verification counts will follow below.
+specific expansion/pool/index item. Full verification counts follow below.
+
+
+## Final gates and counts
+
+Headless `cargo test --offline`: **56 passed, 0 failed, 0 ignored**. This includes
+6 unit tests, 10 coherent groups, 2 raw-conformance/metadata groups, 2 device
+regressions, 16 differential groups, 2 linked C11 consumers, 7 schedule groups,
+10 target groups and 1 eight-case validation group. The launch C consumer still
+passes **160 checks**; the scheduler consumer calls all **15** published exports.
+Strict all-target Clippy, `cargo fmt --check` and `git diff --check` pass.
+Raw test output: `.tmp/m4-final-tests.log`; raw conformance: `.tmp/conformance.log`.
+
+**1,076 differential comparisons: 1,076 agree / 0 diverge** (1,050 successful
+JSON comparisons, 26 diagnostics). Added all 7 runnable D and all 10 runnable G
+CLI cases, plus five block-image boundary comparisons. All existing fixture,
+phase-sensitive amplitude and opaque memory-fingerprint comparison limits from
+milestone 3 remain unchanged. The expected-invalid G budget case must compare
+diagnostics rather than require a successful coherent execution.
+
+| Command | JSON | Diagnostic |
+|---|---:|---:|
+| check | 66 | 0 |
+| hash | 12 | 4 |
+| run-oracle | 218 | 1 |
+| run-cc | 116 | 3 |
+| reverse | 406 | 3 |
+| run-action | 97 | 0 |
+| step-check | 59 | 0 |
+| run-program | 76 | 15 |
+
+Unchanged read-only published conformance (standalone exit **1**):
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A | 21 | 0 | 0 | 21 |
+| B | 35 | 0 | 0 | 35 |
+| C | 339 | 0 | 0 | 339 |
+| D | 7 | 0 | 5 | 12 |
+| E | 0 | 1 | 14 | 15 |
+| F | 33 | 0 | 2 | 35 |
+| G | 10 | 0 | 13 | 23 |
+| H | 0 | 1 | 9 | 10 |
+| **all** | **445** | **2** | **43** | **490** |
+
+These 43 unavailable results are not claimed promoted by local unit tests. D's
+five rigorous-certificate cases and F's linking/frame cases remain unavailable;
+G's library scenarios are checked by the C consumer except estimates/coverage,
+which explicitly fail as milestone 5. E/H direct witnesses exercise the supported
+AST, hashes, matching, leaves, accounting, selectors, defaults, timing, paths,
+bindings and unsupported library responses. Successful emitted schedules and
+their reproducibility are **not** tested or claimed while 47t is unresolved.
+
+## Every gap/divergence and its deciding text
+
+- **47t, blocking:** §11: “bennett-isa-spec publishes the reference library `ref`
+  (§17 item 7).” The same paragraph requires ordinals, scratch identities and
+  the removable subset in a versioned document; no such document/hash is
+  published. §11: “A consumer that does not implement the bound library rejects
+  the schedule (`E_SCHEDULE_INFEASIBLE`).” Default bindings also reject (ref@0.8).
+- **cxg, blocking:** §8.1 includes `"index": "k" | "eps_decade"` but defines no
+  `eps_decade` rounding/offset/domain rule. It fails explicitly as milestone 4.
+- **clh, fixture contradictions:** §8.1: “A target is a JSON document in RFC 8785
+  canonical form”; and “an entry with `epsilon` 0 MUST NOT reference `eps` or
+  `log2inv_eps`.” The hash fixture includes a newline; the epsilon-zero fixture
+  has no forbidden reference. Tests reject the former and accept the latter;
+  a separately mutated forbidden-reference witness rejects. The old E launch
+  probe FAILs on changed diagnostic prose, as documented above. Nothing is
+  changed to match an erroneous staged expected value.
+- **47i, clarification:** §7.3: “sector map from the `block_image` (else empty),
+  512-byte sectors; absent sectors read as zero.” The final partial-sector
+  encoding is not explicit. The VM follows the reference's strict full-sector
+  initialization rule. Red exposed a short read leaving byte 1 at 0xff; green
+  rejects incomplete images before execution and tests full-sector reads and
+  reversal. An initial attempt to reject during `check` differed from the
+  reference; rejection now belongs to device initialization, so `check` and
+  execution diagnostics both agree. No permanent CLI divergence remains.
+- **H probe FAIL:** §11 requires explicit unavailable-library rejection, while
+  the published probe expects the old literal “staged deliverable 10”. The
+  actual refusal names `ref@0.8`, E_SCHEDULE_INFEASIBLE and milestone 4.
+
+Completed beads: `v23.1` target-backed gate execution/class capacity, `v23.2`
+scheduler validation/request-response ABI, `v23.3` block-image hardening.
+Parent **v23 is BLOCKED**, depending on 47t and cxg; it is not closed.
+Next: finish **milestone 4**, including full row lowering, target dirty pools,
+approximate realisations, schedule execution and integrated resource accounting,
+then milestone 5 JIT. Estimates/rigorous certificates/coverage still name 5.
+
+Observed final test executable hashes (not claims about external source builds):
+VM `4d249369634f42115bd51539ebef962d9464ce0f93e5c3c9dd3842406441d872`;
+reference `679de84f8c016ac2626a2eca2c262129d204ae9f7723cec00a92cead0f4beff5`;
+conformance `1bd5aab7f20690c7959edfd217d5380cfd8ea4a4f7f7bc17bea4b86561e2bb92`.
+No other repository changed; no push or Dolt remote sync; std-only throughout.
 
 # Milestone 3 verification — 2026-10-29
 

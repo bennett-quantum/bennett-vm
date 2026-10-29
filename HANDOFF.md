@@ -1,25 +1,45 @@
-Milestone 3 implemented for accepted ISA/launch 0.8 (2026-10-29).
-See docs/PROGRESS.md for exact evidence, deciding sentences and comparison limits.
-Validation p9h: eight rule-citing regressions red then green before hashes.
-Independent §3.6/§3.7 basis machine: derived widths and fixed frame slots,
-activation capture/delivery, sparse cells, actual elementary inverse operations.
-step-check and oracle prefix reverse served, including B=0 and HALT padding.
-Exact symbolic coherent amplitudes, standalone run-action and action reverse;
-phase-sensitive CLI comparison at absolute 2e-12, exact support and cleanliness.
-Designated idle-pool library API preserves external entanglement; CLI provisions
-its documented pool. CC 0.8 has no idle designation operand; no arbitrary live
-register is implicitly borrowed. Borrow proofs precede composition and hashes.
-34 Rust tests pass, plus 160 linked C11 checks; 1,054/1,054 CLI comparisons agree.
-21,888 complete pre-step tuple inverse checks pass on all fixture oracles.
-Published conformance unchanged: A21 B35 C339 D7 E0 F33 G10 H0 pass;
-zero failures, 45 explicit unavailable outcomes, standalone exit 2.
-All 41 normative C exports match published headers at ISA 3a10f84.
-VM header consumes bennett_launch.h; six extensions recorded individually in bd.
-Final reference CLI was pinned under VM .tmp to avoid a concurrent rebuild race;
-SHA-256 a49f07dc608501186d39d5a6c254ea2bbe49ca05647ed053d5dd4ffa2e23cf2c.
-No source copied/read from reference interpreter; no other repository edited.
-No pushes or Dolt sync. Headless, offline, project-local TMPDIR throughout.
-Next: milestone 4 bennett-vm-v23: devices/targets/lowering/verbatim schedules,
-then milestone 5 JIT. Estimates/coverage/certificates retain loud staged errors.
-Final VM executable SHA-256:
-23a77feed9d9ea0eb06f55fa45a5a45e282d24019203e261991f64cd6ecd3872.
+Milestone 4 PARTIAL; parent bennett-vm-v23 BLOCKED, not closed (2026-10-29).
+Commits: 70ac9f0 exact targets; 5111c14 target execution/scheduler exports;
+subsequent final commit contains sector/path hardening and this handoff.
+
+Read docs/PROGRESS.md first: exact counts, deciding sentences, limits and next work.
+56 Rust tests pass; 160 launch C checks; scheduler C consumer calls all 15
+published bennett_sched.h functions. 1,076/1,076 CLI differential comparisons
+agree (1,050 JSON, 26 diagnostics); zero remaining CLI divergences.
+All 7 runnable D and 10 runnable G commands now participate in the differential
+harness; five additional block-image boundary comparisons participate too.
+
+Raw unchanged conformance: 445 pass / 2 fail / 43 unavailable, exit 1.
+A21/0/0 B35/0/0 C339/0/0 D7/0/5 E0/1/14 F33/0/2 G10/0/13 H0/1/9.
+The two FAILs are obsolete staging-prose probes: E receives strict noncanonical
+JCS diagnostic; H receives explicit E_SCHEDULE_INFEASIBLE missing-ref reason.
+Integration test preserves the raw verdict and gates exactly those reasons;
+it does not claim full conformance green or promote 43 hard-coded unavailable cases.
+
+Implemented supported exact-rational target AST, strict §8 target input format,
+UTF16 JCS class order, first matching native gates/non-nested schemes, actual
+native-leaf simulation for gate-only actions, capacity/class history, explicit
+leaf-event/live-interval accounting. No automatic scheme-correctness proof is
+claimed; author owns it (§8.3). Scheduler request setters own copies and valid
+requests return UNSUPPORTED, reason ref@0.8, no schedule/certificate. Selector,
+binding, path, timing and schema validation utilities have hand-derived tests.
+Devices retain all prior behavior; partial block images now reject at device
+initialization (not check), matching reference; complete sectors read/reverse.
+
+ISA gaps (all labeled isa-0.9, filed locally):
+47t: no published ref expansion document/hash/ordinals/scratch/removable subset;
+cxg: eps_decade table index is named but never defined;
+clh: E epsilon-zero fixture contains no forbidden eps; JCS hash fixture has newline;
+47i: clarify complete-sector block_image encoding/partial-final-sector policy.
+Completed child beads v23.1/v23.2/v23.3; parent depends on 47t/cxg and stays blocked.
+
+Remaining M4: full oracle/structured row lowering, dirty-scheme caller idle pool,
+requested approximation shares, verbatim schedules, schedule reproducibility and
+integrated resource accounting. Do not substitute a private guessed ref library.
+After M4: milestone 5 JIT; estimates/rigorous certs/coverage retain loud milestone5
+errors. Branch enumeration and exact coherent tier remain implemented and gated.
+
+Headless/offline with TMPDIR under .tmp, no dependencies, other repository edits,
+pushes or Dolt remote sync. Gates: fmt --check, strict all-target Clippy,
+cargo test --offline, git diff --check. Logs .tmp/m4-final-tests.log and
+.tmp/conformance.log. Full conformance still exits 1; report it honestly.

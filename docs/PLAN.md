@@ -61,9 +61,17 @@ frames, never re-execution.
    widths, prefix reversal, `step-check`, exact-amplitude
    `run-action`, §5.6 borrow frames, and branch-enumeration
    simulation of permutation segments (NorthStar §4.2).
-4. **Devices, targets, lowering, schedules.** §8 target
+4. **Devices, targets, lowering, schedules (in progress; blocked on 47t/cxg).** §8 target
    descriptions, launch-time lowering to the target gate alphabet,
    §11 schedule consumption verbatim-or-reject, resource accounting.
+   Delivered subset: exact target AST/schema/hash, ordered matching, nonnested
+   template expansion, actual native-leaf simulation for gate-only actions,
+   class capacity/history, event-list accounting, schedule validation utilities
+   and all 15 scheduler ABI exports. No schedule is accepted/emitted while the
+   mandatory published `ref` expansion document is absent (47t); eps_decade
+   indexing also lacks a definition (cxg). Full row lowering, dirty scheme pools,
+   approximate scheduled realisations and integrated scheduled accounting remain
+   here, without changing scope. See PROGRESS.md for the raw red conformance verdict.
 5. **JIT tier.** §5.7 transformations (inlining, structure
    recovery, dispatch re-indexing) proven extensional by the
    milestone-1 harness, then native codegen for CC and oracle

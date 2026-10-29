@@ -7,7 +7,8 @@ use crate::value::Budget;
 
 pub fn parse_u64(text: &str, what: &str) -> Result<u64, String> {
     let big = BigUint::parse_int(text).map_err(|_| format!("invalid {what} {text:?}"))?;
-    big.to_u64().ok_or_else(|| format!("host limit: {what} {text:?} exceeds 2^64-1"))
+    big.to_u64()
+        .ok_or_else(|| format!("host limit: {what} {text:?} exceeds 2^64-1"))
 }
 
 /// Layout-derived default limits (§5.4, reference README): heap and
@@ -17,7 +18,11 @@ pub fn default_limits(obj: &Object) -> (u64, u64, u64) {
         None => (0, 0, 0),
         Some(l) => {
             let heap = l.heap_limit_max.to_u64().unwrap_or(u64::MAX);
-            let stack = if l.s_cells >= 64 { u64::MAX } else { 1u64 << l.s_cells };
+            let stack = if l.s_cells >= 64 {
+                u64::MAX
+            } else {
+                1u64 << l.s_cells
+            };
             (heap, stack, 64)
         }
     }
@@ -54,9 +59,21 @@ pub fn parse_budget(text: &str, obj: &Object) -> Result<Budget, String> {
     let (dh, ds, dd) = default_limits(obj);
     let b = Budget {
         steps: parse_u64(parts[0], "budget steps")?,
-        heap: if parts.len() == 4 { parse_u64(parts[1], "budget heap")? } else { dh },
-        stack: if parts.len() == 4 { parse_u64(parts[2], "budget stack")? } else { ds },
-        depth: if parts.len() == 4 { parse_u64(parts[3], "budget depth")? } else { dd },
+        heap: if parts.len() == 4 {
+            parse_u64(parts[1], "budget heap")?
+        } else {
+            dh
+        },
+        stack: if parts.len() == 4 {
+            parse_u64(parts[2], "budget stack")?
+        } else {
+            ds
+        },
+        depth: if parts.len() == 4 {
+            parse_u64(parts[3], "budget depth")?
+        } else {
+            dd
+        },
     };
     validate_budget(obj, &b)?;
     Ok(b)
@@ -64,21 +81,40 @@ pub fn parse_budget(text: &str, obj: &Object) -> Result<Budget, String> {
 
 pub fn default_budget(obj: &Object, steps: u64) -> Budget {
     let (h, s, d) = default_limits(obj);
-    Budget { steps, heap: h, stack: s, depth: d }
+    Budget {
+        steps,
+        heap: h,
+        stack: s,
+        depth: d,
+    }
 }
 
 /// A `token:B[,heap,stack,depth]` value (§5.4-validated by callers).
 pub fn parse_token(text: &str, defaults: &Budget) -> Result<Budget, String> {
-    let inner = text.strip_prefix("token:").ok_or_else(|| format!("invalid token value {text:?}"))?;
+    let inner = text
+        .strip_prefix("token:")
+        .ok_or_else(|| format!("invalid token value {text:?}"))?;
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() != 1 && parts.len() != 4 {
         return Err(format!("invalid token value {text:?}"));
     }
     Ok(Budget {
         steps: parse_u64(parts[0], "token steps")?,
-        heap: if parts.len() == 4 { parse_u64(parts[1], "token heap")? } else { defaults.heap },
-        stack: if parts.len() == 4 { parse_u64(parts[2], "token stack")? } else { defaults.stack },
-        depth: if parts.len() == 4 { parse_u64(parts[3], "token depth")? } else { defaults.depth },
+        heap: if parts.len() == 4 {
+            parse_u64(parts[1], "token heap")?
+        } else {
+            defaults.heap
+        },
+        stack: if parts.len() == 4 {
+            parse_u64(parts[2], "token stack")?
+        } else {
+            defaults.stack
+        },
+        depth: if parts.len() == 4 {
+            parse_u64(parts[3], "token depth")?
+        } else {
+            defaults.depth
+        },
     })
 }
 
@@ -91,7 +127,9 @@ pub enum RawArg {
 
 pub fn parse_raw_arg(text: &str, token_defaults: &Budget) -> Result<RawArg, String> {
     if let Some(rest) = text.strip_prefix("f64:") {
-        let v: f64 = rest.parse().map_err(|_| format!("invalid f64 argument {text:?}"))?;
+        let v: f64 = rest
+            .parse()
+            .map_err(|_| format!("invalid f64 argument {text:?}"))?;
         if !v.is_finite() {
             return Err(format!("invalid f64 argument {text:?}: not finite"));
         }
@@ -110,18 +148,26 @@ pub fn parse_raw_arg(text: &str, token_defaults: &Budget) -> Result<RawArg, Stri
 pub fn bind_int(text: &str, width: usize, type_name: &str) -> Result<BigUint, String> {
     if let Some(neg) = text.strip_prefix('-') {
         if neg.starts_with("0x") || neg.starts_with("0X") {
-            return Err(format!("§10: E_ARG: integer {text} does not fit {type_name}"));
+            return Err(format!(
+                "§10: E_ARG: integer {text} does not fit {type_name}"
+            ));
         }
-        let mag = BigUint::parse_decimal(neg).map_err(|_| format!("§10: E_ARG: invalid integer argument {text:?}"))?;
+        let mag = BigUint::parse_decimal(neg)
+            .map_err(|_| format!("§10: E_ARG: invalid integer argument {text:?}"))?;
         let min_mag = BigUint::from_u64(1).shl(width - 1);
         if width == 0 || mag.is_zero() || mag.cmp_big(&min_mag) == std::cmp::Ordering::Greater {
-            return Err(format!("§10: E_ARG: integer {text} does not fit {type_name}"));
+            return Err(format!(
+                "§10: E_ARG: integer {text} does not fit {type_name}"
+            ));
         }
         return Ok(BigUint::from_u64(1).shl(width).sub(&mag).mask(width));
     }
-    let v = BigUint::parse_int(text).map_err(|_| format!("§10: E_ARG: invalid integer argument {text:?}"))?;
+    let v = BigUint::parse_int(text)
+        .map_err(|_| format!("§10: E_ARG: invalid integer argument {text:?}"))?;
     if v.bits() > width {
-        return Err(format!("§10: E_ARG: integer {text} does not fit {type_name}"));
+        return Err(format!(
+            "§10: E_ARG: integer {text} does not fit {type_name}"
+        ));
     }
     Ok(v)
 }
@@ -133,14 +179,24 @@ pub struct Opts {
     pub flags: std::collections::BTreeSet<String>,
 }
 
-pub fn scan_opts(args: &[String], value_flags: &[&str], bool_flags: &[&str]) -> Result<Opts, String> {
-    let mut out = Opts { positional: Vec::new(), map: Default::default(), flags: Default::default() };
+pub fn scan_opts(
+    args: &[String],
+    value_flags: &[&str],
+    bool_flags: &[&str],
+) -> Result<Opts, String> {
+    let mut out = Opts {
+        positional: Vec::new(),
+        map: Default::default(),
+        flags: Default::default(),
+    };
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
         if let Some(name) = a.strip_prefix("--") {
             if value_flags.contains(&name) {
-                let v = args.get(i + 1).ok_or_else(|| format!("missing value for --{name}"))?;
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for --{name}"))?;
                 out.map.entry(name.to_string()).or_default().push(v.clone());
                 i += 2;
             } else if bool_flags.contains(&name) {

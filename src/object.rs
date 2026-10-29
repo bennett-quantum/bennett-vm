@@ -33,10 +33,11 @@ impl Type {
         if t == "wire" {
             return Ok(Type::Wire(1));
         }
-        if let Some(rest) = t.strip_prefix('i') {
-            if !rest.is_empty() && rest.bytes().all(|c| c.is_ascii_digit()) {
-                return Ok(Type::I(parse_usize(rest)?));
-            }
+        if let Some(rest) = t.strip_prefix('i')
+            && !rest.is_empty()
+            && rest.bytes().all(|c| c.is_ascii_digit())
+        {
+            return Ok(Type::I(parse_usize(rest)?));
         }
         for (prefix, make) in [
             ("wire[", Type::Wire as fn(usize) -> Type),
@@ -44,13 +45,19 @@ impl Type {
             ("qreg[", Type::Qreg),
         ] {
             if let Some(rest) = t.strip_prefix(prefix) {
-                let num = rest.strip_suffix(']').ok_or_else(|| format!("malformed type {t:?}"))?;
+                let num = rest
+                    .strip_suffix(']')
+                    .ok_or_else(|| format!("malformed type {t:?}"))?;
                 return Ok(make(parse_usize(num)?));
             }
         }
         if let Some(rest) = t.strip_prefix("region[") {
-            let inner = rest.strip_suffix(']').ok_or_else(|| format!("malformed type {t:?}"))?;
-            let (a, w) = inner.split_once(',').ok_or_else(|| format!("malformed type {t:?}"))?;
+            let inner = rest
+                .strip_suffix(']')
+                .ok_or_else(|| format!("malformed type {t:?}"))?;
+            let (a, w) = inner
+                .split_once(',')
+                .ok_or_else(|| format!("malformed type {t:?}"))?;
             return Ok(Type::Region(parse_usize(a)?, parse_usize(w)?));
         }
         Err(format!("unknown type {t:?}"))
@@ -62,7 +69,13 @@ impl Type {
             Type::Ptr => "ptr".into(),
             Type::F64 => "f64".into(),
             Type::Token => "token".into(),
-            Type::Wire(n) => if *n == 1 { "wire".into() } else { format!("wire[{n}]") },
+            Type::Wire(n) => {
+                if *n == 1 {
+                    "wire".into()
+                } else {
+                    format!("wire[{n}]")
+                }
+            }
             Type::Reg(n) => format!("reg[{n}]"),
             Type::Region(a, w) => format!("region[{a},{w}]"),
             Type::Qreg(n) => format!("qreg[{n}]"),
@@ -77,7 +90,8 @@ impl Type {
 }
 
 pub fn parse_usize(text: &str) -> Result<usize, String> {
-    text.parse::<usize>().map_err(|_| format!("invalid integer {text:?}"))
+    text.parse::<usize>()
+        .map_err(|_| format!("invalid integer {text:?}"))
 }
 
 #[derive(Clone, Debug)]
@@ -295,7 +309,10 @@ pub fn split_tokens(line: &str) -> Result<Vec<String>, String> {
             }
         }
         if depth_paren < 0 || depth_brack < 0 {
-            return Err(err("16.2", format!("unbalanced delimiters in line {line:?}")));
+            return Err(err(
+                "16.2",
+                format!("unbalanced delimiters in line {line:?}"),
+            ));
         }
         i += 1;
     }
@@ -368,7 +385,15 @@ pub fn paren_inner(token: &str) -> Option<&str> {
 }
 
 const SECTIONS: [&str; 9] = [
-    "symbols", "imports", "functions", "data", "devices", "layout", "schedule", "certificate", "coverage",
+    "symbols",
+    "imports",
+    "functions",
+    "data",
+    "devices",
+    "layout",
+    "schedule",
+    "certificate",
+    "coverage",
 ];
 
 pub fn valid_name(text: &str) -> bool {
@@ -393,7 +418,10 @@ pub fn parse(text: &str) -> Result<Object, String> {
     }
     for (i, line) in lines.iter().enumerate() {
         if line.ends_with(' ') || line.ends_with('\t') {
-            return Err(err("16.1", format!("trailing whitespace on line {}", i + 1)));
+            return Err(err(
+                "16.1",
+                format!("trailing whitespace on line {}", i + 1),
+            ));
         }
         if line.contains('\t') {
             return Err(err("16.1", format!("tab character on line {}", i + 1)));
@@ -405,14 +433,28 @@ pub fn parse(text: &str) -> Result<Object, String> {
             let next = lines.get(i + 1);
             match next {
                 Some(n) if n.starts_with("section ") => {}
-                _ => return Err(err("16.1", format!("blank line {} does not precede a section", i + 1))),
+                _ => {
+                    return Err(err(
+                        "16.1",
+                        format!("blank line {} does not precede a section", i + 1),
+                    ));
+                }
             }
             if i > 0 && lines[i - 1].is_empty() {
-                return Err(err("16.1", format!("more than one blank line before line {}", i + 1)));
+                return Err(err(
+                    "16.1",
+                    format!("more than one blank line before line {}", i + 1),
+                ));
             }
         }
         if line.starts_with("section ") && (i == 0 || !lines[i - 1].is_empty()) {
-            return Err(err("16.1", format!("section on line {} needs exactly one preceding blank line", i + 1)));
+            return Err(err(
+                "16.1",
+                format!(
+                    "section on line {} needs exactly one preceding blank line",
+                    i + 1
+                ),
+            ));
         }
     }
     let ptr_width = parse_header(lines[0])?;
@@ -438,11 +480,17 @@ pub fn parse(text: &str) -> Result<Object, String> {
     }
     let mut last_rank: Option<usize> = None;
     for (idx, (name, hdr, start)) in order.iter().enumerate() {
-        let rank = SECTIONS.iter().position(|s| s == name).ok_or_else(|| err("9.1", format!("unknown section {name:?}")))?;
-        if let Some(prev) = last_rank {
-            if rank <= prev {
-                return Err(err("9.1", format!("section {name:?} is duplicated or out of order")));
-            }
+        let rank = SECTIONS
+            .iter()
+            .position(|s| s == name)
+            .ok_or_else(|| err("9.1", format!("unknown section {name:?}")))?;
+        if let Some(prev) = last_rank
+            && rank <= prev
+        {
+            return Err(err(
+                "9.1",
+                format!("section {name:?} is duplicated or out of order"),
+            ));
         }
         last_rank = Some(rank);
         let end = match order.get(idx + 1) {
@@ -455,7 +503,11 @@ pub fn parse(text: &str) -> Result<Object, String> {
             "symbols" => parse_symbols(&mut obj, body)?,
             "imports" => parse_imports(&mut obj, body)?,
             "functions" => {
-                let mut cur = Cursor { lines: body, pos: 0, base_line: body_start_line };
+                let mut cur = Cursor {
+                    lines: body,
+                    pos: 0,
+                    base_line: body_start_line,
+                };
                 obj.functions = parse_functions(&mut cur)?;
             }
             "data" => parse_data(&mut obj, body)?,
@@ -482,7 +534,9 @@ pub fn parse(text: &str) -> Result<Object, String> {
 
 fn parse_header(line: &str) -> Result<usize, String> {
     let toks = split_tokens(line).map_err(|_| err("16.2", "malformed object header"))?;
-    let keys = ["isa", "object", "launch", "sched", "cert", "coverage", "target"];
+    let keys = [
+        "isa", "object", "launch", "sched", "cert", "coverage", "target",
+    ];
     if toks.len() != 9 || toks[0] != "bennett-object" {
         return Err(err("16.2", "malformed object header"));
     }
@@ -490,25 +544,39 @@ fn parse_header(line: &str) -> Result<usize, String> {
         let want = format!("{k}=0.8");
         if toks[1 + i] != want {
             if toks[1 + i].starts_with(&format!("{k}=")) {
-                return Err(err("1", format!("unsupported {k} version in header {:?}; this implementation is 0.8", toks[1 + i])));
+                return Err(err(
+                    "1",
+                    format!(
+                        "unsupported {k} version in header {:?}; this implementation is 0.8",
+                        toks[1 + i]
+                    ),
+                ));
             }
             return Err(err("16.2", "malformed object header"));
         }
     }
-    let pw = toks[8].strip_prefix("ptr_width=").ok_or_else(|| err("16.2", "malformed object header"))?;
+    let pw = toks[8]
+        .strip_prefix("ptr_width=")
+        .ok_or_else(|| err("16.2", "malformed object header"))?;
     parse_usize(pw).map_err(|_| err("16.2", "malformed object header"))
 }
 
 fn parse_json_section(name: &str, body: &[&str]) -> Result<Json, String> {
     if body.len() != 1 {
-        return Err(err("9.1", format!("section {name} must be exactly one JCS line")));
+        return Err(err(
+            "9.1",
+            format!("section {name} must be exactly one JCS line"),
+        ));
     }
     let v = json::parse(body[0]).map_err(|e| err("9.1", format!("section {name}: {e}")))?;
     if !matches!(v, Json::Obj(_)) {
         return Err(err("9.1", format!("section {name} must be a JSON object")));
     }
     if v.to_jcs() != body[0] {
-        return Err(err("16.1", format!("section {name} line is not RFC 8785 canonical JSON")));
+        return Err(err(
+            "16.1",
+            format!("section {name} line is not RFC 8785 canonical JSON"),
+        ));
     }
     Ok(v)
 }
@@ -517,21 +585,56 @@ fn parse_symbols(obj: &mut Object, body: &[&str]) -> Result<(), String> {
     let v = parse_json_section("symbols", body)?;
     let map = v.as_obj().unwrap();
     for (index_text, entry) in map {
-        let index = parse_usize(index_text).map_err(|_| err("9.1", format!("symbol index {index_text:?} is not an integer")))?;
-        let e = entry.as_obj().ok_or_else(|| err("9.1", "symbol entry must be an object"))?;
+        let index = parse_usize(index_text).map_err(|_| {
+            err(
+                "9.1",
+                format!("symbol index {index_text:?} is not an integer"),
+            )
+        })?;
+        let e = entry
+            .as_obj()
+            .ok_or_else(|| err("9.1", "symbol entry must be an object"))?;
         for k in e.keys() {
             if !["name", "kind", "signature", "interface_hash"].contains(&k.as_str()) {
                 return Err(err("9.1", format!("unknown field {k:?} in symbol entry")));
             }
         }
-        let name = entry.get("name").and_then(|x| x.as_str()).ok_or_else(|| err("9.1", "symbol entry needs a string name"))?.to_string();
-        let kind = entry.get("kind").and_then(|x| x.as_str()).ok_or_else(|| err("9.1", "symbol entry needs a string kind"))?.to_string();
-        let signature = entry.get("signature").cloned().ok_or_else(|| err("9.1", "symbol entry needs a signature"))?;
-        let stored_hash = entry.get("interface_hash").and_then(|x| x.as_str()).ok_or_else(|| err("9.1", "symbol entry needs a string interface_hash"))?.to_string();
+        let name = entry
+            .get("name")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| err("9.1", "symbol entry needs a string name"))?
+            .to_string();
+        let kind = entry
+            .get("kind")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| err("9.1", "symbol entry needs a string kind"))?
+            .to_string();
+        let signature = entry
+            .get("signature")
+            .cloned()
+            .ok_or_else(|| err("9.1", "symbol entry needs a signature"))?;
+        let stored_hash = entry
+            .get("interface_hash")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| err("9.1", "symbol entry needs a string interface_hash"))?
+            .to_string();
         if !valid_name(&name) {
             return Err(err("16.1", format!("invalid symbol name {name:?}")));
         }
-        if obj.symbols.insert(name.clone(), Symbol { index, name: name.clone(), kind, signature, stored_hash }).is_some() {
+        if obj
+            .symbols
+            .insert(
+                name.clone(),
+                Symbol {
+                    index,
+                    name: name.clone(),
+                    kind,
+                    signature,
+                    stored_hash,
+                },
+            )
+            .is_some()
+        {
             return Err(err("9.1", format!("duplicate symbol name {name:?}")));
         }
     }
@@ -541,18 +644,37 @@ fn parse_symbols(obj: &mut Object, body: &[&str]) -> Result<(), String> {
 fn parse_imports(obj: &mut Object, body: &[&str]) -> Result<(), String> {
     let v = parse_json_section("imports", body)?;
     for (name, entry) in v.as_obj().unwrap() {
-        let e = entry.as_obj().ok_or_else(|| err("9.1", "import entry must be an object"))?;
+        let e = entry
+            .as_obj()
+            .ok_or_else(|| err("9.1", "import entry must be an object"))?;
         for k in e.keys() {
             if !["signature", "pinned_closure_hash"].contains(&k.as_str()) {
                 return Err(err("9.1", format!("unknown field {k:?} in import entry")));
             }
         }
-        let signature = entry.get("signature").cloned().ok_or_else(|| err("9.1", "import entry needs a signature"))?;
+        let signature = entry
+            .get("signature")
+            .cloned()
+            .ok_or_else(|| err("9.1", "import entry needs a signature"))?;
         let pinned = match entry.get("pinned_closure_hash") {
-            Some(p) => Some(p.as_str().ok_or_else(|| err("9.1", "pinned_closure_hash must be a string"))?.to_string()),
+            Some(p) => Some(
+                p.as_str()
+                    .ok_or_else(|| err("9.1", "pinned_closure_hash must be a string"))?
+                    .to_string(),
+            ),
             None => None,
         };
-        if obj.imports.insert(name.clone(), Import { signature, pinned_closure_hash: pinned }).is_some() {
+        if obj
+            .imports
+            .insert(
+                name.clone(),
+                Import {
+                    signature,
+                    pinned_closure_hash: pinned,
+                },
+            )
+            .is_some()
+        {
             return Err(err("9.1", format!("duplicate import {name:?}")));
         }
     }
@@ -561,12 +683,21 @@ fn parse_imports(obj: &mut Object, body: &[&str]) -> Result<(), String> {
 
 fn parse_data(obj: &mut Object, body: &[&str]) -> Result<(), String> {
     for line in body {
-        let (name, hex) = line.split_once(' ').ok_or_else(|| err("16.2", format!("malformed data line {line:?}")))?;
+        let (name, hex) = line
+            .split_once(' ')
+            .ok_or_else(|| err("16.2", format!("malformed data line {line:?}")))?;
         if !valid_name(name) {
             return Err(err("16.1", format!("invalid data name {name:?}")));
         }
-        if hex.len() % 2 != 0 || !hex.bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
-            return Err(err("16.1", format!("data line for {name:?} is not lowercase even hex")));
+        if hex.len() % 2 != 0
+            || !hex
+                .bytes()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
+            return Err(err(
+                "16.1",
+                format!("data line for {name:?} is not lowercase even hex"),
+            ));
         }
         if obj.data.insert(name.to_string(), hex.to_string()).is_some() {
             return Err(err("9.1", format!("duplicate data entry {name:?}")));
@@ -576,45 +707,90 @@ fn parse_data(obj: &mut Object, body: &[&str]) -> Result<(), String> {
 }
 
 fn layout_big(v: &Json, key: &str) -> Result<BigUint, String> {
-    v.get(key).and_then(|x| x.as_big()).ok_or_else(|| err("9.1", format!("layout field {key:?} must be a nonnegative integer")))
+    v.get(key).and_then(|x| x.as_big()).ok_or_else(|| {
+        err(
+            "9.1",
+            format!("layout field {key:?} must be a nonnegative integer"),
+        )
+    })
 }
 fn layout_usize(v: &Json, key: &str) -> Result<usize, String> {
-    v.get(key).and_then(|x| x.as_usize()).ok_or_else(|| err("9.1", format!("layout field {key:?} must be a nonnegative integer that fits the host")))
+    v.get(key).and_then(|x| x.as_usize()).ok_or_else(|| {
+        err(
+            "9.1",
+            format!("layout field {key:?} must be a nonnegative integer that fits the host"),
+        )
+    })
 }
 
 fn parse_layout(body: &[&str]) -> Result<Layout, String> {
     let v = parse_json_section("layout", body)?;
     let map = v.as_obj().unwrap();
     for k in map.keys() {
-        if !["ptr_width", "H", "A_tab", "S_cells", "null_size", "heap_base", "heap_limit_max", "globals", "interface_regions", "block_image"].contains(&k.as_str()) {
+        if ![
+            "ptr_width",
+            "H",
+            "A_tab",
+            "S_cells",
+            "null_size",
+            "heap_base",
+            "heap_limit_max",
+            "globals",
+            "interface_regions",
+            "block_image",
+        ]
+        .contains(&k.as_str())
+        {
             return Err(err("9.1", format!("unknown field {k:?} in layout")));
         }
     }
     let mut globals = BTreeMap::new();
-    let gobj = v.get("globals").and_then(|x| x.as_obj()).ok_or_else(|| err("9.1", "layout.globals must be an object"))?;
+    let gobj = v
+        .get("globals")
+        .and_then(|x| x.as_obj())
+        .ok_or_else(|| err("9.1", "layout.globals must be an object"))?;
     for (name, g) in gobj {
-        let gm = g.as_obj().ok_or_else(|| err("9.1", "layout global must be an object"))?;
+        let gm = g
+            .as_obj()
+            .ok_or_else(|| err("9.1", "layout global must be an object"))?;
         for k in gm.keys() {
             if !["base", "size", "image"].contains(&k.as_str()) {
                 return Err(err("9.1", format!("unknown field {k:?} in layout global")));
             }
         }
-        globals.insert(name.clone(), Global {
-            base: layout_big(g, "base")?,
-            size: layout_big(g, "size")?,
-            image: g.get("image").and_then(|x| x.as_str()).ok_or_else(|| err("9.1", "layout global needs a string image"))?.to_string(),
-        });
+        globals.insert(
+            name.clone(),
+            Global {
+                base: layout_big(g, "base")?,
+                size: layout_big(g, "size")?,
+                image: g
+                    .get("image")
+                    .and_then(|x| x.as_str())
+                    .ok_or_else(|| err("9.1", "layout global needs a string image"))?
+                    .to_string(),
+            },
+        );
     }
     let mut interface_regions = BTreeMap::new();
-    let iobj = v.get("interface_regions").and_then(|x| x.as_obj()).ok_or_else(|| err("9.1", "layout.interface_regions must be an object"))?;
+    let iobj = v
+        .get("interface_regions")
+        .and_then(|x| x.as_obj())
+        .ok_or_else(|| err("9.1", "layout.interface_regions must be an object"))?;
     for (oracle, regions) in iobj {
-        let rm = regions.as_obj().ok_or_else(|| err("9.1", "interface_regions entry must be an object"))?;
+        let rm = regions
+            .as_obj()
+            .ok_or_else(|| err("9.1", "interface_regions entry must be an object"))?;
         let mut inner = BTreeMap::new();
         for (region, rv) in rm {
-            let rvm = rv.as_obj().ok_or_else(|| err("9.1", "interface region entry must be an object"))?;
+            let rvm = rv
+                .as_obj()
+                .ok_or_else(|| err("9.1", "interface region entry must be an object"))?;
             for k in rvm.keys() {
                 if k != "base" {
-                    return Err(err("9.1", format!("unknown field {k:?} in interface region entry")));
+                    return Err(err(
+                        "9.1",
+                        format!("unknown field {k:?} in interface region entry"),
+                    ));
                 }
             }
             inner.insert(region.clone(), layout_big(rv, "base")?);
@@ -631,7 +807,10 @@ fn parse_layout(body: &[&str]) -> Result<Layout, String> {
         heap_limit_max: layout_big(&v, "heap_limit_max")?,
         globals,
         interface_regions,
-        block_image: v.get("block_image").and_then(|x| x.as_str()).map(|s| s.to_string()),
+        block_image: v
+            .get("block_image")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
         json: v,
     })
 }
@@ -668,23 +847,38 @@ fn is_function_header(line: &str) -> bool {
 }
 
 fn parse_params(token: &str) -> Result<Vec<Param>, String> {
-    let inner = paren_inner(token).ok_or_else(|| err("16.2", format!("expected a parenthesised list, got {token:?}")))?;
+    let inner = paren_inner(token).ok_or_else(|| {
+        err(
+            "16.2",
+            format!("expected a parenthesised list, got {token:?}"),
+        )
+    })?;
     let mut out = Vec::new();
     for item in split_list(inner) {
         // NAME ":" type (SP role)?
         let mut parts = item.splitn(2, ' ');
         let head = parts.next().unwrap_or("");
         let role = parts.next().map(|s| s.to_string());
-        if let Some(r) = &role {
-            if r != "in" && r != "mut" {
-                return Err(err("16.2", format!("invalid role {r:?} in parameter {item:?}")));
-            }
+        if let Some(r) = &role
+            && r != "in"
+            && r != "mut"
+        {
+            return Err(err(
+                "16.2",
+                format!("invalid role {r:?} in parameter {item:?}"),
+            ));
         }
-        let (name, ty) = head.split_once(':').ok_or_else(|| err("16.2", format!("malformed parameter {item:?}")))?;
+        let (name, ty) = head
+            .split_once(':')
+            .ok_or_else(|| err("16.2", format!("malformed parameter {item:?}")))?;
         if !valid_name(name) {
             return Err(err("16.1", format!("invalid parameter name {name:?}")));
         }
-        out.push(Param { name: name.to_string(), ty: Type::parse(ty).map_err(|e| err("16.2", e))?, role });
+        out.push(Param {
+            name: name.to_string(),
+            ty: Type::parse(ty).map_err(|e| err("16.2", e))?,
+            role,
+        });
     }
     Ok(out)
 }
@@ -699,9 +893,14 @@ fn parse_functions(cur: &mut Cursor) -> Result<Vec<Function>, String> {
 
 fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
     let start_pos = cur.pos;
-    let (header_line, header) = cur.next().ok_or_else(|| err("16.2", "expected a function"))?;
+    let (header_line, header) = cur
+        .next()
+        .ok_or_else(|| err("16.2", "expected a function"))?;
     if !is_function_header(header) {
-        return Err(err("16.2", format!("expected a function header, got {header:?}")));
+        return Err(err(
+            "16.2",
+            format!("expected a function header, got {header:?}"),
+        ));
     }
     let toks = split_tokens(header)?;
     let (kind, name_tok, list_toks): (FnKind, &str, &[String]) = if toks[0] == "fn" {
@@ -710,7 +909,12 @@ fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
             Some("r") => FnKind::R,
             _ => return Err(err("16.2", format!("malformed function header {header:?}"))),
         };
-        (kind, toks.get(2).ok_or_else(|| err("16.2", "malformed function header"))?, &toks[3.min(toks.len())..])
+        (
+            kind,
+            toks.get(2)
+                .ok_or_else(|| err("16.2", "malformed function header"))?,
+            &toks[3.min(toks.len())..],
+        )
     } else {
         let kind = match toks[0].as_str() {
             "oracle" => FnKind::Oracle,
@@ -719,14 +923,33 @@ fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
             "lproc" => FnKind::Lproc,
             _ => unreachable!(),
         };
-        (kind, toks.get(1).ok_or_else(|| err("16.2", "malformed function header"))?, &toks[2.min(toks.len())..])
+        (
+            kind,
+            toks.get(1)
+                .ok_or_else(|| err("16.2", "malformed function header"))?,
+            &toks[2.min(toks.len())..],
+        )
     };
-    let name = name_tok.strip_prefix('@').ok_or_else(|| err("16.2", format!("function name {name_tok:?} must start with @")))?.to_string();
+    let name = name_tok
+        .strip_prefix('@')
+        .ok_or_else(|| {
+            err(
+                "16.2",
+                format!("function name {name_tok:?} must start with @"),
+            )
+        })?
+        .to_string();
     if !valid_name(&name) {
         return Err(err("16.1", format!("invalid function name {name:?}")));
     }
     if list_toks.len() != 5 {
-        return Err(err("16.2", format!("function header for @{name} must have five lists, got {}", list_toks.len())));
+        return Err(err(
+            "16.2",
+            format!(
+                "function header for @{name} must have five lists, got {}",
+                list_toks.len()
+            ),
+        ));
     }
     let mut lists: [Vec<Param>; 5] = Default::default();
     for i in 0..5 {
@@ -736,14 +959,14 @@ fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
     let mut regs = Vec::new();
     let mut bounds = Vec::new();
     let mut has_regs_line = false;
-    if let Some(line) = cur.peek() {
-        if line == "regs" || line.starts_with("regs ") {
-            let (_, regs_line) = cur.next().unwrap();
-            has_regs_line = true;
-            let (r, b) = parse_regs_line(regs_line)?;
-            regs = r;
-            bounds = b;
-        }
+    if let Some(line) = cur.peek()
+        && (line == "regs" || line.starts_with("regs "))
+    {
+        let (_, regs_line) = cur.next().unwrap();
+        has_regs_line = true;
+        let (r, b) = parse_regs_line(regs_line)?;
+        regs = r;
+        bounds = b;
     }
     // Blocks until the next function header or end of section.
     let mut blocks = Vec::new();
@@ -752,7 +975,10 @@ fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
             break;
         }
         if !line.starts_with('^') {
-            return Err(err("16.2", format!("expected a block header in @{name}, got {line:?}")));
+            return Err(err(
+                "16.2",
+                format!("expected a block header in @{name}, got {line:?}"),
+            ));
         }
         blocks.push(parse_block(cur)?);
     }
@@ -760,25 +986,54 @@ fn parse_function(cur: &mut Cursor) -> Result<Function, String> {
         return Err(err("16.2", format!("function @{name} has no blocks")));
     }
     let canonical = cur.lines[start_pos..cur.pos].join("\n");
-    Ok(Function { kind, name, lists, regs, bounds, has_regs_line, blocks, header_line, canonical })
+    Ok(Function {
+        kind,
+        name,
+        lists,
+        regs,
+        bounds,
+        has_regs_line,
+        blocks,
+        header_line,
+        canonical,
+    })
 }
 
 fn parse_regs_line(line: &str) -> Result<(Vec<Param>, Vec<usize>), String> {
     // regs { a:reg[8], b:reg[1] } [bounds {3, 4}]
-    let after = line.strip_prefix("regs").ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?.trim();
-    let open = after.strip_prefix('{').ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?;
-    let close = open.find('}').ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?;
+    let after = line
+        .strip_prefix("regs")
+        .ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?
+        .trim();
+    let open = after
+        .strip_prefix('{')
+        .ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?;
+    let close = open
+        .find('}')
+        .ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?;
     let inner = &open[..close];
     let rest = open[close + 1..].trim();
     let mut regs = Vec::new();
     for item in split_list(inner) {
-        let (name, ty) = item.split_once(':').ok_or_else(|| err("16.2", format!("malformed regs entry {item:?}")))?;
-        regs.push(Param { name: name.to_string(), ty: Type::parse(ty).map_err(|e| err("16.2", e))?, role: None });
+        let (name, ty) = item
+            .split_once(':')
+            .ok_or_else(|| err("16.2", format!("malformed regs entry {item:?}")))?;
+        regs.push(Param {
+            name: name.to_string(),
+            ty: Type::parse(ty).map_err(|e| err("16.2", e))?,
+            role: None,
+        });
     }
     let mut bounds = Vec::new();
     if !rest.is_empty() {
-        let b = rest.strip_prefix("bounds").ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?.trim();
-        let b = b.strip_prefix('{').and_then(|x| x.strip_suffix('}')).ok_or_else(|| err("16.2", format!("malformed bounds in {line:?}")))?;
+        let b = rest
+            .strip_prefix("bounds")
+            .ok_or_else(|| err("16.2", format!("malformed regs line {line:?}")))?
+            .trim();
+        let b = b
+            .strip_prefix('{')
+            .and_then(|x| x.strip_suffix('}'))
+            .ok_or_else(|| err("16.2", format!("malformed bounds in {line:?}")))?;
         for item in split_list(b) {
             bounds.push(parse_usize(&item).map_err(|e| err("16.2", e))?);
         }
@@ -788,9 +1043,15 @@ fn parse_regs_line(line: &str) -> Result<(Vec<Param>, Vec<usize>), String> {
 
 fn parse_block(cur: &mut Cursor) -> Result<Block, String> {
     let (line_no, header) = cur.next().ok_or_else(|| err("16.2", "expected a block"))?;
-    let h = header.strip_prefix('^').ok_or_else(|| err("16.2", format!("malformed block header {header:?}")))?;
-    let h = h.strip_suffix(':').ok_or_else(|| err("16.2", format!("block header {header:?} must end with ':'")))?;
-    let paren = h.find('(').ok_or_else(|| err("16.2", format!("malformed block header {header:?}")))?;
+    let h = header
+        .strip_prefix('^')
+        .ok_or_else(|| err("16.2", format!("malformed block header {header:?}")))?;
+    let h = h
+        .strip_suffix(':')
+        .ok_or_else(|| err("16.2", format!("block header {header:?} must end with ':'")))?;
+    let paren = h
+        .find('(')
+        .ok_or_else(|| err("16.2", format!("malformed block header {header:?}")))?;
     let name = &h[..paren];
     if !valid_name(name) {
         return Err(err("16.1", format!("invalid block name {name:?}")));
@@ -806,11 +1067,18 @@ fn parse_block(cur: &mut Cursor) -> Result<Block, String> {
     if instrs.is_empty() {
         return Err(err("16.2", format!("block ^{name} has no instructions")));
     }
-    Ok(Block { name: name.to_string(), params, line: line_no, instrs })
+    Ok(Block {
+        name: name.to_string(),
+        params,
+        line: line_no,
+        instrs,
+    })
 }
 
 fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
-    let (line_no, line) = cur.next().ok_or_else(|| err("16.2", "expected an instruction"))?;
+    let (line_no, line) = cur
+        .next()
+        .ok_or_else(|| err("16.2", "expected an instruction"))?;
     let line = line.to_string();
     let mut toks = split_tokens(&line)?;
     let opens = toks.last().map(|t| t.as_str()) == Some("{");
@@ -842,7 +1110,9 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
         loop {
             let mut arm = Vec::new();
             loop {
-                let next = cur.peek().ok_or_else(|| err("16.2", format!("unterminated nested block after {line:?}")))?;
+                let next = cur.peek().ok_or_else(|| {
+                    err("16.2", format!("unterminated nested block after {line:?}"))
+                })?;
                 if next == "}" || next == "} {" {
                     break;
                 }
@@ -855,8 +1125,12 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
             }
         }
     }
-    Ok(Instr { lhs, op, operands, nested, line: line_no, raw: line })
+    Ok(Instr {
+        lhs,
+        op,
+        operands,
+        nested,
+        line: line_no,
+        raw: line,
+    })
 }
-
-
-

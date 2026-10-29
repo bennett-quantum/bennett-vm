@@ -1,7 +1,7 @@
 //! Classical values, budgets and width arithmetic shared by the CC/R
 //! executor and the §14.1 oracle interpreter.
 
-use crate::bigint::{from_signed, to_signed, BigUint};
+use crate::bigint::{BigUint, from_signed, to_signed};
 use crate::json::Json;
 use std::cmp::Ordering;
 
@@ -64,7 +64,10 @@ pub enum Value {
 
 impl Value {
     pub fn int(width: usize, bits: BigUint) -> Value {
-        Value::Int { width, bits: bits.mask(width) }
+        Value::Int {
+            width,
+            bits: bits.mask(width),
+        }
     }
     /// Unsigned bits of an integer/pointer value.
     pub fn bits(&self) -> Option<&BigUint> {
@@ -145,8 +148,20 @@ pub fn binop(op: &str, a: &BigUint, b: &BigUint, width: usize) -> BigUint {
         "and" => a.bitand(&b),
         "or" => a.bitor(&b),
         "xor" => a.bitxor(&b),
-        "shl" => if shift >= width { BigUint::zero() } else { a.shl(shift) },
-        "lshr" => if shift >= width { BigUint::zero() } else { a.shr(shift) },
+        "shl" => {
+            if shift >= width {
+                BigUint::zero()
+            } else {
+                a.shl(shift)
+            }
+        }
+        "lshr" => {
+            if shift >= width {
+                BigUint::zero()
+            } else {
+                a.shr(shift)
+            }
+        }
         "ashr" => {
             if shift >= width {
                 BigUint::zero()
@@ -158,7 +173,11 @@ pub fn binop(op: &str, a: &BigUint, b: &BigUint, width: usize) -> BigUint {
                     // ashr of -m by s = -(ceil(m / 2^s)) for m > 0.
                     let denom = BigUint::from_u64(1).shl(shift);
                     let (q, r) = mag.divmod(&denom);
-                    let q = if r.is_zero() { q } else { q.add(&BigUint::from_u64(1)) };
+                    let q = if r.is_zero() {
+                        q
+                    } else {
+                        q.add(&BigUint::from_u64(1))
+                    };
                     from_signed(true, &q, width)
                 }
             }
@@ -227,7 +246,11 @@ pub fn icmp(pred: &str, a: &BigUint, b: &BigUint, width: usize) -> bool {
                 (false, false) => ma.cmp_big(&mb),
                 (true, true) => mb.cmp_big(&ma),
             };
-            if pred == "slt" { ord == Ordering::Less } else { ord != Ordering::Greater }
+            if pred == "slt" {
+                ord == Ordering::Less
+            } else {
+                ord != Ordering::Greater
+            }
         }
         _ => panic!("icmp: unknown predicate {pred}"),
     }

@@ -122,7 +122,9 @@ impl Json {
 }
 
 fn canonical_number(raw: &str) -> String {
-    if raw.bytes().all(|c| c.is_ascii_digit()) || (raw.starts_with('-') && raw.len() > 1 && raw[1..].bytes().all(|c| c.is_ascii_digit())) {
+    if raw.bytes().all(|c| c.is_ascii_digit())
+        || (raw.starts_with('-') && raw.len() > 1 && raw[1..].bytes().all(|c| c.is_ascii_digit()))
+    {
         return raw.to_string();
     }
     match raw.parse::<f64>() {
@@ -164,7 +166,10 @@ pub struct Parser<'a> {
 }
 
 pub fn parse(text: &str) -> Result<Json, String> {
-    let mut p = Parser { b: text.as_bytes(), i: 0 };
+    let mut p = Parser {
+        b: text.as_bytes(),
+        i: 0,
+    };
     p.ws();
     let v = p.value()?;
     p.ws();
@@ -181,7 +186,10 @@ impl Parser<'_> {
         }
     }
     fn peek(&self) -> Result<u8, String> {
-        self.b.get(self.i).copied().ok_or_else(|| "unexpected end of JSON".to_string())
+        self.b
+            .get(self.i)
+            .copied()
+            .ok_or_else(|| "unexpected end of JSON".to_string())
     }
     fn value(&mut self) -> Result<Json, String> {
         match self.peek()? {
@@ -216,7 +224,12 @@ impl Parser<'_> {
                             self.i += 1;
                             return Ok(Json::Obj(m));
                         }
-                        c => return Err(format!("expected ',' or '}}' in JSON object, got {:?}", c as char)),
+                        c => {
+                            return Err(format!(
+                                "expected ',' or '}}' in JSON object, got {:?}",
+                                c as char
+                            ));
+                        }
                     }
                 }
             }
@@ -238,7 +251,12 @@ impl Parser<'_> {
                             self.i += 1;
                             return Ok(Json::Arr(a));
                         }
-                        c => return Err(format!("expected ',' or ']' in JSON array, got {:?}", c as char)),
+                        c => {
+                            return Err(format!(
+                                "expected ',' or ']' in JSON array, got {:?}",
+                                c as char
+                            ));
+                        }
                     }
                 }
             }
@@ -289,8 +307,13 @@ impl Parser<'_> {
                                         if !(0xdc00..0xe000).contains(&lo) {
                                             return Err("invalid surrogate pair".into());
                                         }
-                                        let combined = 0x10000 + (((cp - 0xd800) as u32) << 10) + (lo as u32 - 0xdc00);
-                                        out.push(char::from_u32(combined).ok_or("invalid surrogate pair")?);
+                                        let combined = 0x10000
+                                            + (((cp - 0xd800) as u32) << 10)
+                                            + (lo as u32 - 0xdc00);
+                                        out.push(
+                                            char::from_u32(combined)
+                                                .ok_or("invalid surrogate pair")?,
+                                        );
                                     } else {
                                         return Err("lone surrogate in JSON string".into());
                                     }
@@ -311,7 +334,8 @@ impl Parser<'_> {
                     if start + len > self.b.len() {
                         return Err("invalid UTF-8 in JSON string".into());
                     }
-                    let s = std::str::from_utf8(&self.b[start..start + len]).map_err(|_| "invalid UTF-8 in JSON string")?;
+                    let s = std::str::from_utf8(&self.b[start..start + len])
+                        .map_err(|_| "invalid UTF-8 in JSON string")?;
                     out.push_str(s);
                     self.i = start + len;
                 }
@@ -322,7 +346,8 @@ impl Parser<'_> {
         if self.i + 4 > self.b.len() {
             return Err("truncated \\u escape".into());
         }
-        let s = std::str::from_utf8(&self.b[self.i..self.i + 4]).map_err(|_| "invalid \\u escape")?;
+        let s =
+            std::str::from_utf8(&self.b[self.i..self.i + 4]).map_err(|_| "invalid \\u escape")?;
         self.i += 4;
         u16::from_str_radix(s, 16).map_err(|_| "invalid \\u escape".to_string())
     }
@@ -331,14 +356,22 @@ impl Parser<'_> {
         if self.peek()? == b'-' {
             self.i += 1;
         }
-        while self.i < self.b.len() && matches!(self.b[self.i], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-') {
+        while self.i < self.b.len()
+            && matches!(
+                self.b[self.i],
+                b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+            )
+        {
             self.i += 1;
         }
         if start == self.i {
             return Err(format!("invalid JSON value at byte {start}"));
         }
-        let raw = std::str::from_utf8(&self.b[start..self.i]).unwrap().to_string();
-        raw.parse::<f64>().map_err(|_| format!("invalid JSON number {raw:?}"))?;
+        let raw = std::str::from_utf8(&self.b[start..self.i])
+            .unwrap()
+            .to_string();
+        raw.parse::<f64>()
+            .map_err(|_| format!("invalid JSON number {raw:?}"))?;
         Ok(Json::Num(raw))
     }
 }
@@ -368,4 +401,3 @@ mod tests {
         assert_eq!(big.to_jcs(), r#"{"0":{"kind":"oracle"}}"#);
     }
 }
-

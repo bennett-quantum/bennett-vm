@@ -23,3 +23,12 @@ In progress: broaden execution coverage to every fixture and independent edge
 cases, harden inherited action execution, final CLI documentation and local gates.
 No semantic divergence established yet. Memory digests use a VM-specific canonical
 encoding of the complete allocation table, bump pointer and nonzero bytes.
+
+Expanded gate: 12 integration groups and 4 unit tests pass; 553 differential
+comparisons agree (535 JSON outputs, 18 diagnostics), over all 12 fixtures,
+both independently extracted §16.3 objects, all 57 oracle definitions and all
+13 action definitions. Added static CC/R type/SSA validation after malformed
+widths were accepted, fixed nested oracle `in`-memory restoration (§5.2), and
+included control state in launch equality. Clippy now passes with `-D warnings`.
+Final history audit in progress: region reversal must apply the recorded
+adjoint/involution rather than restore a simulator wavefunction snapshot.

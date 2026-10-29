@@ -15,12 +15,18 @@ impl BigUint {
         BigUint { limbs: Vec::new() }
     }
     pub fn from_u64(v: u64) -> Self {
-        if v == 0 { Self::zero() } else { BigUint { limbs: vec![v] } }
+        if v == 0 {
+            Self::zero()
+        } else {
+            BigUint { limbs: vec![v] }
+        }
     }
     pub fn from_u128(v: u128) -> Self {
         let lo = v as u64;
         let hi = (v >> 64) as u64;
-        let mut b = BigUint { limbs: vec![lo, hi] };
+        let mut b = BigUint {
+            limbs: vec![lo, hi],
+        };
         b.norm();
         b
     }
@@ -256,7 +262,9 @@ impl BigUint {
             }
             let mut r = BigUint::zero();
             for (i, c) in hex.chars().rev().enumerate() {
-                let v = c.to_digit(16).ok_or_else(|| format!("invalid hex integer {text:?}"))?;
+                let v = c
+                    .to_digit(16)
+                    .ok_or_else(|| format!("invalid hex integer {text:?}"))?;
                 if v != 0 {
                     r = r.add(&BigUint::from_u64(v as u64).shl(i * 4));
                 }
@@ -296,7 +304,7 @@ impl BigUint {
 
 impl PartialOrd for BigUint {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp_big(other))
+        Some(self.cmp(other))
     }
 }
 impl Ord for BigUint {
@@ -347,9 +355,14 @@ mod tests {
     use super::*;
     #[test]
     fn arithmetic() {
-        let x = BigUint::parse_decimal("1606938044258990275541962092341162602522202993782792835301379").unwrap();
+        let x =
+            BigUint::parse_decimal("1606938044258990275541962092341162602522202993782792835301379")
+                .unwrap();
         let y = BigUint::parse_decimal("1267650600228229401496703205381").unwrap();
-        assert_eq!(x.to_decimal(), "1606938044258990275541962092341162602522202993782792835301379");
+        assert_eq!(
+            x.to_decimal(),
+            "1606938044258990275541962092341162602522202993782792835301379"
+        );
         let (q, r) = x.divmod(&y);
         assert_eq!(q.to_decimal(), "1267650600228229401496703205371");
         assert_eq!(r.to_u64(), Some(28));
@@ -358,7 +371,9 @@ mod tests {
         assert_eq!(x.mask(8).to_u64(), Some(3));
         let (neg, mag) = to_signed(&BigUint::from_u64(0xff), 8);
         assert!(neg && mag == BigUint::from_u64(1));
-        assert_eq!(from_signed(true, &BigUint::from_u64(1), 8), BigUint::from_u64(0xff));
+        assert_eq!(
+            from_signed(true, &BigUint::from_u64(1), 8),
+            BigUint::from_u64(0xff)
+        );
     }
 }
-

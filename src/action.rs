@@ -13,6 +13,8 @@ use crate::value::{Budget, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub type Amp = (f64, f64);
+type OutcomeCache = BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)>;
+type NormalizedCall<'a> = (bool, Option<&'a str>, &'a str, Vec<String>);
 
 fn c_add(a: Amp, b: Amp) -> Amp {
     (a.0 + b.0, a.1 + b.1)
@@ -112,7 +114,11 @@ impl QuantumState {
     }
     /// Flip `target` where every control is 1 (permutation gate).
     pub fn flip(&mut self, target: usize, controls: &[usize]) {
-        self.apply1(target, controls, [[(0.0, 0.0), (1.0, 0.0)], [(1.0, 0.0), (0.0, 0.0)]]);
+        self.apply1(
+            target,
+            controls,
+            [[(0.0, 0.0), (1.0, 0.0)], [(1.0, 0.0), (0.0, 0.0)]],
+        );
     }
     pub fn phase_if_all(&mut self, wires: &[usize], phase: Amp) {
         for (k, a) in self.amps.iter_mut() {
@@ -160,14 +166,19 @@ impl QuantumState {
         }
         let mut cumulative = 0.0;
         let mut chosen: Option<BigUint> = None;
-        for (v, p) in &probs {
+        let mut ordered = probs.iter().collect::<Vec<_>>();
+        // CLI draws enumerate outcomes lexically in wire order (wire 0 first).
+        ordered.sort_by_key(|(v, _)| (0..wires.len()).map(|i| v.bit(i)).collect::<Vec<_>>());
+        for (v, p) in ordered {
             cumulative += p;
             if draw < cumulative {
                 chosen = Some(v.clone());
                 break;
             }
         }
-        let value = chosen.or_else(|| probs.keys().last().cloned()).unwrap_or_else(BigUint::zero);
+        let value = chosen
+            .or_else(|| probs.keys().last().cloned())
+            .unwrap_or_else(BigUint::zero);
         let p = probs.get(&value).copied().unwrap_or(1.0);
         let norm = if p > 0.0 { 1.0 / p.sqrt() } else { 1.0 };
         self.amps = std::mem::take(&mut self.amps)
@@ -188,6 +199,12 @@ impl QuantumState {
     }
 }
 
+impl Default for QuantumState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RegionWires {
     /// One wire bundle per cell, little-endian within the cell.
@@ -205,6 +222,7 @@ pub struct Exec<'o> {
     args: HashMap<String, Value>,
     pred: Vec<usize>,
     borrowed: Vec<String>,
+    idle: Vec<usize>,
     func: String,
 }
 
@@ -213,45 +231,71 @@ fn diag(rule: &str, msg: impl std::fmt::Display) -> String {
 }
 
 fn parse_wire_operand(token: &str) -> (String, Option<usize>) {
-    if let Some(i) = token.find('[') {
-        if let Some(inner) = token[i + 1..].strip_suffix(']') {
-            if let Ok(n) = inner.parse::<usize>() {
-                return (token[..i].to_string(), Some(n));
-            }
-        }
+    if let Some(i) = token.find('[')
+        && let Some(inner) = token[i + 1..].strip_suffix(']')
+        && let Ok(n) = inner.parse::<usize>()
+    {
+        return (token[..i].to_string(), Some(n));
     }
     (token.to_string(), None)
 }
 
 impl<'o> Exec<'o> {
     fn bundle(&self, name: &str) -> Result<Vec<usize>, String> {
-        self.bundles
-            .get(name)
-            .cloned()
-            .ok_or_else(|| diag("5.1", format!("unknown wire bundle {name:?} in @{}", self.func)))
+        self.bundles.get(name).cloned().ok_or_else(|| {
+            diag(
+                "5.1",
+                format!("unknown wire bundle {name:?} in @{}", self.func),
+            )
+        })
     }
     fn wire(&self, token: &str) -> Result<usize, String> {
         let (name, idx) = parse_wire_operand(token);
         let b = self.bundle(&name)?;
         let i = idx.unwrap_or(0);
         if idx.is_none() && b.len() != 1 {
-            return Err(diag("3.3", format!("wire operand {token:?} in @{} must index a bundle of width {}", self.func, b.len())));
+            return Err(diag(
+                "3.3",
+                format!(
+                    "wire operand {token:?} in @{} must index a bundle of width {}",
+                    self.func,
+                    b.len()
+                ),
+            ));
         }
-        b.get(i).copied().ok_or_else(|| diag("3.3", format!("wire index in {token:?} is out of range in @{}", self.func)))
+        b.get(i).copied().ok_or_else(|| {
+            diag(
+                "3.3",
+                format!("wire index in {token:?} is out of range in @{}", self.func),
+            )
+        })
     }
     fn angle(&self, token: &str) -> Result<f64, String> {
-        if let Ok(v) = token.parse::<f64>() {
-            if v.is_finite() {
-                return Ok(v);
-            }
+        if let Some(name) = token.strip_prefix('-')
+            && self.args.contains_key(name)
+        {
+            return self.angle(name).map(|v| -v);
+        }
+        if let Ok(v) = token.parse::<f64>()
+            && v.is_finite()
+        {
+            return Ok(v);
         }
         if let Some(name) = token.strip_prefix('-') {
             return Ok(-self.angle(name)?);
         }
         match self.args.get(token) {
             Some(Value::F64(v)) => Ok(*v),
-            Some(Value::Int { bits, .. }) => Ok(bits.to_u64().map(|v| v as f64).unwrap_or(f64::INFINITY)),
-            _ => Err(diag("4.4", format!("gate angle {token:?} in @{} is neither a finite literal nor a classical argument", self.func))),
+            Some(Value::Int { bits, .. }) => {
+                Ok(bits.to_u64().map(|v| v as f64).unwrap_or(f64::INFINITY))
+            }
+            _ => Err(diag(
+                "4.4",
+                format!(
+                    "gate angle {token:?} in @{} is neither a finite literal nor a classical argument",
+                    self.func
+                ),
+            )),
         }
     }
     fn controls_plus(&self, extra: &[usize]) -> Vec<usize> {
@@ -325,7 +369,8 @@ impl<'o> Exec<'o> {
             "h" => {
                 let t = self.wire(&ins.operands[0])?;
                 let s = std::f64::consts::FRAC_1_SQRT_2;
-                self.state.apply1(t, &pred, [[(s, 0.0), (s, 0.0)], [(s, 0.0), (-s, 0.0)]]);
+                self.state
+                    .apply1(t, &pred, [[(s, 0.0), (s, 0.0)], [(s, 0.0), (-s, 0.0)]]);
             }
             "s" => self.diag(&ins.operands[0], (0.0, 1.0))?,
             "sdg" => self.diag(&ins.operands[0], (0.0, -1.0))?,
@@ -356,13 +401,17 @@ impl<'o> Exec<'o> {
     fn diag(&mut self, token: &str, phase: Amp) -> Result<(), String> {
         let t = self.wire(token)?;
         let pred = self.pred.clone();
-        self.state.apply1(t, &pred, [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), phase]]);
+        self.state
+            .apply1(t, &pred, [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), phase]]);
         Ok(())
     }
 
     fn xor_bundle(&mut self, src: &[usize], dst: &[usize]) -> Result<(), String> {
         if src.len() != dst.len() {
-            return Err(diag("4.5", format!("bundle width mismatch in @{}", self.func)));
+            return Err(diag(
+                "4.5",
+                format!("bundle width mismatch in @{}", self.func),
+            ));
         }
         let pred = self.pred.clone();
         for (s, d) in src.iter().zip(dst.iter()) {
@@ -381,7 +430,13 @@ impl<'o> Exec<'o> {
     }
 
     /// For each cell i, under (a == i): apply `body(cell wires)`.
-    fn region_dispatch(&mut self, region: &RegionWires, addr: &[usize], value: &[usize], mode: &str) -> Result<(), String> {
+    fn region_dispatch(
+        &mut self,
+        region: &RegionWires,
+        addr: &[usize],
+        value: &[usize],
+        mode: &str,
+    ) -> Result<(), String> {
         // Exact branchwise form: the controlled operations below are
         // permutations/phases selected by basis comparisons; on a
         // superposition they are defined branch by branch.
@@ -392,7 +447,9 @@ impl<'o> Exec<'o> {
                 self.state.map_basis(|k| {
                     let mut nk = k.clone();
                     if pred.iter().all(|p| k.bit(*p)) {
-                        let a = QuantumState::extract(k, addr).to_usize().unwrap_or(usize::MAX);
+                        let a = QuantumState::extract(k, addr)
+                            .to_usize()
+                            .unwrap_or(usize::MAX);
                         if a < region.cells.len() {
                             for (i, cw) in region.cells[a].iter().enumerate() {
                                 if k.bit(*cw) {
@@ -410,7 +467,9 @@ impl<'o> Exec<'o> {
                 self.state.map_basis(|k| {
                     let mut nk = k.clone();
                     if pred.iter().all(|p| k.bit(*p)) {
-                        let a = QuantumState::extract(k, addr).to_usize().unwrap_or(usize::MAX);
+                        let a = QuantumState::extract(k, addr)
+                            .to_usize()
+                            .unwrap_or(usize::MAX);
                         if a < region.cells.len() {
                             for (i, cw) in region.cells[a].iter().enumerate() {
                                 if k.bit(value[i]) {
@@ -427,7 +486,9 @@ impl<'o> Exec<'o> {
                 self.state.map_basis(|k| {
                     let mut nk = k.clone();
                     if pred.iter().all(|p| k.bit(*p)) {
-                        let a = QuantumState::extract(k, addr).to_usize().unwrap_or(usize::MAX);
+                        let a = QuantumState::extract(k, addr)
+                            .to_usize()
+                            .unwrap_or(usize::MAX);
                         if a < region.cells.len() {
                             for (i, cw) in region.cells[a].iter().enumerate() {
                                 let (bv, bc) = (k.bit(value[i]), k.bit(*cw));
@@ -446,20 +507,46 @@ impl<'o> Exec<'o> {
 
     fn create_region(&mut self, ins: &Instr) -> Result<(), String> {
         let name = ins.operands[0].clone();
-        let a: usize = ins.operands[1].parse().map_err(|_| diag("4.6", format!("qregion A in @{} is not an integer", self.func)))?;
-        let w: usize = ins.operands[2].parse().map_err(|_| diag("4.6", format!("qregion W in @{} is not an integer", self.func)))?;
+        let a: usize = ins.operands[1].parse().map_err(|_| {
+            diag(
+                "4.6",
+                format!("qregion A in @{} is not an integer", self.func),
+            )
+        })?;
+        let w: usize = ins.operands[2].parse().map_err(|_| {
+            diag(
+                "4.6",
+                format!("qregion W in @{} is not an integer", self.func),
+            )
+        })?;
         if a > 20 {
-            return Err(format!("host limit: qregion {name:?} in @{} has 2^{a} cells", self.func));
+            return Err(format!(
+                "host limit: qregion {name:?} in @{} has 2^{a} cells",
+                self.func
+            ));
         }
         let ncells = 1usize << a;
         let mut image = vec![BigUint::zero(); ncells];
         if ins.operands.len() == 4 {
             let img = crate::validate::at_name(&ins.operands[3]).unwrap_or("");
-            let bytes = crate::sha256::from_hex(self.obj.data.get(img).ok_or_else(|| diag("4.6", format!("qregion image @{img} undefined in @{}", self.func)))?)
-                .map_err(|e| diag("16.1", e))?;
-            let want_bits = ncells.checked_mul(w).ok_or_else(|| "host limit: qregion too large".to_string())?;
+            let bytes = crate::sha256::from_hex(self.obj.data.get(img).ok_or_else(|| {
+                diag(
+                    "4.6",
+                    format!("qregion image @{img} undefined in @{}", self.func),
+                )
+            })?)
+            .map_err(|e| diag("16.1", e))?;
+            let want_bits = ncells
+                .checked_mul(w)
+                .ok_or_else(|| "host limit: qregion too large".to_string())?;
             if bytes.len() * 8 != want_bits {
-                return Err(diag("4.6", format!("qregion {name:?} image @{img} has {} bits, needs {want_bits}", bytes.len() * 8)));
+                return Err(diag(
+                    "4.6",
+                    format!(
+                        "qregion {name:?} image @{img} has {} bits, needs {want_bits}",
+                        bytes.len() * 8
+                    ),
+                ));
             }
             let mut all = BigUint::zero();
             for (i, b) in bytes.iter().enumerate() {
@@ -472,15 +559,16 @@ impl<'o> Exec<'o> {
             }
         }
         let mut cells = Vec::new();
-        for c in 0..ncells {
+        for cell in image.iter().take(ncells) {
             let wires = self.state.alloc_wires(w);
-            if !image[c].is_zero() {
+            if !cell.is_zero() {
                 // Image gates are unconditional (§3.5).
-                self.state.prepare(&wires, &image[c]);
+                self.state.prepare(&wires, cell);
             }
             cells.push(wires);
         }
-        self.regions.insert(name.clone(), RegionWires { cells, a, w });
+        self.regions
+            .insert(name.clone(), RegionWires { cells, a, w });
         self.local_images.insert(name, image);
         Ok(())
     }
@@ -494,7 +582,13 @@ impl<'o> Exec<'o> {
                 let want = &image[i];
                 let got = self.state.constant_value(cell);
                 if got.as_ref() != Some(want) {
-                    return Err(diag("5.6", format!("local region {name:?} cell {i} of @{} is not back at its image on every component", self.func)));
+                    return Err(diag(
+                        "5.6",
+                        format!(
+                            "local region {name:?} cell {i} of @{} is not back at its image on every component",
+                            self.func
+                        ),
+                    ));
                 }
                 self.state.map_basis(|k| {
                     let mut nk = k.clone();
@@ -523,8 +617,23 @@ impl<'o> Exec<'o> {
         }
         match op {
             "qalloc" | "qborrow" => {
-                let n: usize = ins.operands[1].parse().map_err(|_| diag("4.3", format!("{op} size in @{} is not an integer", self.func)))?;
-                let wires = self.state.alloc_wires(n);
+                let n: usize = ins.operands[1].parse().map_err(|_| {
+                    diag(
+                        "4.3",
+                        format!("{op} size in @{} is not an integer", self.func),
+                    )
+                })?;
+                let wires = if op == "qborrow" {
+                    if self.idle.len() < n {
+                        return Err(diag(
+                            "5.6",
+                            "designated idle set lacks requested borrowed wires",
+                        ));
+                    }
+                    self.idle.drain(..n).collect()
+                } else {
+                    self.state.alloc_wires(n)
+                };
                 if op == "qborrow" {
                     self.borrowed.push(ins.lhs[0].clone());
                 }
@@ -534,9 +643,18 @@ impl<'o> Exec<'o> {
             "qfree" | "qreturn" => {
                 let name = base_name(&ins.operands[0]);
                 let wires = self.bundle(&name)?;
-                if !self.state.is_clean(&wires) {
-                    let rule = if op == "qfree" { "5.6" } else { "5.6" };
-                    return Err(diag(rule, format!("{op} of {name:?} in @{}: bundle is not clean on every component", self.func)));
+                if op == "qfree" && !self.state.is_clean(&wires) {
+                    let rule = "5.6";
+                    return Err(diag(
+                        rule,
+                        format!(
+                            "{op} of {name:?} in @{}: bundle is not clean on every component",
+                            self.func
+                        ),
+                    ));
+                }
+                if op == "qreturn" {
+                    self.idle.extend(wires);
                 }
                 self.bundles.remove(&name);
                 Ok(())
@@ -553,7 +671,13 @@ impl<'o> Exec<'o> {
                 let dst = self.bundle(&dst_name)?;
                 self.xor_bundle(&src, &dst)?;
                 if !self.state.is_clean(&dst) {
-                    return Err(diag("5.6", format!("quncopy target {dst_name:?} in @{} is not clean after uncopy", self.func)));
+                    return Err(diag(
+                        "5.6",
+                        format!(
+                            "quncopy target {dst_name:?} in @{} is not clean after uncopy",
+                            self.func
+                        ),
+                    ));
                 }
                 self.bundles.remove(&dst_name);
                 Ok(())
@@ -567,7 +691,10 @@ impl<'o> Exec<'o> {
                 let a = self.bundle(&base_name(&ins.operands[0]))?;
                 let b = self.bundle(&base_name(&ins.operands[1]))?;
                 if a.len() != b.len() {
-                    return Err(diag("4.5", format!("qexch width mismatch in @{}", self.func)));
+                    return Err(diag(
+                        "4.5",
+                        format!("qexch width mismatch in @{}", self.func),
+                    ));
                 }
                 let pred = self.pred.clone();
                 self.state.map_basis(|k| {
@@ -583,7 +710,7 @@ impl<'o> Exec<'o> {
                 });
                 Ok(())
             }
-            "qregion" => self.create_region(ins),
+            "qregion" => Ok(()),
             "qregion_release" => Ok(()),
             "qload" => {
                 let region = self.region(&ins.operands[0])?;
@@ -599,7 +726,13 @@ impl<'o> Exec<'o> {
                 let dst = self.bundle(&dname)?;
                 self.region_dispatch(&region, &addr, &dst, "load")?;
                 if !self.state.is_clean(&dst) {
-                    return Err(diag("5.6", format!("qunload bundle {dname:?} in @{} is not clean after unload", self.func)));
+                    return Err(diag(
+                        "5.6",
+                        format!(
+                            "qunload bundle {dname:?} in @{} is not clean after unload",
+                            self.func
+                        ),
+                    ));
                 }
                 self.bundles.remove(&dname);
                 Ok(())
@@ -625,7 +758,13 @@ impl<'o> Exec<'o> {
                 let w = self.wire(&ins.operands[0])?;
                 let popped = self.pred.pop();
                 if popped != Some(w) {
-                    return Err(diag("3.5", format!("qunpred in @{} does not match the predicate stack top", self.func)));
+                    return Err(diag(
+                        "3.5",
+                        format!(
+                            "qunpred in @{} does not match the predicate stack top",
+                            self.func
+                        ),
+                    ));
                 }
                 Ok(())
             }
@@ -647,12 +786,20 @@ impl<'o> Exec<'o> {
             "qloop_adj" => self.exec_qloop(ins, true),
             "oracle_call" | "action_call" | "adj" | "ctl" => self.exec_region_call(ins),
             "qinplace" => self.exec_qinplace(ins),
-            _ => Err(format!("unimplemented: Q instruction {op} in @{} (milestone 3)", self.func)),
+            _ => Err(format!(
+                "unimplemented: Q instruction {op} in @{} (milestone 3)",
+                self.func
+            )),
         }
     }
 
     fn exec_qloop(&mut self, ins: &Instr, adjoint: bool) -> Result<(), String> {
-        let n: usize = ins.operands[0].parse().map_err(|_| diag("4.6", format!("qloop count in @{} is not an integer", self.func)))?;
+        let n: usize = ins.operands[0].parse().map_err(|_| {
+            diag(
+                "4.6",
+                format!("qloop count in @{} is not an integer", self.func),
+            )
+        })?;
         let body = ins.nested[0].clone();
         if ins.operands.len() == 1 {
             for _ in 0..n {
@@ -663,7 +810,14 @@ impl<'o> Exec<'o> {
         // while form (§4.6): flags c_i = AND of cond[0..i].
         let cond = self.bundle(&base_name(&ins.operands[2]))?;
         if cond.len() < n {
-            return Err(diag("4.6", format!("qloop while in @{} needs {n} condition wires, bundle has {}", self.func, cond.len())));
+            return Err(diag(
+                "4.6",
+                format!(
+                    "qloop while in @{} needs {n} condition wires, bundle has {}",
+                    self.func,
+                    cond.len()
+                ),
+            ));
         }
         let flags = self.state.alloc_wires(n);
         let pred = self.pred.clone();
@@ -684,16 +838,36 @@ impl<'o> Exec<'o> {
             }
         };
         compute_flags(self.state);
-        let order: Vec<usize> = if adjoint { (0..n).rev().collect() } else { (0..n).collect() };
+        let order: Vec<usize> = if adjoint {
+            (0..n).rev().collect()
+        } else {
+            (0..n).collect()
+        };
         for i in order {
             self.pred.push(flags[i]);
             let r = self.exec_list(&body);
             self.pred.pop();
             r?;
         }
-        compute_flags(self.state);
+        // Invert the dependency chain from its last flag to its first.
+        for i in (1..n).rev() {
+            let mut ctrls = pred.clone();
+            ctrls.extend([flags[i - 1], cond[i]]);
+            self.state.flip(flags[i], &ctrls);
+        }
+        if n > 0 {
+            let mut ctrls = pred.clone();
+            ctrls.push(cond[0]);
+            self.state.flip(flags[0], &ctrls);
+        }
         if !self.state.is_clean(&flags) {
-            return Err(diag("4.6", format!("qloop while flags in @{} did not uncompute clean", self.func)));
+            return Err(diag(
+                "4.6",
+                format!(
+                    "qloop while flags in @{} did not uncompute clean",
+                    self.func
+                ),
+            ));
         }
         Ok(())
     }
@@ -704,38 +878,80 @@ pub fn base_name(token: &str) -> String {
 }
 
 pub fn is_gate_name(op: &str) -> bool {
-    ["x", "h", "s", "sdg", "t", "tdg", "cx", "ccx", "mcx", "swap", "cz", "rx", "ry", "rz"].contains(&op)
+    [
+        "x", "h", "s", "sdg", "t", "tdg", "cx", "ccx", "mcx", "swap", "cz", "rx", "ry", "rz",
+    ]
+    .contains(&op)
 }
 
 impl<'o> Exec<'o> {
-    fn resolve_args(&self, types: &[crate::object::Type], names: &[String]) -> Result<Vec<Value>, String> {
+    fn resolve_args(
+        &self,
+        types: &[crate::object::Type],
+        names: &[String],
+    ) -> Result<Vec<Value>, String> {
         let mut out = Vec::new();
         for (ty, name) in types.iter().zip(names.iter()) {
             match ty {
                 crate::object::Type::Token => match self.args.get(name) {
                     Some(Value::Token(b)) => out.push(Value::Token(*b)),
-                    _ => return Err(diag("4.7", format!("token argument {name:?} in @{} is not a classical token argument", self.func))),
+                    _ => {
+                        return Err(diag(
+                            "4.7",
+                            format!(
+                                "token argument {name:?} in @{} is not a classical token argument",
+                                self.func
+                            ),
+                        ));
+                    }
                 },
                 crate::object::Type::F64 => match self.args.get(name) {
                     Some(v @ Value::F64(_)) => out.push(v.clone()),
                     _ => {
-                        let v: f64 = name.parse().map_err(|_| diag("4.7", format!("f64 argument {name:?} in @{} is unresolved", self.func)))?;
+                        let v: f64 = name.parse().map_err(|_| {
+                            diag(
+                                "4.7",
+                                format!("f64 argument {name:?} in @{} is unresolved", self.func),
+                            )
+                        })?;
                         out.push(Value::F64(v));
                     }
                 },
                 crate::object::Type::I(n) => match self.args.get(name) {
                     Some(Value::Int { bits, .. }) => out.push(Value::int(*n, bits.clone())),
                     _ => {
-                        let v = BigUint::parse_int(name).map_err(|_| diag("4.7", format!("classical argument {name:?} in @{} is unresolved", self.func)))?;
+                        let v = BigUint::parse_int(name).map_err(|_| {
+                            diag(
+                                "4.7",
+                                format!(
+                                    "classical argument {name:?} in @{} is unresolved",
+                                    self.func
+                                ),
+                            )
+                        })?;
                         out.push(Value::int(*n, v));
                     }
                 },
                 crate::object::Type::Ptr => match self.args.get(name) {
                     Some(Value::Ptr(b)) => out.push(Value::Ptr(b.clone())),
                     Some(Value::Int { bits, .. }) => out.push(Value::Ptr(bits.clone())),
-                    _ => return Err(diag("4.7", format!("ptr argument {name:?} in @{} is unresolved", self.func))),
+                    _ => {
+                        return Err(diag(
+                            "4.7",
+                            format!("ptr argument {name:?} in @{} is unresolved", self.func),
+                        ));
+                    }
                 },
-                _ => return Err(diag("4.7", format!("unsupported classical argument type {} in @{}", ty.signature_text(), self.func))),
+                _ => {
+                    return Err(diag(
+                        "4.7",
+                        format!(
+                            "unsupported classical argument type {} in @{}",
+                            ty.signature_text(),
+                            self.func
+                        ),
+                    ));
+                }
             }
         }
         Ok(out)
@@ -744,7 +960,13 @@ impl<'o> Exec<'o> {
     fn token_arg(&self, name: &str) -> Result<Budget, String> {
         match self.args.get(name) {
             Some(Value::Token(b)) => Ok(*b),
-            _ => Err(diag("4.7", format!("token operand {name:?} in @{} is not a token argument", self.func))),
+            _ => Err(diag(
+                "4.7",
+                format!(
+                    "token operand {name:?} in @{} is not a token argument",
+                    self.func
+                ),
+            )),
         }
     }
 
@@ -770,21 +992,29 @@ impl<'o> Exec<'o> {
     }
 
     fn exec_oracle_call(&mut self, operands: &[String]) -> Result<(), String> {
-        let callee = crate::validate::at_name(&operands[0]).unwrap_or("").to_string();
+        let callee = crate::validate::at_name(&operands[0])
+            .unwrap_or("")
+            .to_string();
         let budget = self.token_arg(&operands[1])?;
         let sig = crate::validate::oracle_sig(self.obj, &callee)?;
         let in_names = crate::validate::list_operand(&operands[2])?;
         let mem_names = crate::validate::list_operand(&operands[5])?;
         let arg_names = crate::validate::list_operand(&operands[6])?;
         let args = self.resolve_args(&sig.args, &arg_names)?;
-        let in_bundles: Vec<Vec<usize>> = in_names.iter().map(|n| self.bundle(&base_name(n))).collect::<Result<_, _>>()?;
+        let in_bundles: Vec<Vec<usize>> = in_names
+            .iter()
+            .map(|n| self.bundle(&base_name(n)))
+            .collect::<Result<_, _>>()?;
         let tgt = self.bundle(&base_name(&operands[3]))?;
         let fr = self.bundle(&base_name(&operands[4]))?;
-        let mem_regions: Vec<RegionWires> = mem_names.iter().map(|n| self.region(n)).collect::<Result<_, _>>()?;
+        let mem_regions: Vec<RegionWires> = mem_names
+            .iter()
+            .map(|n| self.region(n))
+            .collect::<Result<_, _>>()?;
         let obj = self.obj;
         let pred = self.pred.clone();
         let mut first_error: Option<String> = None;
-        let mut outcomes: std::collections::BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)> = Default::default();
+        let mut outcomes: OutcomeCache = Default::default();
         self.state.map_basis(|k| {
             if first_error.is_some() {
                 return k.clone();
@@ -793,17 +1023,26 @@ impl<'o> Exec<'o> {
             if !pred.iter().all(|p| k.bit(*p)) {
                 return nk;
             }
-            let inputs: Vec<BigUint> = in_bundles.iter().map(|b| QuantumState::extract(k, b)).collect();
+            let inputs: Vec<BigUint> = in_bundles
+                .iter()
+                .map(|b| QuantumState::extract(k, b))
+                .collect();
             let mem_cells: Vec<Vec<BigUint>> = mem_regions
                 .iter()
-                .map(|r| r.cells.iter().map(|c| QuantumState::extract(k, c)).collect())
+                .map(|r| {
+                    r.cells
+                        .iter()
+                        .map(|c| QuantumState::extract(k, c))
+                        .collect()
+                })
                 .collect();
             let key = (inputs.clone(), mem_cells.clone());
             let outcome = match outcomes.get(&key) {
                 Some(o) => o.clone(),
                 None => {
                     let mut mem = mem_cells.clone();
-                    match crate::oracle::run_oracle(obj, &callee, &inputs, &mut mem, &args, budget) {
+                    match crate::oracle::run_oracle(obj, &callee, &inputs, &mut mem, &args, budget)
+                    {
                         Ok(o) => {
                             let pair = (o.payload.clone(), o.code.clone());
                             outcomes.insert(key, pair.clone());
@@ -827,24 +1066,41 @@ impl<'o> Exec<'o> {
     }
 
     fn exec_action_call(&mut self, operands: &[String], adjoint: bool) -> Result<(), String> {
-        let callee = crate::validate::at_name(&operands[0]).unwrap_or("").to_string();
+        let callee = crate::validate::at_name(&operands[0])
+            .unwrap_or("")
+            .to_string();
         let sig = crate::validate::action_sig(self.obj, &callee)?;
         let mut_names = crate::validate::list_operand(&operands[1])?;
         let in_names = crate::validate::list_operand(&operands[2])?;
         let mem_names = crate::validate::list_operand(&operands[3])?;
         let arg_names = crate::validate::list_operand(&operands[4])?;
         let args = self.resolve_args(&sig.args, &arg_names)?;
-        let muts: Vec<Vec<usize>> = mut_names.iter().map(|n| self.bundle(&base_name(n))).collect::<Result<_, _>>()?;
-        let ins_b: Vec<Vec<usize>> = in_names.iter().map(|n| self.bundle(&base_name(n))).collect::<Result<_, _>>()?;
-        let mems: Vec<RegionWires> = mem_names.iter().map(|n| self.region(n)).collect::<Result<_, _>>()?;
+        let muts: Vec<Vec<usize>> = mut_names
+            .iter()
+            .map(|n| self.bundle(&base_name(n)))
+            .collect::<Result<_, _>>()?;
+        let ins_b: Vec<Vec<usize>> = in_names
+            .iter()
+            .map(|n| self.bundle(&base_name(n)))
+            .collect::<Result<_, _>>()?;
+        let mems: Vec<RegionWires> = mem_names
+            .iter()
+            .map(|n| self.region(n))
+            .collect::<Result<_, _>>()?;
         let pred = self.pred.clone();
-        execute_action_inner(self.obj, self.state, &callee, &muts, &ins_b, &mems, &args, adjoint, &pred)
+        execute_action_with_idle(
+            self.obj, self.state, &callee, &muts, &ins_b, &mems, &args, adjoint, &pred, &self.idle,
+        )
     }
 
     fn exec_qinplace(&mut self, ins: &Instr) -> Result<(), String> {
         // §4.5 expansion, through the oracle_call machinery directly.
-        let g = crate::validate::at_name(&ins.operands[0]).unwrap_or("").to_string();
-        let ginv = crate::validate::at_name(&ins.operands[1]).unwrap_or("").to_string();
+        let g = crate::validate::at_name(&ins.operands[0])
+            .unwrap_or("")
+            .to_string();
+        let ginv = crate::validate::at_name(&ins.operands[1])
+            .unwrap_or("")
+            .to_string();
         let tk_name = ins.operands[2].clone();
         let budget = self.token_arg(&tk_name)?;
         let x_name = base_name(&ins.operands[3]);
@@ -854,8 +1110,10 @@ impl<'o> Exec<'o> {
         let t = self.state.alloc_wires(n);
         let fsig = crate::validate::oracle_sig(self.obj, &g)?;
         let f = self.state.alloc_wires(fsig.fault);
-        self.bundles.insert("\u{0}qinplace_t".to_string(), t.clone());
-        self.bundles.insert("\u{0}qinplace_f".to_string(), f.clone());
+        self.bundles
+            .insert("\u{0}qinplace_t".to_string(), t.clone());
+        self.bundles
+            .insert("\u{0}qinplace_f".to_string(), f.clone());
         let call = |exec: &mut Exec, oracle: &str| -> Result<(), String> {
             let operands = vec![
                 format!("@{oracle}"),
@@ -885,7 +1143,13 @@ impl<'o> Exec<'o> {
             });
             call(self, &ginv)?;
             if !self.state.is_clean(&t) || !self.state.is_clean(&f) {
-                return Err(diag("4.5", format!("qinplace workspace in @{} is not clean after the inverse call (the declared inverse pair does not compose to identity, or a fault code was delivered)", self.func)));
+                return Err(diag(
+                    "4.5",
+                    format!(
+                        "qinplace workspace in @{} is not clean after the inverse call (the declared inverse pair does not compose to identity, or a fault code was delivered)",
+                        self.func
+                    ),
+                ));
             }
             Ok(())
         })();
@@ -905,21 +1169,48 @@ pub fn xor_into(key: &mut BigUint, wires: &[usize], value: &BigUint) {
 }
 
 /// (`adjoint`, control token, call op, call operands)
-fn normalize_call(ins: &Instr) -> Result<(bool, Option<&str>, &str, Vec<String>), String> {
+fn normalize_call(ins: &Instr) -> Result<NormalizedCall<'_>, String> {
     match ins.op.as_str() {
         "oracle_call" | "action_call" => Ok((false, None, ins.op.as_str(), ins.operands.clone())),
         "adj" => {
             let inner = ins.operands.first().ok_or("adj with no call")?;
-            Ok((true, None, if inner == "oracle_call" { "oracle_call" } else { "action_call" }, ins.operands[1..].to_vec()))
+            Ok((
+                true,
+                None,
+                if inner == "oracle_call" {
+                    "oracle_call"
+                } else {
+                    "action_call"
+                },
+                ins.operands[1..].to_vec(),
+            ))
         }
         "ctl" => {
             let ctrl = ins.operands.first().ok_or("ctl with no control")?;
             let second = ins.operands.get(1).ok_or("ctl with no call")?;
             if second == "adj" {
                 let inner = ins.operands.get(2).ok_or("ctl adj with no call")?;
-                Ok((true, Some(ctrl.as_str()), if inner == "oracle_call" { "oracle_call" } else { "action_call" }, ins.operands[3..].to_vec()))
+                Ok((
+                    true,
+                    Some(ctrl.as_str()),
+                    if inner == "oracle_call" {
+                        "oracle_call"
+                    } else {
+                        "action_call"
+                    },
+                    ins.operands[3..].to_vec(),
+                ))
             } else {
-                Ok((false, Some(ctrl.as_str()), if second == "oracle_call" { "oracle_call" } else { "action_call" }, ins.operands[2..].to_vec()))
+                Ok((
+                    false,
+                    Some(ctrl.as_str()),
+                    if second == "oracle_call" {
+                        "oracle_call"
+                    } else {
+                        "action_call"
+                    },
+                    ins.operands[2..].to_vec(),
+                ))
             }
         }
         _ => Err(format!("normalize_call on {}", ins.op)),
@@ -938,10 +1229,40 @@ pub fn execute_action_inner(
     adjoint: bool,
     inherited_pred: &[usize],
 ) -> Result<(), String> {
+    execute_action_with_idle(
+        obj,
+        state,
+        name,
+        muts,
+        ins_b,
+        mems,
+        args,
+        adjoint,
+        inherited_pred,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_action_with_idle(
+    obj: &Object,
+    state: &mut QuantumState,
+    name: &str,
+    muts: &[Vec<usize>],
+    ins_b: &[Vec<usize>],
+    mems: &[RegionWires],
+    args: &[Value],
+    adjoint: bool,
+    inherited_pred: &[usize],
+    idle: &[usize],
+) -> Result<(), String> {
     let f = obj
         .function(name)
         .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking (milestone 2)")))?;
-    if !matches!(f.kind, crate::object::FnKind::Action | crate::object::FnKind::PermAction) {
+    if !matches!(
+        f.kind,
+        crate::object::FnKind::Action | crate::object::FnKind::PermAction
+    ) {
         return Err(diag("5.3", format!("@{name} is not an action")));
     }
     let mut bundles: HashMap<String, Vec<usize>> = HashMap::new();
@@ -962,7 +1283,11 @@ pub fn execute_action_inner(
     let interface_bundles: BTreeSet<String> = bundles.keys().cloned().collect();
     let widths = bundle_widths(obj, f);
     let body_source: Vec<Instr> = f.blocks.iter().flat_map(|b| b.instrs.clone()).collect();
-    let body = if adjoint { adjoint_list(&body_source, &widths) } else { body_source.clone() };
+    let body = if adjoint {
+        adjoint_list(&body_source, &widths)
+    } else {
+        body_source.clone()
+    };
     let mut ex = Exec {
         obj,
         state,
@@ -972,22 +1297,25 @@ pub fn execute_action_inner(
         args: arg_env,
         pred: inherited_pred.to_vec(),
         borrowed: Vec::new(),
+        idle: idle.to_vec(),
         func: name.to_string(),
     };
-    if adjoint {
-        // Entry recreation of the regions the forward exit released.
-        for ins in &body_source {
-            collect_qregions(ins, &mut |q| {
-                if !ex.regions.contains_key(&q.operands[0]) {
-                    let _ = ex.create_region(&q.clone());
-                }
-            });
-        }
+    // §4.6: all lexical regions exist at entry, including those inside
+    // zero-trip loops or declared after their first use.
+    let mut declarations = Vec::new();
+    for ins in &body_source {
+        collect_qregions(ins, &mut |q| declarations.push(q.clone()));
+    }
+    for q in declarations {
+        ex.create_region(&q)?;
     }
     ex.exec_list(&body)?;
     ex.release_local_regions()?;
     if ex.pred.len() != inherited_pred.len() {
-        return Err(diag("3.5", format!("predicate stack of @{name} is not restored at exit")));
+        return Err(diag(
+            "3.5",
+            format!("predicate stack of @{name} is not restored at exit"),
+        ));
     }
     let leaked: Vec<&String> = ex
         .bundles
@@ -995,7 +1323,10 @@ pub fn execute_action_inner(
         .filter(|k| !interface_bundles.contains(*k))
         .collect();
     if !leaked.is_empty() {
-        return Err(diag("5.1", format!("action @{name} exits with unmatched allocations {leaked:?}")));
+        return Err(diag(
+            "5.1",
+            format!("action @{name} exits with unmatched allocations {leaked:?}"),
+        ));
     }
     Ok(())
 }
@@ -1025,15 +1356,18 @@ fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, usize> {
         for ins in instrs {
             match ins.op.as_str() {
                 "qalloc" | "qborrow" => {
-                    if let (Some(lhs), Some(n)) = (ins.lhs.first(), ins.operands.get(1).and_then(|s| s.parse::<usize>().ok())) {
+                    if let (Some(lhs), Some(n)) = (
+                        ins.lhs.first(),
+                        ins.operands.get(1).and_then(|s| s.parse::<usize>().ok()),
+                    ) {
                         widths.insert(lhs.clone(), n);
                     }
                 }
                 "qcopy" => {
-                    if let (Some(lhs), Some(src)) = (ins.lhs.first(), ins.operands.first()) {
-                        if let Some(w) = widths.get(&base_name(src)).copied() {
-                            widths.insert(lhs.clone(), w);
-                        }
+                    if let (Some(lhs), Some(src)) = (ins.lhs.first(), ins.operands.first())
+                        && let Some(w) = widths.get(&base_name(src)).copied()
+                    {
+                        widths.insert(lhs.clone(), w);
                     }
                 }
                 _ => {}
@@ -1058,8 +1392,21 @@ fn adjoint_list(instrs: &[Instr], widths: &HashMap<String, usize>) -> Vec<Instr>
     out
 }
 
-fn renamed(ins: &Instr, op: &str, lhs: Vec<String>, operands: Vec<String>, nested: Vec<Vec<Instr>>) -> Instr {
-    Instr { lhs, op: op.to_string(), operands, nested, line: ins.line, raw: ins.raw.clone() }
+fn renamed(
+    ins: &Instr,
+    op: &str,
+    lhs: Vec<String>,
+    operands: Vec<String>,
+    nested: Vec<Vec<Instr>>,
+) -> Instr {
+    Instr {
+        lhs,
+        op: op.to_string(),
+        operands,
+        nested,
+        line: ins.line,
+        raw: ins.raw.clone(),
+    }
 }
 
 fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
@@ -1071,31 +1418,80 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
         "tdg" => renamed(ins, "t", vec![], ins.operands.clone(), vec![]),
         "rx" | "ry" | "rz" => {
             let angle = &ins.operands[0];
-            let neg = if let Some(rest) = angle.strip_prefix('-') { rest.to_string() } else { format!("-{angle}") };
+            let neg = if let Some(rest) = angle.strip_prefix('-') {
+                rest.to_string()
+            } else {
+                format!("-{angle}")
+            };
             renamed(ins, op, vec![], vec![neg, ins.operands[1].clone()], vec![])
         }
         "qalloc" => renamed(ins, "qfree", vec![], ins.lhs.clone(), vec![]),
         "qfree" => {
             let name = base_name(&ins.operands[0]);
             let n = widths.get(&name).copied().unwrap_or(1);
-            renamed(ins, "qalloc", vec![name], vec!["any".into(), n.to_string()], vec![])
+            renamed(
+                ins,
+                "qalloc",
+                vec![name],
+                vec!["any".into(), n.to_string()],
+                vec![],
+            )
         }
         "qborrow" => renamed(ins, "qreturn", vec![], ins.lhs.clone(), vec![]),
         "qreturn" => {
             let name = base_name(&ins.operands[0]);
             let n = widths.get(&name).copied().unwrap_or(1);
-            renamed(ins, "qborrow", vec![name], vec!["any".into(), n.to_string()], vec![])
+            renamed(
+                ins,
+                "qborrow",
+                vec![name],
+                vec!["any".into(), n.to_string()],
+                vec![],
+            )
         }
-        "qcopy" => renamed(ins, "quncopy", vec![], vec![ins.operands[0].clone(), ins.lhs[0].clone()], vec![]),
-        "quncopy" => renamed(ins, "qcopy", vec![ins.operands[1].clone()], vec![ins.operands[0].clone()], vec![]),
-        "qload" => renamed(ins, "qunload", vec![], vec![ins.operands[0].clone(), ins.operands[1].clone(), ins.lhs[0].clone()], vec![]),
-        "qunload" => renamed(ins, "qload", vec![ins.operands[2].clone()], vec![ins.operands[0].clone(), ins.operands[1].clone()], vec![]),
+        "qcopy" => renamed(
+            ins,
+            "quncopy",
+            vec![],
+            vec![ins.operands[0].clone(), ins.lhs[0].clone()],
+            vec![],
+        ),
+        "quncopy" => renamed(
+            ins,
+            "qcopy",
+            vec![ins.operands[1].clone()],
+            vec![ins.operands[0].clone()],
+            vec![],
+        ),
+        "qload" => renamed(
+            ins,
+            "qunload",
+            vec![],
+            vec![
+                ins.operands[0].clone(),
+                ins.operands[1].clone(),
+                ins.lhs[0].clone(),
+            ],
+            vec![],
+        ),
+        "qunload" => renamed(
+            ins,
+            "qload",
+            vec![ins.operands[2].clone()],
+            vec![ins.operands[0].clone(), ins.operands[1].clone()],
+            vec![],
+        ),
         "qregion" => renamed(ins, "qregion_release", vec![], ins.operands.clone(), vec![]),
         "qinplace" => renamed(
             ins,
             "qinplace",
             vec![],
-            vec![ins.operands[1].clone(), ins.operands[0].clone(), ins.operands[2].clone(), ins.operands[3].clone()],
+            vec![
+                ins.operands[1].clone(),
+                ins.operands[0].clone(),
+                ins.operands[2].clone(),
+                ins.operands[3].clone(),
+            ],
             vec![],
         ),
         "oracle_call" => ins.clone(),
@@ -1106,7 +1502,13 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
         }
         "adj" => {
             if ins.operands.first().map(|s| s.as_str()) == Some("action_call") {
-                renamed(ins, "action_call", vec![], ins.operands[1..].to_vec(), vec![])
+                renamed(
+                    ins,
+                    "action_call",
+                    vec![],
+                    ins.operands[1..].to_vec(),
+                    vec![],
+                )
             } else {
                 ins.clone()
             }
@@ -1131,13 +1533,28 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
             "qif",
             vec![],
             ins.operands.clone(),
-            vec![adjoint_list(&ins.nested[0], widths), adjoint_list(&ins.nested[1], widths)],
+            vec![
+                adjoint_list(&ins.nested[0], widths),
+                adjoint_list(&ins.nested[1], widths),
+            ],
         ),
         "qloop" => {
             if ins.operands.len() == 3 {
-                renamed(ins, "qloop_adj", vec![], ins.operands.clone(), vec![adjoint_list(&ins.nested[0], widths)])
+                renamed(
+                    ins,
+                    "qloop_adj",
+                    vec![],
+                    ins.operands.clone(),
+                    vec![adjoint_list(&ins.nested[0], widths)],
+                )
             } else {
-                renamed(ins, "qloop", vec![], ins.operands.clone(), vec![adjoint_list(&ins.nested[0], widths)])
+                renamed(
+                    ins,
+                    "qloop",
+                    vec![],
+                    ins.operands.clone(),
+                    vec![adjoint_list(&ins.nested[0], widths)],
+                )
             }
         }
         _ => ins.clone(), // x cx ccx mcx swap h cz qxor qexch qstore qexchm
@@ -1169,25 +1586,49 @@ pub fn execute_perm_basis(
         let mut cells = Vec::new();
         for (ci, _) in (0..(1usize << a)).enumerate() {
             let wires = state.alloc_wires(*w);
-            if let Some(v) = mems.get(ri).and_then(|m| m.get(ci)) {
-                if !v.is_zero() {
-                    state.prepare(&wires, v);
-                }
+            if let Some(v) = mems.get(ri).and_then(|m| m.get(ci))
+                && !v.is_zero()
+            {
+                state.prepare(&wires, v);
             }
             cells.push(wires);
         }
-        regions.push(RegionWires { cells, a: *a, w: *w });
+        regions.push(RegionWires {
+            cells,
+            a: *a,
+            w: *w,
+        });
     }
-    execute_action_inner(obj, &mut state, name, &mut_bundles, &in_bundles, &regions, args, false, &[])?;
+    execute_action_inner(
+        obj,
+        &mut state,
+        name,
+        &mut_bundles,
+        &in_bundles,
+        &regions,
+        args,
+        false,
+        &[],
+    )?;
     if state.amps.len() != 1 {
-        return Err(diag("5.3", format!("permutation action @{name} produced a superposition under basis execution")));
+        return Err(diag(
+            "5.3",
+            format!("permutation action @{name} produced a superposition under basis execution"),
+        ));
     }
     let key = state.amps.keys().next().cloned().unwrap_or_default();
-    let out_muts: Vec<BigUint> = mut_bundles.iter().map(|b| QuantumState::extract(&key, b)).collect();
+    let out_muts: Vec<BigUint> = mut_bundles
+        .iter()
+        .map(|b| QuantumState::extract(&key, b))
+        .collect();
     let out_mem: Vec<Vec<BigUint>> = regions
         .iter()
-        .map(|r| r.cells.iter().map(|c| QuantumState::extract(&key, c)).collect())
+        .map(|r| {
+            r.cells
+                .iter()
+                .map(|c| QuantumState::extract(&key, c))
+                .collect()
+        })
         .collect();
     Ok((out_muts, out_mem))
 }
-

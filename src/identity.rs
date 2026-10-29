@@ -171,9 +171,19 @@ fn utf8_len(first: u8) -> usize {
 /// Layout leaves of §9.2 as (dotted path, JCS value text), path-sorted.
 pub fn layout_leaves(obj: &Object) -> Vec<(String, String)> {
     let mut leaves: Vec<(String, String)> = Vec::new();
-    let Some(layout) = &obj.layout else { return leaves };
+    let Some(layout) = &obj.layout else {
+        return leaves;
+    };
     let j = &layout.json;
-    for key in ["ptr_width", "H", "A_tab", "S_cells", "null_size", "heap_base", "heap_limit_max"] {
+    for key in [
+        "ptr_width",
+        "H",
+        "A_tab",
+        "S_cells",
+        "null_size",
+        "heap_base",
+        "heap_limit_max",
+    ] {
         if let Some(v) = j.get(key) {
             leaves.push((key.to_string(), v.to_jcs()));
         }
@@ -201,16 +211,16 @@ pub fn layout_leaves(obj: &Object) -> Vec<(String, String)> {
 
 /// Closure set of §9.2 for one symbol: (layout leaves, data names).
 fn closure_set(obj: &Object, name: &str) -> (Vec<(String, String)>, Vec<String>) {
-    let Some(sym) = obj.symbols.get(name) else { return (Vec::new(), Vec::new()) };
+    let Some(sym) = obj.symbols.get(name) else {
+        return (Vec::new(), Vec::new());
+    };
     let all = layout_leaves(obj);
     let leaves: Vec<(String, String)> = match sym.kind.as_str() {
         "oracle" => all
             .into_iter()
-            .filter(|(path, _)| {
-                match path.strip_prefix("interface_regions.") {
-                    Some(rest) => rest.split('.').next() == Some(name),
-                    None => true,
-                }
+            .filter(|(path, _)| match path.strip_prefix("interface_regions.") {
+                Some(rest) => rest.split('.').next() == Some(name),
+                None => true,
             })
             .collect(),
         "cc" | "r" => all,
@@ -220,18 +230,21 @@ fn closure_set(obj: &Object, name: &str) -> (Vec<(String, String)>, Vec<String>)
                 let mut flat = Vec::new();
                 f.flat_instrs(&mut flat);
                 for ins in flat {
-                    if ins.op == "lift.addr" {
-                        if let Some(tok) = ins.operands.first() {
-                            if let Some(g) = tok.strip_prefix('@') {
-                                if obj.layout.as_ref().is_some_and(|l| l.globals.contains_key(g)) {
-                                    wanted.insert(format!("globals.{g}"));
-                                }
-                            }
-                        }
+                    if ins.op == "lift.addr"
+                        && let Some(tok) = ins.operands.first()
+                        && let Some(g) = tok.strip_prefix('@')
+                        && obj
+                            .layout
+                            .as_ref()
+                            .is_some_and(|l| l.globals.contains_key(g))
+                    {
+                        wanted.insert(format!("globals.{g}"));
                     }
                 }
             }
-            all.into_iter().filter(|(p, _)| wanted.contains(p)).collect()
+            all.into_iter()
+                .filter(|(p, _)| wanted.contains(p))
+                .collect()
         }
         _ => Vec::new(),
     };
@@ -243,10 +256,10 @@ fn closure_set(obj: &Object, name: &str) -> (Vec<(String, String)>, Vec<String>)
                 if let Some(g) = layout.globals.get(gname) {
                     data.insert(g.image.clone());
                 }
-            } else if path == "block_image" {
-                if let Some(img) = &layout.block_image {
-                    data.insert(img.clone());
-                }
+            } else if path == "block_image"
+                && let Some(img) = &layout.block_image
+            {
+                data.insert(img.clone());
             }
         }
     }
@@ -273,15 +286,16 @@ fn device_lines(obj: &Object, f: &Function) -> Vec<String> {
                     used.insert(dev.to_string(), e);
                 }
             }
-        } else if ins.op == "hostcall" {
-            if let Some(service) = ins.operands.first() {
-                if let Some(e) = entry("services", service) {
-                    used.insert(service.clone(), e);
-                }
-            }
+        } else if ins.op == "hostcall"
+            && let Some(service) = ins.operands.first()
+            && let Some(e) = entry("services", service)
+        {
+            used.insert(service.clone(), e);
         }
     }
-    used.into_iter().map(|(name, e)| format!("device {name} {e}")).collect()
+    used.into_iter()
+        .map(|(name, e)| format!("device {name} {e}"))
+        .collect()
 }
 
 /// Tarjan SCCs over defined symbols. Each SCC is name-sorted.
@@ -294,7 +308,12 @@ fn sccs(obj: &Object, refs: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         next: usize,
         out: Vec<Vec<String>>,
     }
-    fn strongconnect(v: &str, refs: &HashMap<String, Vec<String>>, defined: &BTreeSet<String>, st: &mut State) {
+    fn strongconnect(
+        v: &str,
+        refs: &HashMap<String, Vec<String>>,
+        defined: &BTreeSet<String>,
+        st: &mut State,
+    ) {
         st.index.insert(v.to_string(), st.next);
         st.low.insert(v.to_string(), st.next);
         st.next += 1;
@@ -335,7 +354,14 @@ fn sccs(obj: &Object, refs: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         }
     }
     let defined: BTreeSet<String> = obj.symbols.keys().cloned().collect();
-    let mut st = State { index: HashMap::new(), low: HashMap::new(), on_stack: BTreeSet::new(), stack: Vec::new(), next: 0, out: Vec::new() };
+    let mut st = State {
+        index: HashMap::new(),
+        low: HashMap::new(),
+        on_stack: BTreeSet::new(),
+        stack: Vec::new(),
+        next: 0,
+        out: Vec::new(),
+    };
     for name in defined.iter() {
         if !st.index.contains_key(name) {
             strongconnect(name, refs, &defined, &mut st);
@@ -371,23 +397,36 @@ pub fn compute(obj: &Object) -> Result<Identities, String> {
         .into_iter()
         .map(|(k, v)| (k, v.expect("interface hash always exists")))
         .collect();
-    Ok(Identities { object_hash: object_hash(&obj.text), interface, closure: closure_opts, scc_hashes })
+    Ok(Identities {
+        object_hash: object_hash(&obj.text),
+        interface,
+        closure: closure_opts,
+        scc_hashes,
+    })
 }
+
+type HashMapByName = BTreeMap<String, Option<String>>;
 
 fn compute_kind(
     obj: &Object,
     refs: &HashMap<String, Vec<String>>,
     comps: &[Vec<String>],
     interface: bool,
-) -> Result<(BTreeMap<String, Option<String>>, BTreeMap<String, Option<String>>), String> {
+) -> Result<(HashMapByName, HashMapByName), String> {
     let mut hashes: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut scc_hashes: BTreeMap<String, Option<String>> = BTreeMap::new();
     for comp in comps {
-        let in_comp: BTreeMap<&str, usize> = comp.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+        let in_comp: BTreeMap<&str, usize> = comp
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
         let self_ref = comp.len() == 1 && refs.get(&comp[0]).is_some_and(|r| r.contains(&comp[0]));
         let mut envelopes: Vec<Option<Vec<u8>>> = Vec::new();
         for member in comp {
-            envelopes.push(build_envelope(obj, member, refs, &in_comp, &hashes, interface)?);
+            envelopes.push(build_envelope(
+                obj, member, refs, &in_comp, &hashes, interface,
+            )?);
         }
         if comp.len() == 1 && !self_ref {
             let member = &comp[0];
@@ -406,7 +445,9 @@ fn compute_kind(
             };
             for (i, member) in comp.iter().enumerate() {
                 scc_hashes.insert(member.clone(), scc_hash.clone());
-                let hash = scc_hash.as_ref().map(|h| sha256_hex(format!("{h}:{i}").as_bytes()));
+                let hash = scc_hash
+                    .as_ref()
+                    .map(|h| sha256_hex(format!("{h}:{i}").as_bytes()));
                 hashes.insert(member.clone(), hash);
             }
         }
@@ -468,7 +509,10 @@ fn build_envelope(
         .function(member)
         .ok_or_else(|| format!("§9.1: symbol @{member} has no function definition"))?;
     let replaced = replace_refs(f, &|name: &str| {
-        if in_comp.contains_key(name) || obj.symbols.contains_key(name) || obj.imports.contains_key(name) {
+        if in_comp.contains_key(name)
+            || obj.symbols.contains_key(name)
+            || obj.imports.contains_key(name)
+        {
             resolve(name)
         } else {
             None
@@ -569,7 +613,11 @@ pub fn check_json(obj: &Object, ids: &Identities) -> Json {
         ));
     }
     let unresolved: Vec<Json> = obj.imports.keys().map(|n| Json::Str(n.clone())).collect();
-    let status = if obj.imports.is_empty() { "ok" } else { "unlinked" };
+    let status = if obj.imports.is_empty() {
+        "ok"
+    } else {
+        "unlinked"
+    };
     let symbols_obj = {
         let mut m = BTreeMap::new();
         for (k, v) in symbols {
@@ -584,4 +632,3 @@ pub fn check_json(obj: &Object, ids: &Identities) -> Json {
         ("unresolved_imports", Json::Arr(unresolved)),
     ])
 }
-

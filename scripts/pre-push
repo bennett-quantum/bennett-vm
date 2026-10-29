@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
-cargo test
+repo_root="$(git rev-parse --show-toplevel)"
+unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
+export TMPDIR="$repo_root/.tmp"
+mkdir -p "$TMPDIR"
+cargo test --manifest-path "$repo_root/Cargo.toml" --offline

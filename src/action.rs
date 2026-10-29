@@ -35,6 +35,23 @@ impl QuantumState {
         amps.insert(BigUint::zero(), (1.0, 0.0));
         QuantumState { amps, next_wire: 0 }
     }
+    pub fn wire_count(&self) -> usize {
+        self.next_wire
+    }
+    /// Reclaim only a clean suffix of simulator ids after actual inverse gates.
+    /// This changes allocation bookkeeping, never quantum amplitudes.
+    pub fn rewind_clean_wires(&mut self, boundary: usize) -> Result<(), String> {
+        if boundary > self.next_wire
+            || self
+                .amps
+                .keys()
+                .any(|key| (boundary..self.next_wire).any(|w| key.bit(w)))
+        {
+            return Err("§7.4: inverse left a released wire unclean".into());
+        }
+        self.next_wire = boundary;
+        Ok(())
+    }
     pub fn alloc_wire(&mut self) -> usize {
         let w = self.next_wire;
         self.next_wire += 1;
@@ -205,7 +222,7 @@ impl Default for QuantumState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RegionWires {
     /// One wire bundle per cell, little-endian within the cell.
     pub cells: Vec<Vec<usize>>,

@@ -38,7 +38,6 @@ struct Data {
     tape: Vec<Json>,
     hosts: Vec<Json>,
     measurements: Vec<Json>,
-    quantum: QuantumState,
     handles: BTreeMap<u64, Handle>,
     next_handle: u64,
 }
@@ -54,6 +53,8 @@ struct Activation {
 }
 #[derive(Clone)]
 struct Frame {
+    wire_boundary: usize,
+    region: Option<Invocation>,
     definitions: Vec<(Key, usize)>,
     next_activation: u64,
     data: Option<Data>,
@@ -71,6 +72,9 @@ struct Segment {
     results: Vec<Value>,
 }
 struct Machine<'a> {
+    quantum: QuantumState,
+    quantum_events: Vec<Invocation>,
+    pending_region: Option<Invocation>,
     obj: &'a Object,
     data: Data,
     env: BTreeMap<Key, Vec<Value>>,
@@ -145,7 +149,6 @@ impl Data {
             tape: vec![],
             hosts: vec![],
             measurements: vec![],
-            quantum: QuantumState::new(),
             handles: BTreeMap::new(),
             next_handle: 1,
         };
@@ -283,10 +286,18 @@ impl<'a> Machine<'a> {
         let id = self.id(n).map_err(|_| err(format!("invalid qreg {n}")))?;
         Ok(self.data.handle(id).unwrap().wires.clone())
     }
-    fn undo(&mut self, index: usize, control: bool) {
+    fn undo(&mut self, index: usize, control: bool) -> Result<(), String> {
         let frame = &mut self.history[index];
         if frame.reversed || frame.marker {
-            return;
+            return Ok(());
+        }
+        if let Some(invocation) = &frame.region {
+            let inverse = invocation.inverse();
+            apply_invocation(self.obj, &mut self.quantum, &inverse)?;
+            record_quantum(&mut self.quantum_events, inverse);
+        }
+        if !frame.pure {
+            self.quantum.rewind_clean_wires(frame.wire_boundary)?;
         }
         for (key, len) in frame.definitions.iter().rev() {
             if let Some(vs) = self.env.get_mut(key) {
@@ -304,6 +315,7 @@ impl<'a> Machine<'a> {
             self.next_activation = frame.next_activation;
         }
         frame.reversed = true;
+        Ok(())
     }
     fn step(&mut self) -> Result<(), String> {
         let a = self.stack.last().unwrap().clone();
@@ -315,6 +327,8 @@ impl<'a> Machine<'a> {
             .ok_or_else(|| err("instruction pointer fell off block"))?
             .clone();
         let before = self.data.clone();
+        let wire_boundary = self.quantum.wire_count();
+        self.pending_region = None;
         let env_before = self.env.clone();
         let control = self.stack.clone();
         let next_activation = self.next_activation;
@@ -388,6 +402,8 @@ impl<'a> Machine<'a> {
             ("memory", Json::Arr(mem)),
         ]));
         self.history.push(Frame {
+            wire_boundary,
+            region: self.pending_region.take(),
             definitions: self.definitions.clone(),
             next_activation,
             data: (!pure(&ins.op)).then_some(before),
@@ -611,7 +627,7 @@ impl<'a> Machine<'a> {
                 }
                 let (start, end) = (seg.start, seg.end);
                 for i in (start..=end).rev() {
-                    self.undo(i, false);
+                    self.undo(i, false)?;
                 }
             }
             "effect" => {
@@ -654,14 +670,14 @@ impl<'a> Machine<'a> {
             "qreg" => match op {
                 "qreg.new" => {
                     let n: usize = xs[1].parse().map_err(err)?;
-                    let ws = self.data.quantum.alloc_wires(n);
+                    let ws = self.quantum.alloc_wires(n);
                     let id = self.data.new_handle(ws, None);
                     result = Some(Value::Qreg(id));
                 }
                 "qreg.free" => {
                     let id = get!(self.id(&xs[0]));
                     let h = self.data.handle(id).unwrap();
-                    if h.parent.is_some() || !self.data.quantum.is_clean(&h.wires) {
+                    if h.parent.is_some() || !self.quantum.is_clean(&h.wires) {
                         return Ok(Some(4));
                     }
                     self.data.handles.get_mut(&id).unwrap().live = false;
@@ -705,7 +721,7 @@ impl<'a> Machine<'a> {
                 let ws = h.wires.clone();
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
-                let (v, bits) = self.data.quantum.measure(&ws, draw);
+                let (v, bits) = self.quantum.measure(&ws, draw);
                 self.data.handles.get_mut(&id).unwrap().live = false;
                 self.data.measurements.push(Json::obj(vec![
                     ("bits", Json::Str(bits)),
@@ -802,7 +818,7 @@ impl<'a> Machine<'a> {
     fn region(&mut self, ins: &Instr) -> Result<(), String> {
         let mut xs = ins.operands.as_slice();
         let mut op = ins.op.as_str();
-        let mut adj = false;
+        let mut adjoint = false;
         let mut controls = vec![];
         if op == "ctl" {
             controls = self.wires(&xs[0])?;
@@ -810,14 +826,14 @@ impl<'a> Machine<'a> {
             xs = &xs[2..];
         }
         if op == "adj" {
-            adj = true;
+            adjoint = true;
             op = &xs[0];
             xs = &xs[1..];
         }
-        let name = xs[0].trim_start_matches('@');
-        let mut used = Vec::new();
+        let name = xs[0].trim_start_matches('@').to_string();
+        let mut used = vec![];
         let mut bundles = |text: &str| -> Result<Vec<Vec<usize>>, String> {
-            crate::validate::list_operand(text)?
+            list(text)?
                 .iter()
                 .map(|n| {
                     used.push(n.clone());
@@ -825,11 +841,11 @@ impl<'a> Machine<'a> {
                 })
                 .collect()
         };
-        if op == "action_call" {
+        let invocation = if op == "action_call" {
             let muts = bundles(&xs[1])?;
             let inputs = bundles(&xs[2])?;
             let mem = bundles(&xs[3])?;
-            let sig = crate::validate::action_sig(self.obj, name)?;
+            let sig = crate::validate::action_sig(self.obj, &name)?;
             let regions = mem
                 .into_iter()
                 .zip(&sig.mem)
@@ -838,46 +854,145 @@ impl<'a> Machine<'a> {
                     a: *a,
                     w: *w,
                 })
-                .collect::<Vec<_>>();
+                .collect();
             let args = self
-                .operands(&crate::validate::list_operand(&xs[4])?)
-                .map_err(|_| err("invalid region argument"))?;
-            // §9.4: borrowing needs the caller's *designated* idle set.
-            // The 0.8 one-shot CLI has no designation operand; other live
-            // handles are not an implicit permission to borrow their wires.
-            let idle = Vec::new();
-            action::execute_action_with_idle(
-                self.obj,
-                &mut self.data.quantum,
+                .operands(&list(&xs[4])?)
+                .map_err(|_| err("invalid action argument"))?;
+            Invocation::Action {
                 name,
-                &muts,
-                &inputs,
-                &regions,
-                &args,
-                adj,
-                &controls,
-                &idle,
-            )?;
+                muts,
+                inputs,
+                regions,
+                args,
+                adjoint,
+                controls,
+            }
         } else if op == "oracle_call" {
             let inputs = bundles(&xs[2])?;
             let target = self.wires(&xs[3])?;
             let fault = self.wires(&xs[4])?;
-            let mem = crate::validate::list_operand(&xs[5])?
+            let mem_names = list(&xs[5])?;
+            let mem = mem_names
                 .iter()
                 .map(|n| self.wires(n))
                 .collect::<Result<Vec<_>, _>>()?;
             used.extend([xs[3].clone(), xs[4].clone()]);
-            used.extend(crate::validate::list_operand(&xs[5])?);
-            let budget = match self.read(&xs[1]).map_err(|_| err("missing token"))? {
+            used.extend(mem_names);
+            let budget = match self.read(&xs[1]).map_err(|_| err("missing oracle token"))? {
                 Value::Token(b) => b,
-                _ => return Err(err("oracle call needs token")),
+                _ => return Err(err("oracle call requires token")),
             };
             let args = self
-                .operands(&crate::validate::list_operand(&xs[6])?)
-                .map_err(|_| err("invalid region argument"))?;
-            let sig = crate::validate::oracle_sig(self.obj, name)?;
+                .operands(&list(&xs[6])?)
+                .map_err(|_| err("invalid oracle argument"))?;
+            Invocation::Oracle {
+                name,
+                inputs,
+                target,
+                fault,
+                mem,
+                args,
+                budget,
+                controls,
+            }
+        } else {
+            return Err(err(format!("invalid region call {op}")));
+        };
+        apply_invocation(self.obj, &mut self.quantum, &invocation)?;
+        record_quantum(&mut self.quantum_events, invocation.clone());
+        self.pending_region = Some(invocation);
+        for n in used {
+            let id = self
+                .id(&action::base_name(&n))
+                .map_err(|_| err("invalid region handle"))?;
+            if let Some(parent) = self.data.handles[&id].parent {
+                self.data.handles.get_mut(&id).unwrap().live = false;
+                self.data.handles.get_mut(&parent).unwrap().viewed = false;
+            }
+        }
+        Ok(())
+    }
+}
+fn list(text: &str) -> Result<Vec<String>, String> {
+    crate::validate::list_operand(text)
+}
+
+/// A resolved invocation boundary: inverse execution never resolves names in
+/// an activation which has since returned or reads changed classical inputs.
+#[derive(Clone, Debug, PartialEq)]
+enum Invocation {
+    Action {
+        name: String,
+        muts: Vec<Vec<usize>>,
+        inputs: Vec<Vec<usize>>,
+        regions: Vec<RegionWires>,
+        args: Vec<Value>,
+        adjoint: bool,
+        controls: Vec<usize>,
+    },
+    Oracle {
+        name: String,
+        inputs: Vec<Vec<usize>>,
+        target: Vec<usize>,
+        fault: Vec<usize>,
+        mem: Vec<Vec<usize>>,
+        args: Vec<Value>,
+        budget: value::Budget,
+        controls: Vec<usize>,
+    },
+}
+impl Invocation {
+    fn inverse(&self) -> Self {
+        let mut inverse = self.clone();
+        if let Self::Action { adjoint, .. } = &mut inverse {
+            *adjoint = !*adjoint;
+        }
+        inverse
+    }
+}
+fn record_quantum(events: &mut Vec<Invocation>, invocation: Invocation) {
+    // An exact symbolic identity witness for snapshot comparison, independent
+    // of roundoff in the Born-probability amplitude cache. No amplitudes are
+    // stored or restored by a run-history frame.
+    if events
+        .last()
+        .is_some_and(|last| *last == invocation.inverse())
+    {
+        events.pop();
+    } else {
+        events.push(invocation);
+    }
+}
+fn apply_invocation(
+    obj: &Object,
+    state: &mut QuantumState,
+    invocation: &Invocation,
+) -> Result<(), String> {
+    match invocation {
+        Invocation::Action {
+            name,
+            muts,
+            inputs,
+            regions,
+            args,
+            adjoint,
+            controls,
+        } => action::execute_action_inner(
+            obj, state, name, muts, inputs, regions, args, *adjoint, controls,
+        ),
+        Invocation::Oracle {
+            name,
+            inputs,
+            target,
+            fault,
+            mem,
+            args,
+            budget,
+            controls,
+        } => {
+            let sig = crate::validate::oracle_sig(obj, name)?;
             let mut next = BTreeMap::new();
-            for (key, amp) in &self.data.quantum.amps {
+            for (key, amp) in &state.amps {
                 let mut nk = key.clone();
                 if controls.iter().all(|w| key.bit(*w)) {
                     let values = inputs
@@ -893,30 +1008,18 @@ impl<'a> Machine<'a> {
                                 .collect()
                         })
                         .collect::<Vec<Vec<_>>>();
-                    let out = crate::oracle::run_oracle(
-                        self.obj, name, &values, &mut cells, &args, budget,
-                    )?;
-                    action::xor_into(&mut nk, &target, &out.payload);
-                    action::xor_into(&mut nk, &fault, &out.code);
+                    let out =
+                        crate::oracle::run_oracle(obj, name, &values, &mut cells, args, *budget)?;
+                    action::xor_into(&mut nk, target, &out.payload);
+                    action::xor_into(&mut nk, fault, &out.code);
                 }
                 let e = next.entry(nk).or_insert((0.0, 0.0));
                 e.0 += amp.0;
                 e.1 += amp.1;
             }
-            self.data.quantum.amps = next;
-        } else {
-            return Err(err(format!("invalid region call {op}")));
+            state.amps = next;
+            Ok(())
         }
-        for n in used {
-            let id = self
-                .id(&action::base_name(&n))
-                .map_err(|_| err("invalid region handle"))?;
-            if let Some(parent) = self.data.handles[&id].parent {
-                self.data.handles.get_mut(&id).unwrap().live = false;
-                self.data.handles.get_mut(&parent).unwrap().viewed = false;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -978,6 +1081,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         None => cliargs::default_budget(&obj, 1_000_000),
     };
     let mut data = Data::new(&obj)?;
+    let mut quantum = QuantumState::new();
     for raw in opts.all("mem") {
         let (n, h) = raw.split_once('=').ok_or("--mem requires global=hex")?;
         let g = obj
@@ -1030,12 +1134,12 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                 if bits.len() != *n || !bits.bytes().all(|b| b == b'0' || b == b'1') {
                     return Err("§10: E_ARG: qreg bits differ from signature".into());
                 }
-                let ws = data.quantum.alloc_wires(*n);
+                let ws = quantum.alloc_wires(*n);
                 let mut v = BigUint::zero();
                 for (i, b) in bits.bytes().enumerate() {
                     v.set_bit(i, b == b'1');
                 }
-                data.quantum.prepare(&ws, &v);
+                quantum.prepare(&ws, &v);
                 let id = data.new_handle(ws, None);
                 Value::Qreg(id)
             }
@@ -1072,6 +1176,9 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let entry_data = data.clone();
     let entry_env = env.clone();
     let mut m = Machine {
+        quantum,
+        quantum_events: vec![],
+        pending_region: None,
         obj: &obj,
         data,
         env,
@@ -1152,7 +1259,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             return Err("§10: E_NOT_REVERSIBLE: run contains measure".into());
         }
         for i in (0..m.history.len()).rev() {
-            m.undo(i, true);
+            m.undo(i, true)?;
         }
     }
     let diff = first_difference(
@@ -1163,6 +1270,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         &entry_stack,
         &m.stack,
         m.next_activation,
+        m.quantum_events.is_empty(),
     );
     out.extend(vec![
         (
@@ -1230,6 +1338,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     println!("{}", Json::obj(out).to_jcs());
     Ok(())
 }
+#[allow(clippy::too_many_arguments)]
 fn first_difference(
     a: &BTreeMap<Key, Vec<Value>>,
     b: &BTreeMap<Key, Vec<Value>>,
@@ -1238,6 +1347,7 @@ fn first_difference(
     entry_stack: &[Activation],
     stack: &[Activation],
     next_activation: u64,
+    quantum_identity: bool,
 ) -> Option<String> {
     let keys: BTreeSet<_> = a.keys().chain(b.keys()).collect();
     for k in keys {
@@ -1275,7 +1385,7 @@ fn first_difference(
     {
         return Some("device state differs".into());
     }
-    if da.handles != db.handles || da.quantum.amps != db.quantum.amps {
+    if da.handles != db.handles || !quantum_identity {
         return Some("quantum registers differ".into());
     }
     None

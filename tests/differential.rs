@@ -996,7 +996,35 @@ fn cc_oracle_xor_budgets_controls_and_arguments() {
         vec!["i8", "i8", "i4", "i1"],
         "ctl c oracle_call @inc8 tk (x) t f () ()\na = measure x\nb = measure t\nd = measure f\ne = measure c\nret a b d e",
     );
+    let text = add_cc(
+        &text,
+        "uninvoke",
+        "tk:token, x:qreg[8], t:qreg[8], f:qreg[4]",
+        vec!["token", "qreg[8]", "qreg[8]", "qreg[4]"],
+        "",
+        vec![],
+        "oracle_call @inc8 tk (x) t f () ()\nret",
+    );
     let p = temp_object("invoke", &text);
+    for budget in [0, 2, 3] {
+        assert_outcome(
+            "actual oracle involution reversal",
+            &s(&[
+                "run-program",
+                &p,
+                "uninvoke",
+                "--reverse",
+                "--arg",
+                &format!("token:{budget}"),
+                "--arg",
+                "qreg:11111111",
+                "--arg",
+                "qreg:10100101",
+                "--arg",
+                "qreg:0101",
+            ]),
+        );
+    }
     for budget in [0, 2, 3] {
         for x in ["00000000", "11111111"] {
             for control in ["0", "1"] {
@@ -1091,6 +1119,67 @@ fn classical_rows_and_boundary_faults() {
     for n in ["0", "1", "2", "1024", "1025"] {
         for command in ["run-cc", "reverse", "run-program"] {
             assert_outcome("memory bounds", &s(&[command, &p, "memory", "--args", n]));
+        }
+    }
+}
+
+#[test]
+fn history_reverses_actual_region_invocations() {
+    let text = std::fs::read_to_string(fixtures().join("registers.bisa")).unwrap();
+    let t = add_cc(
+        &text,
+        "unitary",
+        "q:qreg[2]",
+        vec!["qreg[2]"],
+        "",
+        vec![],
+        "action_call @bell (q) () () ()\nret",
+    );
+    let t = add_cc(
+        &t,
+        "cancel_unitary",
+        "q:qreg[2]",
+        vec!["qreg[2]"],
+        "r:i2",
+        vec!["i2"],
+        "call @unitary q\nx = const.i8 1\nuncall @unitary (q) ()\nr = measure q\nret r",
+    );
+    let p = temp_object("actual-adjoint", &t);
+    for bits in ["00", "01", "10", "11"] {
+        assert_outcome(
+            "actual adjoint whole-run",
+            &s(&[
+                "run-program",
+                &p,
+                "unitary",
+                "--arg",
+                &format!("qreg:{bits}"),
+                "--reverse",
+            ]),
+        );
+        assert_outcome(
+            "actual adjoint segment",
+            &s(&[
+                "run-program",
+                &p,
+                "cancel_unitary",
+                "--arg",
+                &format!("qreg:{bits}"),
+            ]),
+        );
+        for step in [0, 1, 2] {
+            assert_outcome(
+                "actual adjoint prefix",
+                &s(&[
+                    "reverse",
+                    &p,
+                    "unitary",
+                    "--arg",
+                    &format!("qreg:{bits}"),
+                    "--steps",
+                    &step.to_string(),
+                ]),
+            );
         }
     }
 }

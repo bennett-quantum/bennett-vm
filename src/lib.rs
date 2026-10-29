@@ -1,8 +1,36 @@
-//! bennett-vm: the device runtime (launch 0.3, Bennett-ISA-Spec.md section 10).
+//! bennett-vm: the device runtime for ISA 0.8 (Bennett-ISA-Spec.md).
+//!
+//! Coupled to other Bennett repositories only through the published
+//! spec. The reference interpreter is a CLI oracle in tests, never a
+//! code dependency.
+
+pub mod action;
+pub mod bigint;
+pub mod cc;
+pub mod identity;
+pub mod json;
+pub mod launch;
+pub mod object;
+pub mod oracle;
+pub mod sha256;
+pub mod validate;
+pub mod value;
 
 /// Crate version string.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// Parse, validate and (unless `hash_only`) verify stored hashes.
+/// This is the `bennett_load` front half used by every CLI command.
+pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Identities), String> {
+    let obj = object::parse(text)?;
+    validate::validate(&obj)?;
+    let ids = identity::compute(&obj)?;
+    if !hash_only {
+        identity::check_hashes(&obj, &ids)?;
+    }
+    Ok((obj, ids))
 }
 
 #[cfg(test)]

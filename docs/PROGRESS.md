@@ -1,24 +1,195 @@
-# Milestone 2 — implementation in progress (2026-10-29)
+# Milestone 2 verification — 2026-10-29
 
-Claimed bennett-vm-7bj. Read the accepted ISA 0.8 §10–11 and published
-headers in full. Contrary to the brief, both published headers are empty
-apart from guards/comments. VM-owned include/bennett_vm.h transcribes the
-normative §10 declarations and includes bennett_launch.h; no ISA repo edits.
+Implemented accepted **ISA 0.8 / launch 0.8**, as actually published in §10
+(the brief calls it launch 0.3). Sole repository implementer; std-only Rust;
+no source from the ISA repo's crates was read, copied or linked. Reference
+and conformance executables were used through their CLIs. No other repo was
+modified; no push or Dolt remote sync performed.
 
-Red: C11 test failed linking (no libbennett_vm). Green: static/shared library
-build and initial host/wait/reply/suspend/result/reversal test: 20 assertions.
-The original 17 Rust tests / 577 differential comparisons still pass.
-Stateful execution is cooperative at instruction boundaries. All calls on a
-program require caller synchronization. Actual Q inverses remain in history;
-classical before/after deltas preserve unrelated registers across runs.
+## Delivered ABI and runtime
 
-First full read-only conformance-binary run: A 21/0/0, B 31/4/0,
-C 38/301/0, D 0/7/5, E 0/1/14, F 22/11/2, G 9/1/13, H 0/1/9
-(pass/fail/unavailable). These are preliminary counts, not a milestone claim.
-Most failures are milestone-3 CLI surfaces. Found a §10 CC-entry diagnostic
-bug and staged-probe wording mismatches; correcting them with explicit tests.
-No reference disagreement is asserted. Published staged G scenarios cannot
-be promoted in the read-only harness; C tests exercise them independently.
+`cargo build --offline` produces `target/debug/libbennett_vm.a` and
+`libbennett_vm.so`, plus the CLI. All **41 normative §10 functions** are
+exported, with the §10 status/kind discriminants and C calling convention:
+
+- program: `load`, `unload`, `budget`;
+- registers: `qreg_new`, `qreg_prepare`, `qreg_free`;
+- arguments: `args_new`, `args_set_int`, `args_set_f64`, `args_set_qreg`,
+  `args_set_token`, `args_free`;
+- runs: `run`, `wait`, `reply`, `suspend`, `resume`, `reverse`, `run_close`;
+- results: `result_nvalues`, `result_get`, `result_nfaults`, `result_fault`,
+  `result_nmeasurements`, `result_measurement`, `result_tape_length`, `result_free`;
+- requests: `request_service`, `request_payload`, `request_free`;
+- tapes: `tape_open`, `tape_next`, `tape_free`;
+- staged estimates: `estimate_run`, `estimate_nresources`, `estimate_get`,
+  `estimate_certificate`, `estimate_free`;
+- staged coverage: `coverage_get`, `coverage_jcs`, `coverage_free`.
+
+Names above have the `bennett_` prefix. Estimate/coverage production remains
+an explicit diagnostic naming milestones **4–5**, as PLAN.md milestone 2
+requires; these are **exports, not implemented estimate/coverage semantics**.
+Status-returning staged producers set output objects NULL and return E_TARGET;
+non-status staged accessors print the unimplemented diagnostic and return
+zero/NULL; matching frees accept NULL. No fake resource/certificate/JCS object.
+
+Runs are cooperative, externally synchronized per program. `run` validates
+positional kinds/widths and copies arguments/entropy without executing;
+`wait` advances RUNNING until exactly one owned request/result is available.
+A valid hostcall pauses before mutation; reply copies the host bytes, resumes
+RUNNING, then the ordinary instruction frame records request/reply/overwrites.
+Invalid host memory produces fault 7 without a request. Terminal faults expose
+no values. Suspend/resume and all terminal-state checks follow §10.
+
+Persistent program memory, registers and modeled devices survive run close;
+closing releases the run's history. Locks retain touched register IDs, allocation
+entries, overlapping memory ranges, allocator state and device ordering until
+CLOSED. Disjoint registers can execute concurrently; all lock acquisition is
+checked before mutation. Reversal runs actual resolved Q inverses and LIFO
+classical deltas; independent runs' handles/state are preserved. Entropy position,
+effect tape, host requests and measurement records are local to each run.
+Tokens preserve identity even when two tokens carry identical budgets; foreign
+program tokens are rejected. B/heap/stack/depth use the existing independently
+tested oracle evaluator and §5.4 validation. Counter widths are derived from
+the supplied depth limit (§3.7), rather than imposing an undocumented fixed Dc.
+
+VM extensions (not additions to the published ABI): `run_step`,
+`run_snapshot`, `snapshot_jcs`, `snapshot_free`, `run_reverse_to`, plus
+`last_error` (six extensions; 47 total C functions). Snapshots are immutable
+owned diagnostic JCS: state, dynamic instances, frame flags, trace, memory
+digest, devices, tape and host requests. `reverse_to` reverses a retained
+prefix to a history length while SUSPENDED/COMPLETED/FAILED, then suspends;
+it rejects measurement reversal, out-of-range indices and cuts inside an
+already cancelled segment. Normal §10 `reverse` still requires COMPLETED.
+
+**Published-header discrepancy:** both ISA include headers currently contain
+only guards/comments (confirmed by conformance/PROGRESS.md), despite the brief's
+ABI assumption. VM-owned `include/bennett_vm.h` includes the published
+`bennett_launch.h`, and transcribes declarations from the normative §10 C block.
+The C test also includes the published `bennett_sched.h`. No declarations were
+invented in or written to the ISA repository. Consumers need both include paths.
+
+Two §10 details lack specified encodings/statuses: host prepare/measurement
+bits use one byte 0/1 per wire, in wire order; tape exhaustion returns
+E_INVALID_STATE with an explicit end-of-tape diagnostic and leaves outputs
+untouched (there is no published EOF status). Calls on a program require host
+synchronization; pointer-returning accessors without status require valid
+objects/out-length pointers and fail loudly on misuse. Recoverable argument
+vector allocation failure maps to E_NOMEM; Rust allocator exhaustion elsewhere
+can still abort, as with the existing interpreter. Exact arbitrary-interference
+cleanliness and the binary64 Born cache remain milestone 3, unchanged in scope.
+
+## Tests and red-green evidence
+
+Final headless offline gate: **20 Rust tests passed**, 0 failed/ignored,
+including the C11 integration group. `tests/launch_abi.c` links the actual
+static library with `cc -std=c11 -Wall -Wextra -Werror` and passes **160 status /
+count checks**, plus hand-derived byte, pointer, measurement, tape, snapshot and
+ownership assertions. Every normative entry point and every VM extension is
+called by that C program. Comments cite the deciding §10 sentences; budgets
+also cite §5.4, effects §7.3 and history §7.4. Status enums are statically checked.
+
+Red: initial C link failed because no library existed. Green: exported library
+and host/wait/reply/suspend/result/reversal assertions. Expanded C cases cover
+all four kinds and non-byte integer width, duplicate-budget token identities,
+copied input buffers, five devices/effects in tape order, entropy atomicity,
+failed-prefix reversal/replay, nested CC→R→Q reversal plus inner uncall,
+measurement consumption/refusal, surviving register IDs and interleaved runs.
+A later C run exposed the test's own allocation-lifetime mistake: a FAILED
+allocation persists after close; moving the independent tree scenario before
+that exhausted heap fixed the test without resetting program state.
+
+The conformance run exposed silent acceptance of unknown schedule/certificate
+metadata. A dedicated test reproduced it RED; top-level §9.1 envelope validation
+made it GREEN. Also corrected the non-CC launch diagnostic (now §10 E_ARG before
+any tier-specific parser) and added explicit milestone diagnostics for action
+reverse options. The target/schedule probes now retain both the VM milestone
+and published harness's staged-deliverable wording.
+
+`cargo fmt --check`, strict `cargo clippy --offline --all-targets -- -D warnings`
+and `git diff --check` pass. `tests/launch_c.rs` builds the library in a separate
+repository-local target directory to avoid Cargo's recursive build lock.
+
+**Original differential harness: 577 / 577 agree, 0 diverge**, unchanged counts
+and comparison limits listed under milestone 1 below (558 JSON, 19 diagnostics).
+No reference-interpreter disagreement is asserted. No expected output was
+changed to match this implementation.
+
+## Reproduction and fingerprints
+
+Final commands (with DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS and
+BROWSER unset; TMPDIR `/home/tobias/Projects/bennett-workspace/bennett-vm/.tmp`):
+
+```sh
+BENNETT_HARNESS_COUNTS=1 cargo test --offline --manifest-path /home/tobias/Projects/bennett-workspace/bennett-vm/Cargo.toml -- --nocapture
+cargo fmt --check --manifest-path /home/tobias/Projects/bennett-workspace/bennett-vm/Cargo.toml
+cargo clippy --offline --manifest-path /home/tobias/Projects/bennett-workspace/bennett-vm/Cargo.toml --all-targets -- -D warnings
+/home/tobias/Projects/bennett-workspace/bennett-isa-spec/conformance/target/debug/bennett-isa-conformance --bin /home/tobias/Projects/bennett-workspace/bennett-vm/target/debug/bennett-vm
+```
+
+The last command is also invoked unchanged by the report integration test.
+Gate output: `.tmp/final-tests.log`; all 577 HARNESS records were counted.
+Observed ISA checkout HEAD: `8e11fe7529d1b52db736a170ac0d99ee91824bc4`.
+Observed executable SHA-256 (not a claim about which source built an existing
+external executable):
+
+- VM: `624d4ed8306c0ed166b6b445a387aec831d76c3e474ba64d15d3da4834ac90c8`;
+- conformance: `1bd5aab7f20690c7959edfd217d5380cfd8ea4a4f7f7bc17bea4b86561e2bb92`;
+- reference: `4ade7d6fb8dda864b829fe33f91b0bc53c9f8fd6089ac8cfe9ecc481a9eebaff`.
+
+Milestone bead `bennett-vm-7bj` is CLOSED. Validation follow-up `bennett-vm-p9h`
+is OPEN. No remote synchronization or push.
+
+## Published conformance: full 490-case verdict stays RED
+
+`tests/conformance.rs` invokes the existing read-only conformance harness with
+`--bin <VM binary>` and no suite/case filtering. It saves the complete raw
+verdict at `.tmp/conformance.log`. Standalone harness exits **1**, not success.
+The Rust report test verifies the full corpus and milestone-2 launch/probe
+obligations; its success does **not** turn the full conformance verdict green.
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A — classical/history | 21 | 0 | 0 | 21 |
+| B — oracle/reversal | 31 | 4 | 0 | 35 |
+| C — permutations/agreement | 38 | 301 | 0 | 339 |
+| D — unitary/channel | 0 | 7 | 5 | 12 |
+| E — targets | 0 | 0 | 15 | 15 |
+| F — validation/identity | 24 | 9 | 2 | 35 |
+| G — launch | 10 | 0 | 13 | 23 |
+| H — scheduling | 0 | 0 | 10 | 10 |
+| **All** | **124** | **321** | **45** | **490** |
+
+**313 failures are explicit milestone-3 refusals:** 304 run-action, four
+step-check, three oracle reverse, one action reverse and one perm_action reverse.
+These correspond to deferred literal §3.6/§3.7 stepping and exact-amplitude
+output, not a semantic claim about an executed Q calculation. All available
+G cases pass; D's seven runnable cases require those unimplemented standalone
+exact-action commands; E's launch target refusal probe passes and is reported
+UNAVAILABLE by the harness's own rules. Nothing is silently executed without a
+schedule or lowered target. C tests separately exercise the stateful launch
+scenarios that the unchanged harness labels UNAVAILABLE; the harness has no
+mechanism to invoke/promote this C library. Estimate/coverage remain staged.
+
+**Eight F diagnostic disagreements remain red**, tracked by **bennett-vm-p9h**.
+Each malformed object is rejected, but as §9.2 stored-hash mismatch before the
+required validation diagnostic. These were not included in the 577-comparison
+milestone-1 corpus and are not alleged reference bugs:
+
+- `F-borrow-neg-vwv`, `F-borrow-neg-control-in-b`, `F-borrow-neg-target-outside-b`,
+  `F-borrow-neg-swap`: §5.6 requires the frame to factor as `P_F = P′ ⊗ I_B`,
+  proved by T3 or structurally as `V; W; V⁻¹; W`; V targets B with controls
+  outside B, and “no `swap` appears in the frame.”
+- `F-disjoint-pred`: §3.3, “every wire of the effective control context is
+  distinct from every target”.
+- `F-width-mismatch`: §3.3, “`binop`/`icmp` operands equal width”, and these rules
+  “apply verbatim to their `lift.*` counterparts”.
+- `F-in-wire-target`: §5.1, “`in` wires in actions appear only as controls, as
+  targets of diagonal gates, as `qcopy`/`qxor` sources, or as `in` arguments of calls.”
+- `F-lex-double-space`: §16.1, “tokens separated by exactly one space”.
+
+Next: milestone **3**, `bennett-vm-gkd`, plus validation bug `bennett-vm-p9h`.
+Targets/lowering/schedules stay milestone 4; estimate/certificate/coverage work
+stays milestones 4–5 per PLAN. North-Star scope remains intact.
 
 # Milestone 1 verification
 

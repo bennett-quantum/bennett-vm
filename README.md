@@ -1,9 +1,9 @@
 # bennett-vm
 
 Independent, std-only Rust implementation of the accepted Bennett ISA 0.8.
-Milestone 1 provides object loading/validation and identities, the bounded
+Milestones 1–2 provide object loading/validation and identities, the bounded
 oracle interpreter, CC/R execution with retained history and tapes, region
-calls, and one-shot launch. It consumes published specs, never the reference
+calls, one-shot launch, and a stateful C library. It consumes published specs, never the reference
 interpreter's code.
 
 Implemented commands use the reference interpreter's names and JSON shapes:
@@ -32,6 +32,20 @@ Milestone 1's gate is 17 passing tests and 577 agreeing comparisons over all
 
 [Architecture and milestones](docs/PLAN.md) · [Verified evidence and divergences](docs/PROGRESS.md)
 
-Next: the stateful launch C ABI and reversible runtime API (milestone 2).
+The stateful library exports all 41 §10 functions; estimates and coverage
+remain explicit milestone-4–5 stubs. Use [include/bennett_vm.h](include/bennett_vm.h)
+with the published ISA include directory. `cargo build --offline` emits static
+and shared libraries under `target/debug/`. Calls on one program require caller
+synchronization; execution advances at `wait` or `run_step`. VM extensions add
+immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
+[tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
+
+The current gate has 20 passing Rust tests, including 160 C ABI checks and the
+577-comparison differential harness. It also runs the unchanged published
+490-case conformance harness: **124 pass / 321 fail / 45 unavailable**; full
+conformance stays red. The reporting test checks served launch cases and loud
+staged refusals without filtering the corpus.
+
+Next: milestone 3, coherent execution, and the outstanding validation negatives.
 Exact-amplitude coherent execution, targets/lowering/schedules and JIT follow
 in milestones 3–5. No future North-Star capability is removed from scope.

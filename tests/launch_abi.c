@@ -4,6 +4,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Deciding §10 clauses, grouped by the API entry points exercised below:
+ * load/unload/budget/qreg: "Tokens are scoped to the program and destroyed at
+ * unload"; "bennett_unload with a run not CLOSED: E_INVALID_STATE"; budgets
+ * additionally follow §5.4, "heap_limit <= layout.heap_limit_max" and
+ * "stack_limit <= 2^S_cells" (counter widths are derived from the limits).
+ * args_new/set_*/
+/* args_free/run: "argument i ... binds to parameter i" and "Arguments and the
+ * entropy tape are copied at bennett_run". (The four kinds are tested below.)
+ * wait/reply/suspend/resume: "bennett_wait blocks until the run leaves RUNNING
+ * and returns OK with exactly one outcome"; "bennett_reply answers it and the
+ * run is RUNNING again"; "Waiting on a SUSPENDED, REVERSED or CLOSED run is
+ * E_INVALID_STATE"; the §10 state graph defines suspend/resume edges.
+ * reverse/run_close: "bennett_reverse reverses post-order"; "Reverse
+ * eligibility: COMPLETED; no measure"; "bennett_run_close releases the record;
+ * register ids created by the run remain valid unless measured or freed".
+ * result accessors: "bennett_result_get writes value i and sets *kind and
+ * *width"; "Fault records are read by ... nfaults / ... fault ... in order of
+ * occurrence"; "a FAILED run has at least one and exposes no values".
+ * request accessors: "those bytes are copied into the request".
+ * tape_open/next/free: "bennett_tape_next yields each effect in tape order";
+ * "each an unsigned 64-bit little-endian field ... *alen = 8 x arity".
+ * all owning objects/accessor pointers/free functions: "A function that returns
+ * an object transfers ownership to the caller, released with the matching
+ * *_free"; "Accessor-returned pointers are valid until the owning object is
+ * freed". Estimate/coverage semantics are staged explicitly by PLAN milestone 2;
+ * their exports are checked below for loud refusal and matching null-safe frees.
+ */
+_Static_assert(BENNETT_OK==0 && BENNETT_E_VERSION==1 && BENNETT_E_PTR_WIDTH==2 &&
+ BENNETT_E_DEVICE_MISSING==3 && BENNETT_E_GATE_UNSUPPORTED==4 && BENNETT_E_TARGET==5 &&
+ BENNETT_E_BUDGET==6 && BENNETT_E_QREG_NOT_CLEAN==7 && BENNETT_E_INVALID_STATE==8 &&
+ BENNETT_E_NOT_REVERSIBLE==9 && BENNETT_E_SCHEDULE_INFEASIBLE==10 && BENNETT_E_ARG==11 &&
+ BENNETT_E_NOMEM==12, "§10 status discriminants");
 static unsigned checks;
 #define EQ(a,b) do { unsigned actual=(a), expected=(b); ++checks; if(actual!=expected){fprintf(stderr,"line %d: %s got %u expected %u: %s\n",__LINE__,#a,actual,expected,bennett_last_error());abort();}}while(0)
 int main(int argc, char** argv) {

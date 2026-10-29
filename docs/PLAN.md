@@ -38,7 +38,7 @@ frames, never re-execution.
 
 ## Milestones
 
-1. **Loader + CC tier + differential harness (this milestone).**
+1. **Loader + CC tier + differential harness (completed at 188ab05).**
    `docs/PLAN.md`; object loader/validator and identities with
    `check` byte-identical to `bennett-isa-ref check` on the §16.3
    examples and every reference fixture; the CC/R executor above
@@ -51,7 +51,7 @@ frames, never re-execution.
    Explicitly not yet: literal §3.6 machine (`step-check`,
    oracle-form `reverse`), standalone `run-action` with exact
    amplitudes, §8 targets, §11 schedules, §12 certificates, JIT.
-2. **Reversible tier + full launch ABI.** The complete §10 C API as a
+2. **Reversible tier + full launch ABI (implemented; evidence in PROGRESS.md).** The complete §10 C API as a
    library (runs, `SUSPENDED`/`HOST_REQUEST` states, wait/reply,
    reverse eligibility, tape iterators, estimates/coverage stubs
    that fail loud until milestones 4–5), single-stepping and

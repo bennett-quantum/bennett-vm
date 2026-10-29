@@ -928,7 +928,15 @@ pub unsafe extern "C" fn bennett_run_snapshot(
             bennett_snapshot_t {
                 jcs: run
                     .runtime
-                    .snapshot(&format!("{:?}", run.state))
+                    .snapshot(match run.state {
+                        State::Running => "RUNNING",
+                        State::Suspended => "SUSPENDED",
+                        State::HostRequest => "HOST_REQUEST",
+                        State::Completed => "COMPLETED",
+                        State::Failed => "FAILED",
+                        State::Reversed => "REVERSED",
+                        State::Closed => "CLOSED",
+                    })
                     .to_jcs()
                     .into_bytes(),
             },

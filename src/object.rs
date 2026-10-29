@@ -423,6 +423,20 @@ pub fn parse(text: &str) -> Result<Object, String> {
                 format!("trailing whitespace on line {}", i + 1),
             ));
         }
+        if !line.starts_with('{') {
+            let mut quoted = false;
+            let mut escape = false;
+            let mut space = false;
+            for c in line.replace("{  }", "{ }").chars() {
+                if escape { escape = false; continue; }
+                if quoted && c == '\\' { escape = true; continue; }
+                if c == '"' { quoted = !quoted; }
+                if !quoted && c == ' ' && space {
+                    return Err(err("16.1", format!("tokens need exactly one space on line {}", i+1)));
+                }
+                space = !quoted && c == ' ';
+            }
+        }
         if line.contains('\t') {
             return Err(err("16.1", format!("tab character on line {}", i + 1)));
         }

@@ -5,6 +5,7 @@
 //! code dependency.
 
 pub mod action;
+pub mod exact;
 pub mod bigint;
 pub mod cc;
 pub mod cliargs;
@@ -15,6 +16,7 @@ pub mod object;
 pub mod oracle;
 pub mod sha256;
 mod typing;
+mod qvalidate;
 pub mod validate;
 pub mod value;
 

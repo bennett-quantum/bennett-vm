@@ -1,3 +1,10 @@
+# Milestone 3 in progress — 2026-10-29
+
+Validation bead p9h: eight rule-citing regressions observed red (§9.2 instead
+of the deciding rule), then green. Lexical checking preserves §16.2 empty
+`regs {  }` grammar. All 577 existing differential comparisons remain green.
+Predicated machine and exact action simulation are in progress; no completion claim.
+
 # Milestone 2 verification — 2026-10-29
 
 Implemented accepted **ISA 0.8 / launch 0.8**, as actually published in §10

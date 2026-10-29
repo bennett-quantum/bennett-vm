@@ -29,6 +29,7 @@ pub fn validate(obj: &Object) -> Result<(), String> {
     for f in &obj.functions {
         validate_function(obj, f)?;
         crate::typing::classical(obj, f)?;
+        crate::qvalidate::validate(obj, f)?;
     }
     validate_action_acyclic(obj)?;
     Ok(())

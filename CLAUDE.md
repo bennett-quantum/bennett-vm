@@ -49,3 +49,8 @@ until bennett-isa-spec is published.
    SQLite is the core). A deferral may postpone mechanics only. If a contract truly lacks
    something, raise it as a blocker naming the exact change; never shrink scope to fit.
    See bennett/docs/plan/2026-10-29-path-to-north-star.md.
+11. HEADLESS, NO /tmp ARTEFACTS. Never run LLVM -view-* / view-cfg / view-dom / view-callgraph
+   passes or viewCFG-style helpers outside an interactive human session (use the dot-* variants).
+   Batch and agent commands run with DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS and BROWSER
+   unset and TMPDIR set to a project-local or job directory (2026-10-28: ~80,000 .dot files reached
+   the maintainer's editor via xdg-open).

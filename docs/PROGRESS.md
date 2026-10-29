@@ -1,3 +1,15 @@
+# Milestone 4 in progress — 2026-10-29
+
+Target evaluator: five new hand-derived §8 test groups pass after red. Exact
+arbitrary precision rational arithmetic, closed target schema, canonical bytes
+and hash, ordered gate matching, nonnested scheme expansion and event-list
+resource accounting. No reference target evaluator exists; tests cite the spec.
+
+Blockers: bennett-vm-47t (ISA does not publish the ref expansion document with
+ordinals/hash required by §11); bennett-vm-clh (E epsilon-zero fixture has no eps
+reference; hash fixture has a trailing newline). No foreign repository changed.
+Milestone v23 remains in progress; this is not a completion/conformance claim.
+
 # Milestone 3 verification — 2026-10-29
 
 Accepted ISA/object/launch **0.8**, std-only, sole implementer. No reference

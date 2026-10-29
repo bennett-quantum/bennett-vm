@@ -55,6 +55,7 @@ pub struct DerivedWidths {
     pub stack: usize,
     pub depth: usize,
     pub cell: usize,
+    pub slots: Vec<usize>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Frame {
@@ -200,6 +201,45 @@ impl<'a> Machine<'a> {
             .max(stack)
             .max(u(locations.len().saturating_sub(1)).bits())
             .max(locations.iter().map(|(_, _, w)| *w).max().unwrap_or(0));
+        let mut slot_widths = Vec::<usize>::new();
+        for (fname, i) in &rows {
+            let ws = match i.op.as_str() {
+                "lift.alloc" => vec![obj.ptr_width, 2 * obj.ptr_width + 2, heap, atop],
+                "lift.call" => {
+                    let ff = obj
+                        .function(i.operands[0].trim_start_matches('@'))
+                        .ok_or("§3.7: unresolved lproc")?;
+                    let mut ws = ff.lists[0]
+                        .iter()
+                        .map(|p| p.ty.width().unwrap())
+                        .collect::<Vec<_>>();
+                    ws.extend([stack, stack, depth]);
+                    ws
+                }
+                "lift.ret" => vec![cell, stack, depth],
+                op if op.starts_with("lift.store.i") => vec![
+                    op.rsplit('i')
+                        .next()
+                        .unwrap()
+                        .parse::<usize>()
+                        .map_err(|_| "§3.3: invalid store width")?,
+                ],
+                _ => i
+                    .lhs
+                    .iter()
+                    .map(|n| {
+                        widths
+                            .get(&(fname.clone(), n.clone()))
+                            .copied()
+                            .ok_or("§3.3: unknown destination")
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            slot_widths.resize(slot_widths.len().max(ws.len()), 0);
+            for (j, w) in ws.into_iter().enumerate() {
+                slot_widths[j] = slot_widths[j].max(w);
+            }
+        }
         Ok(Self {
             obj,
             name: name.into(),
@@ -218,6 +258,7 @@ impl<'a> Machine<'a> {
                 stack,
                 depth,
                 cell,
+                slots: slot_widths,
             },
             state,
             frames: vec![],
@@ -449,14 +490,12 @@ impl<'a> Machine<'a> {
     fn exchange_loc_stack(&mut self, f: &str, base: usize) {
         for (j, (n, w)) in self.function_locs(f).into_iter().enumerate() {
             let k = Self::loc(f, &n);
-            let mut v = self.state.get(&k);
+            let v = self.state.get(&k);
             let sk = Key::Stack(base + 3 + j);
             let cell = self.state.get(&sk);
             self.state.set(k, cell.mask(w));
             let upper = cell.shr(w).shl(w);
             self.state.set(sk, upper.add(&v.mask(w)));
-            v = BigUint::zero();
-            let _ = v;
         }
     }
     fn call(
@@ -489,8 +528,8 @@ impl<'a> Machine<'a> {
                 self.counter(2).add(&u(size)),
                 self.counter(4).add(&u(1)),
             ];
-            for j in 0..3 {
-                frame.slots[m + j] = frame.slots[m + j].bitxor(&vals[j]);
+            for (j, v) in vals.iter().enumerate() {
+                frame.slots[m + j] = frame.slots[m + j].bitxor(v);
             }
         }
         let base = self.count(2);
@@ -643,7 +682,7 @@ impl<'a> Machine<'a> {
         if oracle {
             let tk = self.args.get(&x[1]).ok_or("§5.4: unknown token")?;
             let budget = match tk {
-                Value::Token(b) | Value::TokenId(_, b) => b.clone(),
+                Value::Token(b) | Value::TokenId(_, b) => *b,
                 _ => return Err("§5.4: expected token".into()),
             };
             let o =
@@ -710,22 +749,22 @@ impl<'a> Machine<'a> {
         Ok(())
     }
     fn exchange_assignment(&mut self, i: &Instr, k: Key, v: &mut BigUint) -> Result<(), String> {
-        if let Key::Mem(base) = &k {
-            if i.op.starts_with("lift.store.i") {
-                let bits: usize =
-                    i.op.rsplit('i')
-                        .next()
-                        .unwrap()
-                        .parse()
-                        .map_err(|_| "§3.3: invalid store width")?;
-                let old = self.load(base, bits / 8);
-                for j in 0..bits / 8 {
-                    self.state
-                        .set(Key::Mem(base.add(&u(j))), v.shr(j * 8).mask(8));
-                }
-                *v = old;
-                return Ok(());
+        if let Key::Mem(base) = &k
+            && i.op.starts_with("lift.store.i")
+        {
+            let bits: usize =
+                i.op.rsplit('i')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .map_err(|_| "§3.3: invalid store width")?;
+            let old = self.load(base, bits / 8);
+            for j in 0..bits / 8 {
+                self.state
+                    .set(Key::Mem(base.add(&u(j))), v.shr(j * 8).mask(8));
             }
+            *v = old;
+            return Ok(());
         }
         self.state.exchange(k, v);
         Ok(())
@@ -773,6 +812,14 @@ impl<'a> Machine<'a> {
         self.state.pc_prime ^= successor;
         std::mem::swap(&mut self.state.pc, &mut self.state.pc_prime);
         std::mem::swap(&mut self.state.pc_prime, &mut frame.old_pc);
+        frame
+            .slots
+            .resize(self.widths_derived.slots.len(), BigUint::zero());
+        for (value, width) in frame.slots.iter().zip(&self.widths_derived.slots) {
+            if value.bits() > *width {
+                return Err("§3.6: frame slot exceeded derived width".into());
+            }
+        }
         self.frames.push(frame);
         Ok(())
     }
@@ -784,6 +831,7 @@ impl<'a> Machine<'a> {
         if k == self.rows.len() {
             self.state.pc_prime ^= k;
         } else {
+            self.steps -= 1;
             let (f, i) = self.rows[k].clone();
             let successor = self.state.pc_prime;
             // Successor is uncomputed before row effects; flag/succ are history.

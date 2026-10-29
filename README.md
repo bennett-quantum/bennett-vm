@@ -1,13 +1,14 @@
 # bennett-vm
 
 Independent, std-only Rust implementation of the accepted Bennett ISA 0.8.
-Milestones 1–2 provide object loading/validation and identities, the bounded
+Milestones 1–3 provide object loading/validation and identities, the bounded
 oracle interpreter, CC/R execution with retained history and tapes, region
 calls, one-shot launch, and a stateful C library. It consumes published specs, never the reference
 interpreter's code.
 
 Implemented commands use the reference interpreter's names and JSON shapes:
-`check`, `hash`, `run-oracle`, `run-cc`, CC/R `reverse`, and `run-program`.
+`check`, `hash`, `run-oracle`, `step-check`, `run-action`, `run-cc`,
+`reverse` (all tiers), and `run-program`.
 Run `bennett-vm help` for options. Errors go to stderr and exit 1; a program
 fault is a JSON `FAILED` run with no results. Unsupported later milestones
 fail explicitly with their plan item. Memory-digest serialization is local;
@@ -40,12 +41,12 @@ synchronization; execution advances at `wait` or `run_step`. VM extensions add
 immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
 [tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
 
-The current gate has 20 passing Rust tests, including 160 C ABI checks and the
-577-comparison differential harness. It also runs the unchanged published
-490-case conformance harness: **124 pass / 321 fail / 45 unavailable**; full
-conformance stays red. The reporting test checks served launch cases and loud
-staged refusals without filtering the corpus.
+The current gate has **34 passing Rust tests**, including 160 C ABI checks,
+**1,054 agreeing CLI comparisons** and 21,888 complete one-row inverse checks.
+The unchanged published conformance harness reports **445 pass / 0 fail /
+45 unavailable** (exit 2); suite C is **339/339**. Exact support and cleanliness
+use symbolic amplitudes; display amplitudes are compared phase-sensitively at
+absolute tolerance 2e-12. No global phase is discarded.
 
-Next: milestone 3, coherent execution, and the outstanding validation negatives.
-Exact-amplitude coherent execution, targets/lowering/schedules and JIT follow
-in milestones 3–5. No future North-Star capability is removed from scope.
+Next: milestone 4, devices/targets/lowering/schedules, then milestone 5 JIT.
+No future North-Star capability is removed from scope.

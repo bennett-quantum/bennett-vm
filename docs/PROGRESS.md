@@ -1,9 +1,178 @@
-# Milestone 3 in progress — 2026-10-29
+# Milestone 3 verification — 2026-10-29
 
-Validation bead p9h: eight rule-citing regressions observed red (§9.2 instead
-of the deciding rule), then green. Lexical checking preserves §16.2 empty
-`regs {  }` grammar. All 577 existing differential comparisons remain green.
-Predicated machine and exact action simulation are in progress; no completion claim.
+Accepted ISA/object/launch **0.8**, std-only, sole implementer. No reference
+interpreter source copied, linked or read; its executable is a CLI oracle.
+No other repository edited, no push, no Dolt remote sync.
+
+## Delivered and verified
+
+- `step`: independent literal §3.6 basis machine, canonical index space,
+  pc/pc-prime exchanges, fault/flag/successor uncomputation, derived counter,
+  cell and fixed frame-slot widths; sparse cells, allocation entries and
+  monotonic activation records. Assignments retain displaced values, not
+  snapshots. §3.7 call capture and return delivery have explicit inverse
+  sequences. Nested oracle XORs are involutions; permutation calls reverse
+  through the callee's actual adjoint.
+- `step-check`: exhaustive inputs plus every unfixed interface cell, or seeded
+  xoshiro256** samples; sequential/literal F_B comparison and complete B-step
+  reversal. Exhaustive width is a user guard, not a fixed ISA restriction.
+  Oracle `reverse` implements every prefix k <= B, including B=0 and HALT padding.
+- `exact`: finite symbolic sums of dyadic coefficients times sqrt(2), i and
+  exp(i * dyadic angle). Binary64 input amplitudes and angles enter as their
+  exact dyadic values. Gates, controlled gates and branch permutations retain
+  phase. Support, cleanliness and action reversal equality use exact algebra;
+  the binary64 cache serves display and Born probabilities only. No epsilon
+  pruning, global-phase alignment or saved-wavefunction reversal.
+- Standalone `run-action`, action `reverse`, basis/mut/in/memory/state inputs,
+  explicit adjoints, classical arguments, structured controls/loops and local
+  images share the device executor. CLI memory uses one little-endian value
+  per cell, including sub-byte-width cells. Oracle calls enumerate basis
+  branches and preserve the amplitudes and arbitrary target/fault entries.
+- Borrow-frame checks precede hashes: translation lemma or an independent
+  exhaustive full-domain permutation proof. Frames are checked before
+  non-permutation composition; list controls and active predicates participate.
+  The library takes an explicit designated idle pool, including dirty and
+  externally entangled wires. Standalone CLI provisions its documented clean
+  pool and checks it on return. CC/launch 0.8 has no designation operand;
+  those calls still require a caller-designated set rather than treating
+  arbitrary live handles as idle (§9.4).
+
+## Gates and exact counts
+
+`cargo test --offline`: **34 passed, 0 failed, 0 ignored**: 6 unit tests,
+10 coherent integration tests, 14 differential groups, 2 conformance tests,
+1 linked C11 test and 1 eight-case validation regression. The C consumer passes
+**160 checks**, including all 41 normative exports and six VM extensions.
+`cargo fmt --check`, strict all-target Clippy and `git diff --check` pass.
+
+**1,054 differential comparisons: 1,054 agree / 0 diverge**, including
+1,035 successful JSON outputs and 19 expected diagnostics. All 12 published
+fixtures, all 57 oracle definitions, all 13 actions and both independently
+extracted §16.3 objects participate. Existing 577 comparisons remain included.
+
+| Command | JSON | Diagnostic |
+|---|---:|---:|
+| check | 64 | 0 |
+| hash | 12 | 4 |
+| run-oracle | 218 | 0 |
+| run-cc | 115 | 1 |
+| reverse (all tiers) | 404 | 3 |
+| run-action | 91 | 0 |
+| step-check | 59 | 0 |
+| run-program | 72 | 11 |
+
+Coherent comparisons require identical fields and exact support; real and
+imaginary display components have **absolute tolerance 2e-12**, phase-sensitively
+(with no phase quotient). Other fields are exact. The inherited opaque memory
+fingerprint exclusion is unchanged and described in the historical report below.
+Sampled CLI checks are evidence on their recorded domain, not a universal proof.
+`every_reached_row_inverse_restores_complete_pre_step_tuple` separately checks
+**21,888** one-row forward/inverse pairs at zero, one and all-one fixture inputs
+and memory: every sparse location, memory byte, allocation entry, counter,
+stack cell, pc, pc-prime and retained frame must equal its pre-step value.
+The entangled-borrow witness compares the complete exact state with an external
+reference qubit, not only a marginal or a clean-ancilla predicate.
+
+Unchanged published conformance, our binary:
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A | 21 | 0 | 0 | 21 |
+| B | 35 | 0 | 0 | 35 |
+| C | 339 | 0 | 0 | 339 |
+| D | 7 | 0 | 5 | 12 |
+| E | 0 | 0 | 15 | 15 |
+| F | 33 | 0 | 2 | 35 |
+| G | 10 | 0 | 13 | 23 |
+| H | 0 | 0 | 10 | 10 |
+| **all** | **445** | **0** | **45** | **490** |
+
+The standalone harness exits **2**, not 0: 45 staged outcomes remain explicitly
+unavailable. Every available case, including **339/339 C**, is now a hard test
+gate. No conformance files or expected outcomes were edited.
+
+## Red-green findings and deciding sentences
+
+The eight p9h negatives first produced §9.2 hash errors. Rule-citing tests
+observed red, then green before identity checking:
+
+| Case | Deciding ISA sentence |
+|---|---|
+| F-borrow-neg-vwv | §5.6: “the frame is `V; W; V⁻¹; W`” (or a full-domain T3 proof) |
+| F-borrow-neg-control-in-b | §5.6(i): “controls are all in a set X with X ∩ B = ∅” |
+| F-borrow-neg-target-outside-b | §5.6(i): “target is in B” |
+| F-borrow-neg-swap | §5.6(iv): “no `swap` appears in the frame” (translation lemma); exhaustive fallback independently fails factorisation |
+| F-disjoint-pred | §3.3: “every wire of the effective control context is distinct from every target” |
+| F-width-mismatch | §3.3: “`binop`/`icmp` operands equal width” applied verbatim to lifted counterparts |
+| F-in-wire-target | §5.1: “`in` wires in actions appear only as controls, as targets of diagonal gates, as `qcopy`/`qxor` sources, or as `in` arguments of calls” |
+| F-lex-double-space | §16.1: “tokens separated by exactly one space” |
+
+Additional regressions observed red then corrected:
+
+- H² left 1.0000000000000002 numerically; §4.4 defines the exact H matrix.
+  Exact algebra now gives I and exact clean support; rotation/adjoint
+  cancellation is tested for all three axes. A separate red/green regression
+  covers a symbolic sum of finite angles exceeding binary64: §3.1 permits
+  finite f64 angles, so display evaluates bounded phase factors rather than
+  manufacturing a NaN. This approximation is display evidence, not a rigorous
+  interval certificate.
+- Fixed frame layout: §3.6 “Frame layout (fixed per oracle)”; rows originally
+  retained different slot counts. Every row, HALT included, now has the same
+  derived clean-padded slot layout; every retained value is width-checked.
+- Borrow identity outside lemma shape: §5.6 permits “a T3 claim over the
+  frame's full domain”; two cancelling CXs now pass exhaustive proof.
+- Hidden `mcx` list controls: §5.6 “touched (as control or target) only inside
+  borrow frames”; a single borrowed-controlled flip now rejects.
+- Separate frames: §5.6 “maximal contiguous permutation-only subcircuits”.
+  Two valid frames around H pass; an invalid frame followed by its later
+  cancellation across H cannot pass by checking the aggregate operation.
+
+The initial lexical implementation rejected `regs {  }`; §16.2 has two
+mandatory spaces surrounding the optional empty declaration list. This exact
+form remains legal. The action CLI initially packed sub-byte memory cells;
+the reference README's per-cell encoding and the conformance derivation decide
+the CLI convention. Current reference `step-check` adds `target_fault` explanatory
+text beyond the older README schema; the VM matches that observable CLI field.
+No remaining reference-semantic disagreement on the compared corpus.
+
+## Header audit
+
+Published real headers landed at ISA commit **3a10f84**. All 41 normative
+function signatures, opaque types, enum values and calling conventions match.
+`include/bennett_vm.h` now **consumes** `bennett_launch.h`, removing duplicated
+types/enums that would conflict. Bead `bennett-vm-28w` records this difference.
+The six intentionally VM-only extensions are individually recorded by
+`bennett-vm-flh`, `5nl`, `kr0`, `73w`, `j6r`, `ht2`; the extension header alone
+owns their declarations. All seven audit beads are closed with C11 evidence.
+
+## Reproduction and provenance
+
+Final executable SHA-256:
+`23a77feed9d9ea0eb06f55fa45a5a45e282d24019203e261991f64cd6ecd3872`.
+Reference executable SHA-256:
+`a49f07dc608501186d39d5a6c254ea2bbe49ca05647ed053d5dd4ffa2e23cf2c`.
+ISA checkout HEAD observed during verification: `2f167cc` (report-only; no
+claim that the reference was rebuilt from that HEAD). Another agent rebuilt
+the reference during one test run, causing ENOENT; that run failed loudly.
+The final run pins a byte-for-byte CLI executable copy in VM `.tmp/` to avoid
+racing cross-repository builds. No reference source is a dependency.
+
+```sh
+env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u BROWSER \
+  TMPDIR=/home/tobias/Projects/bennett-workspace/bennett-vm/.tmp \
+  BENNETT_ISA_REF=/home/tobias/Projects/bennett-workspace/bennett-vm/.tmp/reference-m3-oracle \
+  BENNETT_HARNESS_COUNTS=1 cargo test --offline \
+  --manifest-path /home/tobias/Projects/bennett-workspace/bennett-vm/Cargo.toml -- --nocapture
+```
+
+Logs: `.tmp/m3-test.log`, `.tmp/conformance.log`. All supported commands fail
+loudly; §8 target lowering and §11 schedules remain explicit milestone-4
+refusals, and estimate/coverage/certificate production names milestones 4–5.
+Next: **milestone 4**, `bennett-vm-v23`; JIT remains milestone 5.
+
+---
+
+# Historical milestone 2 evidence
 
 # Milestone 2 verification — 2026-10-29
 

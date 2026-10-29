@@ -1300,6 +1300,33 @@ fn coherent_corpus(path: &Path) {
                     };
                 }
             }
+            let state = if n >= 2 {
+                (0..4)
+                    .map(|v| {
+                        let bits = (0..n)
+                            .map(|i| if i < 2 && v & (1 << i) != 0 { '1' } else { '0' })
+                            .collect::<String>();
+                        format!("{bits}={}", if v % 2 == 0 { "0.5" } else { "0,0.5" })
+                    })
+                    .collect::<Vec<_>>()
+                    .join(";")
+            } else {
+                format!("{}=0,1", "0".repeat(n))
+            };
+            for cmd in ["run-action", "reverse"] {
+                let mut args = s(&[cmd, path.to_str().unwrap(), &f.name, "--state", &state]);
+                for p in &f.lists[3] {
+                    args.extend(s(&[
+                        "--arg",
+                        match p.ty {
+                            Type::Token => "token:64",
+                            Type::F64 => "f64:0.5",
+                            _ => "1",
+                        },
+                    ]));
+                }
+                assert_coherent(&args);
+            }
             for basis in [
                 "0".repeat(n),
                 "1".repeat(n),

@@ -428,11 +428,22 @@ pub fn parse(text: &str) -> Result<Object, String> {
             let mut escape = false;
             let mut space = false;
             for c in line.replace("{  }", "{ }").chars() {
-                if escape { escape = false; continue; }
-                if quoted && c == '\\' { escape = true; continue; }
-                if c == '"' { quoted = !quoted; }
+                if escape {
+                    escape = false;
+                    continue;
+                }
+                if quoted && c == '\\' {
+                    escape = true;
+                    continue;
+                }
+                if c == '"' {
+                    quoted = !quoted;
+                }
                 if !quoted && c == ' ' && space {
-                    return Err(err("16.1", format!("tokens need exactly one space on line {}", i+1)));
+                    return Err(err(
+                        "16.1",
+                        format!("tokens need exactly one space on line {}", i + 1),
+                    ));
                 }
                 space = !quoted && c == ' ';
             }

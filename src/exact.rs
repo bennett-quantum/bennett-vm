@@ -68,6 +68,25 @@ impl Dyad {
     fn twice(&self) -> Self {
         Self::new(self.neg, self.mag.shl(1), self.scale)
     }
+    fn unit_phase(&self) -> (f64, f64) {
+        // Evaluate a bounded factor, then square; the exact angle stays in
+        // the dyadic group algebra and is never converted through infinity.
+        let mut a = self.clone();
+        let mut squares = 0;
+        while !a.value().is_finite() {
+            a = a.half();
+            squares += 1;
+        }
+        let (mut im, mut re) = a.value().sin_cos();
+        for _ in 0..squares {
+            let rr = re * re - im * im;
+            let ii = 2. * re * im;
+            let norm = rr.hypot(ii);
+            re = rr / norm;
+            im = ii / norm;
+        }
+        (re, im)
+    }
     fn value(&self) -> f64 {
         let bits = self.mag.bits();
         let shift = bits.saturating_sub(53);
@@ -152,9 +171,8 @@ impl Exact {
         let mut re = 0.;
         let mut im = 0.;
         for ((a, s, i), c) in &self.0 {
-            let angle = a.value();
             let factor = c.value() * if *s { 2f64.sqrt() } else { 1. };
-            let (sin, cos) = angle.sin_cos();
+            let (cos, sin) = a.unit_phase();
             if *i {
                 re -= factor * sin;
                 im += factor * cos;
@@ -186,15 +204,24 @@ impl Exact {
 mod tests {
     use super::*;
     #[test]
+    fn combined_finite_rotation_angles_have_finite_display() {
+        // §3.1 allows every finite f64 gate angle, even if a symbolic sum
+        // exceeds binary64. Approximation must not manufacture NaN support.
+        let p = Exact::phase(Dyad::float(f64::MAX));
+        let (re, im) = p.mul(&p).value();
+        assert!(re.is_finite() && im.is_finite());
+        assert!((re * re + im * im - 1.).abs() < 2e-12);
+    }
+    #[test]
     fn exact_inverse_cancellation() {
         let h = Exact::sqrt_half();
         assert_eq!(h.mul(&h).add(&h.mul(&h)), Exact::one());
         for axis in ["rx", "ry", "rz"] {
             let m = Exact::rotation(axis, 0.123);
             let inv = Exact::rotation(axis, -0.123);
-            for i in 0..2 {
-                for j in 0..2 {
-                    let x = m[i][0].mul(&inv[0][j]).add(&m[i][1].mul(&inv[1][j]));
+            for (i, row) in m.iter().enumerate() {
+                for (j, _) in inv[0].iter().enumerate() {
+                    let x = row[0].mul(&inv[0][j]).add(&row[1].mul(&inv[1][j]));
                     assert_eq!(x, if i == j { Exact::one() } else { Exact::zero() });
                 }
             }

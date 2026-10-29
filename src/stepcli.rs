@@ -87,7 +87,7 @@ pub fn reverse(args: &[String]) -> Result<(), String> {
     if n > budget.steps {
         return Err("§5.4: prefix exceeds B".into());
     }
-    let mut m = Machine::new(&obj, name, &vs, &inp.mem, &inp.args, budget.clone())?;
+    let mut m = Machine::new(&obj, name, &vs, &inp.mem, &inp.args, budget)?;
     let entry = m.state.clone();
     for _ in 0..n {
         m.forward_step()?;
@@ -235,15 +235,8 @@ pub fn check(args: &[String]) -> Result<(), String> {
                 }
             }
         }
-        let seq = crate::oracle::run_oracle(
-            &obj,
-            name,
-            ins,
-            &mut mem.clone(),
-            &inp.args,
-            budget.clone(),
-        )?;
-        let mut m = Machine::new(&obj, name, ins, &mem, &inp.args, budget.clone())?;
+        let seq = crate::oracle::run_oracle(&obj, name, ins, &mut mem.clone(), &inp.args, budget)?;
+        let mut m = Machine::new(&obj, name, ins, &mem, &inp.args, budget)?;
         let entry = m.state.clone();
         for _ in 0..budget.steps {
             m.forward_step()?;

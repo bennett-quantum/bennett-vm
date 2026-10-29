@@ -1,5 +1,5 @@
 # Spec versions this repo implements. Contract = the published specs, nothing else.
-status = "milestone-1"
+status = "milestone-3"
 isa = "0.8"
 object = "0.8"
 launch = "0.8"

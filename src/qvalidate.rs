@@ -62,16 +62,18 @@ fn borrow_frame(
         .filter(|i| !matches!(i.op.as_str(), "qalloc" | "qfree" | "qborrow" | "qreturn"))
         .collect();
     let touches = |i: &&Instr| {
-        i.operands
-            .iter()
-            .any(|s| wires(env, s).is_ok_and(|ws| ws.iter().any(|w| borrowed.contains(w))))
+        i.operands.iter().any(|s| {
+            let names = list_operand(s).unwrap_or_else(|_| vec![s.clone()]);
+            names
+                .iter()
+                .any(|s| wires(env, s).is_ok_and(|ws| ws.iter().any(|w| borrowed.contains(w))))
+        })
     };
     let Some(first) = gates.iter().position(touches) else {
         return Ok(());
     };
     let last = gates.iter().rposition(touches).unwrap();
-    // W after the last borrowed touch is part of the translation frame.
-    let seq = &gates[first..];
+    let seq = &gates[first..=last];
     for vlen in 1..=seq.len() / 2 {
         if seq.len() % 2 != 0 {
             continue;
@@ -202,10 +204,10 @@ pub fn validate(_obj: &Object, f: &Function) -> Result<(), String> {
         } else if i.op == "qload" {
             let mut region = None;
             for p in f.lists[2].iter() {
-                if p.name == i.operands[0] {
-                    if let Type::Region(_, w) = p.ty {
-                        region = Some(w);
-                    }
+                if p.name == i.operands[0]
+                    && let Type::Region(_, w) = p.ty
+                {
+                    region = Some(w);
                 }
             }
             for q in &flat {
@@ -305,8 +307,125 @@ pub fn validate(_obj: &Object, f: &Function) -> Result<(), String> {
         walk(&b.instrs, &env, &inputs, &mut vec![])?;
     }
     if !borrowed.is_empty() {
-        let seq = flat.into_iter().cloned().collect::<Vec<_>>();
-        borrow_frame(&seq, &env, &borrowed)?;
+        let mut segment = Vec::new();
+        let mut pred = Vec::<Wire>::new();
+        let token = |w: &Wire| format!("{}[{}]", w.0, w.1);
+        fn expand(xs: &[Instr], out: &mut Vec<Instr>) {
+            for i in xs {
+                let make = |op: &str, operand: String| Instr {
+                    op: op.into(),
+                    operands: vec![operand],
+                    lhs: vec![],
+                    nested: vec![],
+                    line: i.line,
+                    raw: i.raw.clone(),
+                };
+                if i.op == "qif" {
+                    let p = i.operands[0].clone();
+                    out.push(make("qpred", p.clone()));
+                    expand(&i.nested[0], out);
+                    out.push(make("qunpred", p.clone()));
+                    out.push(make("x", p.clone()));
+                    out.push(make("qpred", p.clone()));
+                    expand(&i.nested[1], out);
+                    out.push(make("qunpred", p.clone()));
+                    out.push(make("x", p));
+                } else if i.op == "qloop" {
+                    // Prove each source frame before composing iterations. The
+                    // while flags range over conjunctions of immutable selectors.
+                    if i.operands.len() == 3 {
+                        let n = i.operands[0]
+                            .parse::<usize>()
+                            .expect("validated loop bound");
+                        for j in 0..n {
+                            out.push(make("qpred", format!("{}[{j}]", i.operands[2])));
+                        }
+                        expand(&i.nested[0], out);
+                        for j in (0..n).rev() {
+                            out.push(make("qunpred", format!("{}[{j}]", i.operands[2])));
+                        }
+                    } else {
+                        expand(&i.nested[0], out);
+                    }
+                } else {
+                    out.push(i.clone());
+                }
+            }
+        }
+        let mut proof = vec![];
+        for b in &f.blocks {
+            expand(&b.instrs, &mut proof);
+        }
+        for i in &proof {
+            match i.op.as_str() {
+                "qpred" => {
+                    pred.extend(wires(&env, &i.operands[0])?);
+                    continue;
+                }
+                "qunpred" => {
+                    let n = wires(&env, &i.operands[0])?.len();
+                    pred.truncate(pred.len() - n);
+                    continue;
+                }
+                "qalloc" | "qfree" | "qborrow" => continue,
+                "qreturn" => {
+                    borrow_frame(&segment, &env, &borrowed)?;
+                    segment.clear();
+                    continue;
+                }
+                "x" | "cx" | "ccx" | "mcx" => {
+                    let (mut cs, t) = flip(i, &env)?;
+                    cs.extend(pred.clone());
+                    cs.sort();
+                    cs.dedup();
+                    let mut g = i.clone();
+                    g.op = "mcx".into();
+                    g.operands = vec![
+                        format!("({})", cs.iter().map(token).collect::<Vec<_>>().join(", ")),
+                        token(&t),
+                    ];
+                    segment.push(g);
+                    continue;
+                }
+                "swap" | "qexch" if pred.is_empty() => {
+                    segment.push(i.clone());
+                    continue;
+                }
+                "qcopy" | "quncopy" | "qxor" => {
+                    let a = wires(&env, &i.operands[0])?;
+                    let dst = if i.op == "qcopy" {
+                        &i.lhs[0]
+                    } else {
+                        &i.operands[1]
+                    };
+                    let b = wires(&env, dst)?;
+                    for (a, b) in a.iter().zip(b) {
+                        let mut cs = pred.clone();
+                        cs.push(a.clone());
+                        let mut g = i.clone();
+                        g.op = "mcx".into();
+                        g.lhs.clear();
+                        g.operands = vec![
+                            format!("({})", cs.iter().map(token).collect::<Vec<_>>().join(", ")),
+                            token(&b),
+                        ];
+                        segment.push(g);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            borrow_frame(&segment, &env, &borrowed)?;
+            segment.clear();
+            if i.operands
+                .iter()
+                .flat_map(|s| list_operand(s).unwrap_or_else(|_| vec![s.clone()]))
+                .any(|s| wires(&env, &s).is_ok_and(|ws| ws.iter().any(|w| borrowed.contains(w))))
+            {
+                return Err(err("5.6", "borrowed operand outside a permutation frame"));
+            }
+        }
+        borrow_frame(&segment, &env, &borrowed)?;
     }
     Ok(())
 }
@@ -326,8 +445,10 @@ fn exhaustive_frame(
     let mut touched = BTreeSet::new();
     for i in seq {
         for x in &i.operands {
-            if let Ok(ws) = wires(env, x) {
-                touched.extend(ws);
+            for name in list_operand(x).unwrap_or_else(|_| vec![x.clone()]) {
+                if let Ok(ws) = wires(env, &name) {
+                    touched.extend(ws);
+                }
             }
         }
     }

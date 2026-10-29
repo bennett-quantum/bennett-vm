@@ -38,7 +38,7 @@ fn published_conformance_report() {
         "Must run all 490 published cases, without filtering: {report}"
     );
     // Every available published case is now a hard gate.
-    for line in report.lines().filter(|l| l.starts_with("FAIL ")) {
+    if let Some(line) = report.lines().find(|l| l.starts_with("FAIL ")) {
         panic!("Published conformance regression: {line}");
     }
     println!(

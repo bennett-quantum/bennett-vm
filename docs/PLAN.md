@@ -24,8 +24,9 @@ in `docs/PROGRESS.md` first.
 | `launch` | one-shot §10 launch behind `run-program`; later the full opaque-object C ABI | §10 |
 | `main` | CLI with the reference interpreter's command names and JSON shapes for implemented commands | §10, ref README |
 
-Later modules, added by their milestones and not stubbed early:
-`step` (literal §3.6 predicated step machine), `target` (§8 target
+Milestone 3 adds `step`/`stepcli` (literal §3.6/§3.7 machine), `exact`
+(symbolic amplitudes), `qcli` and `qvalidate`. Later modules:
+`target` (§8 target
 descriptions + launch-time lowering), `sched` (§11 verbatim schedule
 consumer), `jit` (§5.7 extensional optimisations, then codegen).
 
@@ -56,7 +57,7 @@ frames, never re-execution.
    reverse eligibility, tape iterators, estimates/coverage stubs
    that fail loud until milestones 4–5), single-stepping and
    snapshot APIs over the §7.4 history, and device-model hardening.
-3. **Coherent tier.** Literal §3.6/§3.7 step machine with derived
+3. **Coherent tier (implemented; evidence in PROGRESS.md).** Literal §3.6/§3.7 step machine with derived
    widths, prefix reversal, `step-check`, exact-amplitude
    `run-action`, §5.6 borrow frames, and branch-enumeration
    simulation of permutation segments (NorthStar §4.2).

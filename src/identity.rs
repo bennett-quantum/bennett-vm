@@ -10,6 +10,20 @@ pub struct Identities {
     pub object_hash: String,
     pub interface: BTreeMap<String, String>,
     pub closure: BTreeMap<String, Option<String>>,
+    /// Closure-kind SCC hash per member (its own closure hash for a
+    /// trivial SCC); used for the §3.6 lproc ordering.
+    pub scc_hashes: BTreeMap<String, Option<String>>,
+}
+
+impl Identities {
+    pub fn scc_hash_of(&self, name: &str) -> String {
+        self.scc_hashes
+            .get(name)
+            .cloned()
+            .flatten()
+            .or_else(|| self.closure.get(name).cloned().flatten())
+            .unwrap_or_default()
+    }
 }
 
 /// `@name` symbol-reference tokens of a function, in first-reference
@@ -351,13 +365,13 @@ pub fn compute(obj: &Object) -> Result<Identities, String> {
         refs.insert(name.clone(), r);
     }
     let comps = sccs(obj, &refs);
-    let interface = compute_kind(obj, &refs, &comps, true)?;
-    let closure_opts = compute_kind(obj, &refs, &comps, false)?;
+    let (interface, _) = compute_kind(obj, &refs, &comps, true)?;
+    let (closure_opts, scc_hashes) = compute_kind(obj, &refs, &comps, false)?;
     let interface: BTreeMap<String, String> = interface
         .into_iter()
         .map(|(k, v)| (k, v.expect("interface hash always exists")))
         .collect();
-    Ok(Identities { object_hash: object_hash(&obj.text), interface, closure: closure_opts })
+    Ok(Identities { object_hash: object_hash(&obj.text), interface, closure: closure_opts, scc_hashes })
 }
 
 fn compute_kind(
@@ -365,8 +379,9 @@ fn compute_kind(
     refs: &HashMap<String, Vec<String>>,
     comps: &[Vec<String>],
     interface: bool,
-) -> Result<BTreeMap<String, Option<String>>, String> {
+) -> Result<(BTreeMap<String, Option<String>>, BTreeMap<String, Option<String>>), String> {
     let mut hashes: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let mut scc_hashes: BTreeMap<String, Option<String>> = BTreeMap::new();
     for comp in comps {
         let in_comp: BTreeMap<&str, usize> = comp.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
         let self_ref = comp.len() == 1 && refs.get(&comp[0]).is_some_and(|r| r.contains(&comp[0]));
@@ -377,6 +392,7 @@ fn compute_kind(
         if comp.len() == 1 && !self_ref {
             let member = &comp[0];
             let hash = envelopes[0].as_ref().map(|e| sha256_hex(e));
+            scc_hashes.insert(member.clone(), hash.clone());
             hashes.insert(member.clone(), hash);
         } else {
             let scc_hash = if envelopes.iter().all(|e| e.is_some()) {
@@ -389,12 +405,13 @@ fn compute_kind(
                 None
             };
             for (i, member) in comp.iter().enumerate() {
+                scc_hashes.insert(member.clone(), scc_hash.clone());
                 let hash = scc_hash.as_ref().map(|h| sha256_hex(format!("{h}:{i}").as_bytes()));
                 hashes.insert(member.clone(), hash);
             }
         }
     }
-    Ok(hashes)
+    Ok((hashes, scc_hashes))
 }
 
 fn build_envelope(

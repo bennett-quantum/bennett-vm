@@ -294,6 +294,17 @@ impl BigUint {
     }
 }
 
+impl PartialOrd for BigUint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp_big(other))
+    }
+}
+impl Ord for BigUint {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.cmp_big(other)
+    }
+}
+
 impl std::fmt::Display for BigUint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_decimal())

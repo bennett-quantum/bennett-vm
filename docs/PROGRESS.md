@@ -1,12 +1,25 @@
 # Progress
 
-Updated as features verify. Each row names the test and the fixture
-that backs the claim. Nothing is verified until its test has been
-seen red, then green, in this session.
+2026-10-29: resumed the interrupted implementation at eb20fff. Read the full
+brief and required 0.8 contract; the reference is accessed only as a binary.
+No new dependencies (std-only, offline).
 
-| Claim | Test | Fixture/evidence | Status |
-|---|---|---|---|
-| Reading list read; reference CLI probed through its binary only | session log | brief + spec sections cited in PLAN.md | done |
+Verified with `cargo test --offline` (headless, project-local `.tmp`):
 
-Harness counts and divergences are recorded here once the
-differential tests exist.
+- `check_and_hash_byte_identical_on_every_fixture`: all 12 published fixtures,
+  24 byte-identical CLI comparisons, including the two §16.3 example fixtures.
+- `run_oracle_differential`: 45 comparisons, including 257-bit values, arithmetic
+  faults, recursive stack/depth budgets, nested oracles and mapped memory.
+  Inherited work did not compile: stale constructor fields were removed; all
+  inherited oracle cases then passed.
+- `classical_control_and_launch_differential`: seen red at the CC stub, now
+  green on 45 command cases over classical.bisa and registers.bisa. Checks
+  dynamic SSA traces, nested cancellation, all four devices, fault atomicity,
+  handle allocation/slicing/concatenation, measurement, and launch eligibility.
+  Successful JSON comparisons include every field except opaque memory digests;
+  the ISA does not prescribe their serialization. Diagnostics compare exit status.
+
+In progress: broaden execution coverage to every fixture and independent edge
+cases, harden inherited action execution, final CLI documentation and local gates.
+No semantic divergence established yet. Memory digests use a VM-specific canonical
+encoding of the complete allocation table, bump pointer and nonzero bytes.

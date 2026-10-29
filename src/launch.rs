@@ -1,5 +1,4 @@
-//! §10 one-shot launch behind `run-program`.
-
-pub fn cmd_run_program(_args: &[String]) -> Result<(), String> {
-    Err("unimplemented: run-program (§10 launch) (milestone 1, in progress)".into())
+//! One-shot §10 launch. The stateful C ABI follows in milestone 2.
+pub fn cmd_run_program(args: &[String]) -> Result<(), String> {
+    crate::cc::cmd_program(args)
 }

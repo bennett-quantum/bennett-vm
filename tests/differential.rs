@@ -146,3 +146,37 @@ fn run_oracle_differential() {
         assert_bytes(&format!("run-oracle case {i}"), args);
     }
 }
+
+/// Memory digests are opaque implementation fingerprints (the ISA does not
+/// prescribe their encoding). Compare every other field, including trace.
+fn assert_outcome(case: &str, args: &[String]) {
+    let a = run(&reference(), args);
+    let b = run(Path::new(vm()), args);
+    assert_eq!(a.status.code(), b.status.code(), "{case}\nref {}\nvm {}", show(&a), show(&b));
+    if !a.status.success() { return; }
+    let mut aj = bennett_vm::json::parse(std::str::from_utf8(&a.stdout).unwrap().trim()).unwrap();
+    let mut bj = bennett_vm::json::parse(std::str::from_utf8(&b.stdout).unwrap().trim()).unwrap();
+    for j in [&mut aj, &mut bj] {
+        if let bennett_vm::json::Json::Obj(m) = j {
+            m.remove("memory_digest"); m.remove("entry_memory_digest");
+        }
+    }
+    assert_eq!(aj, bj, "DIVERGENCE {case}\nargs {args:?}\nref {}\nvm {}", show(&a), show(&b));
+}
+
+#[test]
+fn classical_control_and_launch_differential() {
+    for entry in ["sum", "nested", "effects", "impure", "entropy_short", "unknown_effect", "memfault", "divzero", "host_invalid"] {
+        for command in ["run-cc", "reverse", "run-program"] {
+            let mut args = s(&[command, &fx("classical.bisa"), entry, "--entropy", "616263"]);
+            if entry == "sum" { args.extend(s(&["--args", "3"])); }
+            assert_outcome(&format!("{command} classical {entry}"), &args);
+        }
+    }
+    for entry in ["allocation", "views", "unclean", "measurement", "measuring", "bad_uncall"] {
+        for command in ["run-cc", "reverse", "run-program"] {
+            let args = s(&[command, &fx("registers.bisa"), entry, "--draws", "0.9"]);
+            assert_outcome(&format!("{command} registers {entry}"), &args);
+        }
+    }
+}

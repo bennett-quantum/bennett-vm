@@ -1,3 +1,25 @@
+# Milestone 2 — implementation in progress (2026-10-29)
+
+Claimed bennett-vm-7bj. Read the accepted ISA 0.8 §10–11 and published
+headers in full. Contrary to the brief, both published headers are empty
+apart from guards/comments. VM-owned include/bennett_vm.h transcribes the
+normative §10 declarations and includes bennett_launch.h; no ISA repo edits.
+
+Red: C11 test failed linking (no libbennett_vm). Green: static/shared library
+build and initial host/wait/reply/suspend/result/reversal test: 20 assertions.
+The original 17 Rust tests / 577 differential comparisons still pass.
+Stateful execution is cooperative at instruction boundaries. All calls on a
+program require caller synchronization. Actual Q inverses remain in history;
+classical before/after deltas preserve unrelated registers across runs.
+
+First full read-only conformance-binary run: A 21/0/0, B 31/4/0,
+C 38/301/0, D 0/7/5, E 0/1/14, F 22/11/2, G 9/1/13, H 0/1/9
+(pass/fail/unavailable). These are preliminary counts, not a milestone claim.
+Most failures are milestone-3 CLI surfaces. Found a §10 CC-entry diagnostic
+bug and staged-probe wording mismatches; correcting them with explicit tests.
+No reference disagreement is asserted. Published staged G scenarios cannot
+be promoted in the read-only harness; C tests exercise them independently.
+
 # Milestone 1 verification
 
 Completed 2026-10-29 against accepted ISA **0.8**, std-only Rust, offline and

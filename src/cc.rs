@@ -58,12 +58,14 @@ struct Frame {
     definitions: Vec<(Key, usize)>,
     next_activation: u64,
     data: Option<Data>,
+    after: Option<Data>,
     control: Vec<Activation>,
     pure: bool,
     reversed: bool,
     marker: bool,
     measured: bool,
 }
+#[derive(Clone)]
 struct Segment {
     start: usize,
     end: usize,
@@ -71,11 +73,12 @@ struct Segment {
     args: Vec<Value>,
     results: Vec<Value>,
 }
-struct Machine<'a> {
+#[derive(Clone)]
+struct Machine {
     quantum: QuantumState,
     quantum_events: Vec<Invocation>,
     pending_region: Option<Invocation>,
-    obj: &'a Object,
+    obj: std::sync::Arc<Object>,
     data: Data,
     env: BTreeMap<Key, Vec<Value>>,
     stack: Vec<Activation>,
@@ -92,6 +95,7 @@ struct Machine<'a> {
     replies: Vec<Json>,
     reply_pos: usize,
     definitions: Vec<(Key, usize)>,
+    stateful: bool,
 }
 fn err(s: impl std::fmt::Display) -> String {
     format!("§3.4: {s}")
@@ -244,7 +248,7 @@ impl Data {
             .ok_or(4)
     }
 }
-impl<'a> Machine<'a> {
+impl Machine {
     fn read(&self, name: &str) -> Result<Value, u64> {
         current(&self.env, &(self.stack.last().unwrap().id, name.into())).ok_or(4)
     }
@@ -293,10 +297,10 @@ impl<'a> Machine<'a> {
         }
         if let Some(invocation) = &frame.region {
             let inverse = invocation.inverse();
-            apply_invocation(self.obj, &mut self.quantum, &inverse)?;
+            apply_invocation(&self.obj, &mut self.quantum, &inverse)?;
             record_quantum(&mut self.quantum_events, inverse);
         }
-        if !frame.pure {
+        if !frame.pure && !self.stateful {
             self.quantum.rewind_clean_wires(frame.wire_boundary)?;
         }
         for (key, len) in frame.definitions.iter().rev() {
@@ -308,7 +312,11 @@ impl<'a> Machine<'a> {
             }
         }
         if let Some(d) = &frame.data {
-            self.data = d.clone();
+            if let Some(after) = &frame.after {
+                self.data.undo_delta(d, after);
+            } else {
+                self.data = d.clone();
+            }
         }
         if control {
             self.stack = frame.control.clone();
@@ -319,7 +327,8 @@ impl<'a> Machine<'a> {
     }
     fn step(&mut self) -> Result<(), String> {
         let a = self.stack.last().unwrap().clone();
-        let f = self.obj.function(&a.function).unwrap();
+        let obj = self.obj.clone();
+        let f = obj.function(&a.function).unwrap();
         let block = &f.blocks[a.block];
         let ins = block
             .instrs
@@ -407,6 +416,7 @@ impl<'a> Machine<'a> {
             definitions: self.definitions.clone(),
             next_activation,
             data: (!pure(&ins.op)).then_some(before),
+            after: self.stateful.then(|| self.data.clone()),
             control,
             pure: pure(&ins.op) && fault.is_none(),
             reversed: false,
@@ -427,6 +437,7 @@ impl<'a> Machine<'a> {
                 }
             };
         }
+        let obj = self.obj.clone();
         let xs = &ins.operands;
         let op = ins.op.as_str();
         let base = op.split('.').next().unwrap();
@@ -557,7 +568,7 @@ impl<'a> Machine<'a> {
                 let args = crate::validate::list_operand(&format!("({rest}"))?;
                 let values = get!(self.operands(&args));
                 let a = self.stack.last().unwrap();
-                let f = self.obj.function(&a.function).unwrap();
+                let f = obj.function(&a.function).unwrap();
                 let bi = f.blocks.iter().position(|b| b.name == label).unwrap();
                 for (p, v) in f.blocks[bi].params.iter().zip(values) {
                     self.define(&p.name, v);
@@ -568,7 +579,7 @@ impl<'a> Machine<'a> {
             }
             "call" => {
                 let name = xs[0].trim_start_matches('@');
-                let f = self.obj.function(name).ok_or_else(|| {
+                let f = obj.function(name).ok_or_else(|| {
                     format!("unimplemented: unresolved call @{name} (milestone 2 linking)")
                 })?;
                 let values = get!(self.operands(&xs[1..]));
@@ -845,7 +856,7 @@ impl<'a> Machine<'a> {
             let muts = bundles(&xs[1])?;
             let inputs = bundles(&xs[2])?;
             let mem = bundles(&xs[3])?;
-            let sig = crate::validate::action_sig(self.obj, &name)?;
+            let sig = crate::validate::action_sig(&self.obj, &name)?;
             let regions = mem
                 .into_iter()
                 .zip(&sig.mem)
@@ -898,7 +909,7 @@ impl<'a> Machine<'a> {
         } else {
             return Err(err(format!("invalid region call {op}")));
         };
-        apply_invocation(self.obj, &mut self.quantum, &invocation)?;
+        apply_invocation(&self.obj, &mut self.quantum, &invocation)?;
         record_quantum(&mut self.quantum_events, invocation.clone());
         self.pending_region = Some(invocation);
         for n in used {
@@ -1027,6 +1038,18 @@ pub fn cmd_run_cc(args: &[String], reverse: bool) -> Result<(), String> {
     command(args, if reverse { Mode::Reverse } else { Mode::Cc })
 }
 pub fn cmd_reverse(args: &[String]) -> Result<(), String> {
+    // Dispatch by entry kind before scanning tier-specific options.
+    if args.len() >= 2 {
+        let (obj, _) = crate::load(&cliargs::read_object(&args[0])?, false)?;
+        if let Some(f) = obj.function(cliargs::entry_name(&args[1])) {
+            if !matches!(f.kind, FnKind::Cc | FnKind::R) {
+                return Err(format!(
+                    "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
+                    f.kind.kind_str()
+                ));
+            }
+        }
+    }
     command(args, Mode::Reverse)
 }
 pub fn cmd_program(args: &[String]) -> Result<(), String> {
@@ -1051,16 +1074,21 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         return Err("command requires <object> <entry>".into());
     }
     if opts.one("target")?.is_some() {
-        return Err("unimplemented: target (§8 launch lowering) (milestone 4)".into());
+        return Err(
+            "unimplemented: target (§8 launch lowering) (milestone 4); staged deliverable 9".into(),
+        );
     }
     let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
     if obj.has_schedule && mode == Mode::Program {
-        return Err("unimplemented: schedule (§11 verbatim consumption) (milestone 4)".into());
+        return Err("unimplemented: schedule (§11 verbatim consumption) (milestone 4); staged deliverable 10".into());
     }
     let name = cliargs::entry_name(&opts.positional[1]);
     let f = obj
         .function(name)
         .ok_or_else(|| err(format!("unknown entry @{name}")))?;
+    if mode == Mode::Program && f.kind != FnKind::Cc {
+        return Err("§10: E_ARG: run-program requires a CC entry".into());
+    }
     if !matches!(f.kind, FnKind::Cc | FnKind::R) {
         return Err(format!(
             "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
@@ -1179,7 +1207,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         quantum,
         quantum_events: vec![],
         pending_region: None,
-        obj: &obj,
+        obj: std::sync::Arc::new(obj.clone()),
         data,
         env,
         stack: vec![Activation {
@@ -1204,6 +1232,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         replies,
         reply_pos: 0,
         definitions: vec![],
+        stateful: false,
     };
     let entry_stack = m.stack.clone();
     let limit = opts
@@ -1389,4 +1418,277 @@ fn first_difference(
         return Some("quantum registers differ".into());
     }
     None
+}
+
+// Stateful launch adapter. Resources are exchanged only at instruction boundaries;
+// history contains classical deltas and resolved inverse invocations, never Q snapshots.
+impl Data {
+    fn undo_delta(&mut self, before: &Self, after: &Self) {
+        fn restore<K: Ord + Clone, V: PartialEq + Clone>(
+            now: &mut BTreeMap<K, V>,
+            before: &BTreeMap<K, V>,
+            after: &BTreeMap<K, V>,
+        ) {
+            for k in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+                if before.get(k) != after.get(k) {
+                    if let Some(v) = before.get(k) {
+                        now.insert(k.clone(), v.clone());
+                    } else {
+                        now.remove(k);
+                    }
+                }
+            }
+        }
+        restore(&mut self.memory, &before.memory, &after.memory);
+        restore(&mut self.block, &before.block, &after.block);
+        restore(&mut self.handles, &before.handles, &after.handles);
+        if before.bump != after.bump {
+            self.bump = before.bump.clone();
+        }
+        if before.table != after.table {
+            self.table = before.table.clone();
+        }
+        if before.console != after.console {
+            self.console = before.console.clone();
+        }
+        if before.clock != after.clock {
+            self.clock = before.clock;
+        }
+        if before.entropy_pos != after.entropy_pos {
+            self.entropy_pos = before.entropy_pos;
+        }
+        if before.tape != after.tape {
+            self.tape = before.tape.clone();
+        }
+        if before.hosts != after.hosts {
+            self.hosts = before.hosts.clone();
+        }
+        if before.measurements != after.measurements {
+            self.measurements = before.measurements.clone();
+        }
+        // Handle IDs are never recycled across host-visible calls.
+    }
+}
+#[derive(Clone)]
+pub(crate) struct Resources {
+    data: Data,
+    quantum: QuantumState,
+}
+impl Resources {
+    pub(crate) fn new(obj: &Object) -> Result<Self, String> {
+        Ok(Self {
+            data: Data::new(obj)?,
+            quantum: QuantumState::new(),
+        })
+    }
+    pub(crate) fn new_reg(&mut self, n: usize) -> u64 {
+        let ws = self.quantum.alloc_wires(n);
+        self.data.new_handle(ws, None)
+    }
+    pub(crate) fn reg_width(&self, id: u64) -> Option<usize> {
+        self.data.handle(id).ok().map(|h| h.wires.len())
+    }
+    pub(crate) fn clean(&self, id: u64) -> bool {
+        self.data
+            .handle(id)
+            .is_ok_and(|h| self.quantum.is_clean(&h.wires))
+    }
+    pub(crate) fn prepare(&mut self, id: u64, bits: &[u8]) {
+        let mut v = BigUint::zero();
+        for (i, b) in bits.iter().enumerate() {
+            v.set_bit(i, *b != 0);
+        }
+        self.quantum.prepare(&self.data.handles[&id].wires, &v);
+    }
+    pub(crate) fn free(&mut self, id: u64) {
+        self.data.handles.get_mut(&id).unwrap().live = false;
+    }
+}
+#[derive(Clone)]
+pub(crate) struct RuntimeRun {
+    machine: Machine,
+    tape_start: usize,
+    measurement_start: usize,
+    host_start: usize,
+}
+impl RuntimeRun {
+    pub(crate) fn new(
+        obj: std::sync::Arc<Object>,
+        resources: &Resources,
+        name: &str,
+        args: Vec<Value>,
+        entropy: Vec<u8>,
+    ) -> Self {
+        let f = obj.function(name).unwrap();
+        let env = f.lists[0]
+            .iter()
+            .zip(&args)
+            .map(|(p, v)| ((0, p.name.clone()), vec![v.clone()]))
+            .collect();
+        Self {
+            tape_start: resources.data.tape.len(),
+            measurement_start: resources.data.measurements.len(),
+            host_start: resources.data.hosts.len(),
+            machine: Machine {
+                quantum: resources.quantum.clone(),
+                quantum_events: vec![],
+                pending_region: None,
+                obj,
+                data: resources.data.clone(),
+                env,
+                stack: vec![Activation {
+                    id: 0,
+                    function: name.into(),
+                    block: 0,
+                    index: 0,
+                    dest: vec![],
+                    call_start: None,
+                    args,
+                }],
+                history: vec![],
+                segments: vec![],
+                trace: vec![],
+                next_activation: 1,
+                steps: 0,
+                fault: None,
+                results: vec![],
+                entropy,
+                draws: vec![],
+                draw_pos: 0,
+                replies: vec![],
+                reply_pos: 0,
+                definitions: vec![],
+                stateful: true,
+            },
+        }
+    }
+    pub(crate) fn sync(&mut self, r: &Resources) {
+        self.machine.data = r.data.clone();
+        self.machine.quantum = r.quantum.clone();
+    }
+    pub(crate) fn export(&self, r: &mut Resources) {
+        r.data = self.machine.data.clone();
+        r.quantum = self.machine.quantum.clone();
+    }
+    pub(crate) fn terminal(&self) -> bool {
+        self.machine.fault.is_some() || self.machine.stack.is_empty()
+    }
+    pub(crate) fn fault(&self) -> Option<u64> {
+        self.machine.fault
+    }
+    pub(crate) fn values(&self) -> &[Value] {
+        &self.machine.results
+    }
+    pub(crate) fn measured(&self) -> bool {
+        self.machine.history.iter().any(|f| f.measured)
+    }
+    pub(crate) fn tape(&self) -> Vec<Json> {
+        self.machine.data.tape[self.tape_start..].to_vec()
+    }
+    pub(crate) fn measurements(&self) -> Vec<Json> {
+        self.machine.data.measurements[self.measurement_start..].to_vec()
+    }
+    pub(crate) fn history_len(&self) -> usize {
+        self.machine.history.len()
+    }
+    // Locks are acquired before the instruction. Classical memory/devices share
+    // an ordering domain; qreg operands lock only their actual handles.
+    pub(crate) fn touches(&self) -> (bool, Vec<u64>) {
+        let m = &self.machine;
+        let Some(a) = m.stack.last() else {
+            return (false, vec![]);
+        };
+        let i = &m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index];
+        let memory = matches!(
+            i.op.split('.').next().unwrap(),
+            "load" | "store" | "alloc" | "free" | "hostcall" | "effect"
+        );
+        let mut regs = vec![];
+        for text in &i.operands {
+            for name in
+                text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c != '%')
+            {
+                if let Ok(Value::Qreg(id)) = m.read(name) {
+                    regs.push(id);
+                    if let Some(parent) = m.data.handles.get(&id).and_then(|h| h.parent) {
+                        regs.push(parent);
+                    }
+                }
+            }
+        }
+        (memory, regs)
+    }
+    pub(crate) fn request(&self) -> Option<(String, Vec<u8>)> {
+        let m = &self.machine;
+        let a = m.stack.last()?;
+        let i = m.obj.function(&a.function)?.blocks[a.block]
+            .instrs
+            .get(a.index)?;
+        if i.op != "hostcall" || m.reply_pos < m.replies.len() {
+            return None;
+        }
+        let p = m.bits(&i.operands[1]).ok()?;
+        let n = m.number(&i.operands[2]).ok()?;
+        if !m.data.valid(&p, &u(n)) {
+            return None;
+        }
+        Some((
+            i.operands[0].clone(),
+            m.data.read(&p, usize::try_from(n).ok()?),
+        ))
+    }
+    pub(crate) fn reply(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let (service, payload) = self.request().ok_or("§10: no HOST_REQUEST")?;
+        self.machine.replies.push(Json::obj(vec![
+            ("service", Json::Str(service)),
+            ("payload", Json::Str(hex(&payload))),
+            ("reply", Json::Str(hex(bytes))),
+        ]));
+        Ok(())
+    }
+    pub(crate) fn step(&mut self) -> Result<(), String> {
+        self.machine.step()
+    }
+    pub(crate) fn reverse_to(&mut self, n: usize) -> Result<(), String> {
+        if n > self.machine.history.len() {
+            return Err("§7.4: history index beyond current prefix".into());
+        }
+        if self.machine.history[n..].iter().any(|f| f.measured) {
+            return Err("§10: E_NOT_REVERSIBLE: measure".into());
+        }
+        // Reject a cut through a retired segment: its control checkpoint refers
+        // to instances already removed by uncall. Whole-prefix reversal is valid.
+        if n != 0
+            && self
+                .machine
+                .segments
+                .iter()
+                .any(|s| s.start < n && n <= s.end && self.machine.history[s.start].reversed)
+        {
+            return Err("§7.4: snapshot lies inside cancelled segment".into());
+        }
+        for i in (n..self.machine.history.len()).rev() {
+            self.machine.undo(i, true)?;
+        }
+        self.machine.history.truncate(n);
+        self.machine.trace.truncate(n);
+        self.machine.segments.retain(|s| s.end < n);
+        self.machine.steps = n as u64;
+        self.machine.fault = None;
+        self.machine.results.clear();
+        Ok(())
+    }
+    pub(crate) fn snapshot(&self, state: &str) -> Json {
+        Json::obj(vec![
+            ("state", Json::Str(state.into())),
+            ("history_length", Json::u64(self.history_len() as u64)),
+            ("memory_digest", Json::Str(self.machine.data.digest())),
+            ("trace", Json::Arr(self.machine.trace.clone())),
+            ("tape", Json::Arr(self.tape())),
+            (
+                "host_requests",
+                Json::Arr(self.machine.data.hosts[self.host_start..].to_vec()),
+            ),
+        ])
+    }
 }

@@ -180,3 +180,69 @@ fn c11_launch_contract() {
     );
     println!("{}", String::from_utf8_lossy(&output.stdout));
 }
+
+#[test]
+fn c11_sched_contract() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmp = repo.join(".tmp/sched-abi");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let root = repo
+        .parent()
+        .unwrap()
+        .join("bennett-isa-spec/conformance/cases");
+    let raw = std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap();
+    let (_, ids) = bennett_vm::load(&raw, false).unwrap();
+    let object = tmp.join("inc8.bisa");
+    std::fs::write(&object, raw).unwrap();
+    let target = tmp.join("target.json");
+    std::fs::write(
+        &target,
+        std::fs::read_to_string(root.join("E/E-matching-first-entry/target.json"))
+            .unwrap()
+            .trim_end(),
+    )
+    .unwrap();
+    let out = Command::new("cargo")
+        .args(["build", "--offline", "--lib", "--manifest-path"])
+        .arg(repo.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(tmp.join("target"))
+        .env("TMPDIR", &tmp)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let exe = tmp.join("sched-abi");
+    let out = Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-I"])
+        .arg(repo.join("include"))
+        .arg("-I")
+        .arg(repo.parent().unwrap().join("bennett-isa-spec/include"))
+        .arg(repo.join("tests/sched_abi.c"))
+        .arg(tmp.join("target/debug/libbennett_vm.a"))
+        .args(["-ldl", "-lpthread", "-lm", "-o"])
+        .arg(&exe)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = Command::new(exe)
+        .arg(object)
+        .arg(target)
+        .arg(ids.closure["inc8"].as_ref().unwrap())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&out.stdout));
+}

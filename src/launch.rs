@@ -25,12 +25,12 @@ use std::{
 const ARG: i32 = 11;
 const INVALID: i32 = 8;
 const NOT_REV: i32 = 9;
-type Fallible<T> = Result<T, (i32, String)>;
-fn error(code: i32, msg: impl Into<String>) -> (i32, String) {
+pub(crate) type Fallible<T> = Result<T, (i32, String)>;
+pub(crate) fn error(code: i32, msg: impl Into<String>) -> (i32, String) {
     (code, msg.into())
 }
 thread_local! { static LAST:RefCell<CString>=RefCell::new(CString::new("").unwrap()); }
-fn status(f: impl FnOnce() -> Fallible<()>) -> i32 {
+pub(crate) fn status(f: impl FnOnce() -> Fallible<()>) -> i32 {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(Ok(())) => 0,
         Ok(Err((code, msg))) => {
@@ -49,7 +49,7 @@ fn status(f: impl FnOnce() -> Fallible<()>) -> i32 {
 pub extern "C" fn bennett_last_error() -> *const c_char {
     LAST.with(|v| v.borrow().as_ptr())
 }
-unsafe fn bytes<'a>(p: *const u8, n: usize) -> Fallible<&'a [u8]> {
+pub(crate) unsafe fn bytes<'a>(p: *const u8, n: usize) -> Fallible<&'a [u8]> {
     if n == 0 {
         return Ok(&[]);
     }
@@ -58,7 +58,7 @@ unsafe fn bytes<'a>(p: *const u8, n: usize) -> Fallible<&'a [u8]> {
     }
     Ok(std::slice::from_raw_parts(p, n))
 }
-unsafe fn text<'a>(p: *const c_char) -> Fallible<&'a str> {
+pub(crate) unsafe fn text<'a>(p: *const c_char) -> Fallible<&'a str> {
     if p.is_null() {
         return Err(error(ARG, "§10: E_ARG: null name"));
     }
@@ -66,15 +66,15 @@ unsafe fn text<'a>(p: *const c_char) -> Fallible<&'a str> {
         .to_str()
         .map_err(|_| error(ARG, "§10: E_ARG: name is not UTF-8"))
 }
-unsafe fn get<'a, T>(p: *const T) -> Fallible<&'a T> {
+pub(crate) unsafe fn get<'a, T>(p: *const T) -> Fallible<&'a T> {
     p.as_ref()
         .ok_or_else(|| error(ARG, "§10: E_ARG: null object"))
 }
-unsafe fn get_mut<'a, T>(p: *mut T) -> Fallible<&'a mut T> {
+pub(crate) unsafe fn get_mut<'a, T>(p: *mut T) -> Fallible<&'a mut T> {
     p.as_mut()
         .ok_or_else(|| error(ARG, "§10: E_ARG: null object"))
 }
-unsafe fn output<T>(out: *mut *mut T, v: T) -> Fallible<()> {
+pub(crate) unsafe fn output<T>(out: *mut *mut T, v: T) -> Fallible<()> {
     *get_mut(out)? = Box::into_raw(Box::new(v));
     Ok(())
 }
@@ -264,19 +264,31 @@ pub unsafe extern "C" fn bennett_load(
             };
             error(code, s)
         })?;
-        if tlen != 0 {
-            return Err(error(
-                5,
-                "unimplemented: target (§8 launch lowering) (milestone 4)",
-            ));
-        }
+        let target = if tlen == 0 {
+            None
+        } else {
+            let raw = std::str::from_utf8(bytes(target, tlen)?)
+                .map_err(|_| error(5, "§8: invalid target UTF-8"))?;
+            Some(crate::target::Target::parse(raw).map_err(|e| error(5, e))?)
+        };
         if obj.has_schedule {
-            return Err(error(
-                10,
-                "unimplemented: schedule (§11 verbatim consumption) (milestone 4)",
-            ));
+            let doc = crate::sched::object_schedule(&obj)
+                .map_err(|e| error(10, e))?
+                .unwrap();
+            let ids = crate::identity::compute(&obj).map_err(|e| error(10, e))?;
+            crate::sched::validate_entries(&doc, &obj, &ids).map_err(|e| error(10, e))?;
+            return crate::sched::require_library(
+                doc.get("bindings").and_then(|b| b.get("expansion")),
+            )
+            .map_err(|e| error(10, e));
         }
-        let resources = Resources::new(&obj).map_err(|s| error(ARG, s))?;
+        if let Some(t) = &target {
+            t.validate_object(&obj).map_err(|e| error(4, e))?;
+        }
+        let mut resources = Resources::new(&obj).map_err(|s| error(ARG, s))?;
+        if let Some(t) = target {
+            resources.set_target(t);
+        }
         output(
             out,
             bennett_program_t {
@@ -345,16 +357,13 @@ pub unsafe extern "C" fn bennett_qreg_new(
         let p = get_mut(p)?;
         let cls = text(cls)?;
         get_mut(out)?;
-        if cls != "any" {
-            return Err(error(
-                5,
-                "unimplemented: concrete target register classes (milestone 4)",
-            ));
-        }
         if n == 0 {
             return Err(error(ARG, "§3.3: empty register"));
         }
-        *out = p.resources.new_reg(n as usize);
+        *out = p
+            .resources
+            .new_reg(n as usize, cls)
+            .map_err(|e| error(5, e))?;
         Ok(())
     })
 }
@@ -858,13 +867,13 @@ pub unsafe extern "C" fn bennett_estimate_run(
         }
         Err(error(
             5,
-            "unimplemented: estimates/certificates (§8/§12) (milestone 4–5)",
+            "unimplemented: estimates/certificates (§8/§12) (milestone 5)",
         ))
     })
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_nresources(_p: *const bennett_estimate_t) -> usize {
-    eprintln!("unimplemented: estimates (milestone 4–5)");
+    eprintln!("unimplemented: estimates (milestone 5)");
     0
 }
 #[unsafe(no_mangle)]
@@ -874,7 +883,7 @@ pub unsafe extern "C" fn bennett_estimate_get(
     _name: *mut *const c_char,
     _value: *mut *const c_char,
 ) -> i32 {
-    status(|| Err(error(5, "unimplemented: estimates (milestone 4–5)")))
+    status(|| Err(error(5, "unimplemented: estimates (milestone 5)")))
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_certificate(
@@ -884,7 +893,7 @@ pub unsafe extern "C" fn bennett_estimate_certificate(
     if !len.is_null() {
         *len = 0
     }
-    eprintln!("unimplemented: estimate certificates (milestone 4–5)");
+    eprintln!("unimplemented: estimate certificates (milestone 5)");
     ptr::null()
 }
 free!(bennett_estimate_free, bennett_estimate_t);
@@ -896,7 +905,7 @@ pub unsafe extern "C" fn bennett_coverage_get(
     status(|| {
         get(p)?;
         *get_mut(out)? = ptr::null_mut();
-        Err(error(5, "unimplemented: coverage (§13) (milestone 4–5)"))
+        Err(error(5, "unimplemented: coverage (§13) (milestone 5)"))
     })
 }
 #[unsafe(no_mangle)]
@@ -907,7 +916,7 @@ pub unsafe extern "C" fn bennett_coverage_jcs(
     if !len.is_null() {
         *len = 0
     }
-    eprintln!("unimplemented: coverage (milestone 4–5)");
+    eprintln!("unimplemented: coverage (milestone 5)");
     ptr::null()
 }
 free!(bennett_coverage_free, bennett_coverage_t);

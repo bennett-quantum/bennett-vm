@@ -105,9 +105,10 @@ impl Json {
             }
             Json::Obj(m) => {
                 out.push('{');
-                // JCS sorts by UTF-16 code units; our keys are ASCII in
-                // every §9 schema, where that equals byte order.
-                for (i, (k, v)) in m.iter().enumerate() {
+                // RFC 8785 sorts property names by UTF-16 code units.
+                let mut entries = m.iter().collect::<Vec<_>>();
+                entries.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+                for (i, (k, v)) in entries.into_iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }

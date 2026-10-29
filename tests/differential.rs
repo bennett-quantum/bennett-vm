@@ -1362,3 +1362,48 @@ fn coherent_commands_on_every_fixture() {
         coherent_corpus(&path);
     }
 }
+
+#[test]
+fn published_d_and_g_cli_cases_differential() {
+    // Re-run every runnable D/G command; staged scenarios have no oracle surface.
+    let cases = workspace().join("bennett-isa-spec/conformance/cases");
+    let mut compared = 0;
+    for suite in ["D", "G"] {
+        let mut dirs = std::fs::read_dir(cases.join(suite))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect::<Vec<_>>();
+        dirs.sort();
+        for dir in dirs {
+            let doc =
+                bennett_vm::json::parse(&std::fs::read_to_string(dir.join("case.json")).unwrap())
+                    .unwrap();
+            if doc.get("unavailable").is_some() {
+                continue;
+            }
+            let Some(command) = doc.get("command").and_then(|v| v.as_arr()) else {
+                panic!("available D/G case without command: {}", dir.display())
+            };
+            let object = dir
+                .join(doc.get("object").unwrap().as_str().unwrap())
+                .canonicalize()
+                .unwrap();
+            let args = command
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .unwrap()
+                        .replace("{object}", object.to_str().unwrap())
+                        .replace("{dir}", dir.to_str().unwrap())
+                })
+                .collect::<Vec<_>>();
+            if suite == "D" {
+                assert_coherent(&args);
+            } else {
+                assert_outcome(doc.get("id").unwrap().as_str().unwrap(), &args);
+            }
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 17, "all 7 D and 10 G CLI cases must participate");
+}

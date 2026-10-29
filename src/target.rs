@@ -108,10 +108,10 @@ pub fn eval(
 ) -> Result<R, String> {
     let bound: Vec<_> = vars.keys().map(String::as_str).collect();
     check_expr(j, &bound)?;
-    if let Some(e) = vars.get("eps") {
-        if e <= &R::zero() || e > &R::from(1) {
-            return Err("§8.1: eps outside (0,1]".into());
-        }
+    if let Some(e) = vars.get("eps")
+        && (e <= &R::zero() || e > &R::from(1))
+    {
+        return Err("§8.1: eps outside (0,1]".into());
     }
     if matches!(j, Json::Num(_)) {
         return number(j);
@@ -374,6 +374,51 @@ impl Target {
         }
         Ok(target)
     }
+    fn static_expr(&self, e: &Json) -> Result<Option<R>, String> {
+        if matches!(e, Json::Num(_)) {
+            return number(e).map(Some);
+        }
+        if e.get("var").is_some() {
+            return Ok(None);
+        }
+        if let Some(t) = e.get("table") {
+            if !self.tables.contains_key(string(t)?) {
+                return Err("§8.1: unknown table".into());
+            }
+            return Ok(None);
+        }
+        let args = arr(field(e, "args")?)?;
+        let values = args
+            .iter()
+            .map(|v| self.static_expr(v))
+            .collect::<Result<Vec<_>, _>>()?;
+        let op = string(field(e, "op")?)?;
+        if op == "/" && values[1].as_ref().is_some_and(R::is_zero) {
+            return Err("§8.1: division by zero".into());
+        }
+        if op == "-" && args[0] == args[1] {
+            return Ok(Some(R::zero()));
+        }
+        if op == "log2inv_eps" || values.iter().any(Option::is_none) {
+            return Ok(None);
+        }
+        // All variables are absent except syntactically canceled subtrees.
+        // Evaluate folded arguments with exact arithmetic directly.
+        let a = args
+            .iter()
+            .map(|v| self.static_expr(v).map(Option::unwrap))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(match op {
+            "+" => a[0].add(&a[1]),
+            "-" => a[0].sub(&a[1]),
+            "*" => a[0].mul(&a[1]),
+            "/" => a[0].div(&a[1])?,
+            "min" => a[0].clone().min(a[1].clone()),
+            "max" => a[0].clone().max(a[1].clone()),
+            "ceil" => a[0].ceil(),
+            _ => unreachable!(),
+        }))
+    }
     fn validate_cost(&self, cost: &Json, bound: &[&str]) -> Result<BTreeSet<String>, String> {
         let mut vars = BTreeSet::new();
         field(cost, "time")?;
@@ -382,6 +427,9 @@ impl Target {
                 return Err(format!("§8.2: undeclared resource {n}"));
             }
             vars.extend(check_expr(e, bound)?);
+            if let Some(value) = self.static_expr(e)? {
+                nonnegative(value)?;
+            }
             if matches!(e, Json::Num(_)) {
                 nonnegative(number(e)?)?;
             }
@@ -407,12 +455,16 @@ impl Target {
             }
         }
         let mut vars = check_expr(field(g, "epsilon")?, &["k", "c", "eps"])?;
+        let constant_epsilon = self.static_expr(field(g, "epsilon")?)?;
+        if let Some(value) = &constant_epsilon {
+            nonnegative(value.clone())?;
+        }
         vars.extend(self.validate_cost(field(g, "cost")?, &["k", "c", "eps"])?);
-        if matches!(field(g, "epsilon")?, Json::Num(_)) {
-            let e = nonnegative(number(field(g, "epsilon")?)?)?;
-            if e.is_zero() && vars.contains("eps") {
-                return Err("§8.1: epsilon zero entry references eps".into());
-            }
+        if let Some(e) = constant_epsilon
+            && e.is_zero()
+            && vars.contains("eps")
+        {
+            return Err("§8.1: epsilon zero entry references eps".into());
         }
         Ok(())
     }
@@ -486,7 +538,9 @@ impl Target {
         n: usize,
         used: &BTreeMap<String, usize>,
     ) -> Result<String, String> {
-        for (c, v) in &self.classes {
+        let mut classes = self.classes.iter().collect::<Vec<_>>();
+        classes.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+        for (c, v) in classes {
             if requested != "any" && requested != c {
                 continue;
             }
@@ -535,6 +589,18 @@ impl Target {
         Ok(None)
     }
     pub fn lower(&self, g: &Gate, eps: &R, choice: Option<&str>) -> Result<Lowered, String> {
+        if g.own_controls > g.controls.len()
+            || own_controls(&g.op, g.own_controls + g.targets.len())? != g.own_controls
+        {
+            return Err("§8.3: invalid own control/target arity".into());
+        }
+        if matches!(g.op.as_str(), "rx" | "ry" | "rz") != g.theta.is_some() {
+            return Err("§8.3: gate parameter arity mismatch".into());
+        }
+        let wires = g.controls.iter().chain(&g.targets).collect::<BTreeSet<_>>();
+        if wires.len() != g.controls.len() + g.targets.len() {
+            return Err("§3.3: gate operands must be disjoint".into());
+        }
         if eps.negative() || eps > &R::from(1) {
             return Err("§8.1: eps outside [0,1]".into());
         }
@@ -984,5 +1050,51 @@ impl Target {
             });
         }
         self.account(&events, &live)
+    }
+}
+
+impl Target {
+    /// Guard paths whose gate-level ordinals/scratch require the absent §11 library.
+    /// Gate-only actions use the published §4.4 matrices after actual target expansion.
+    pub fn validate_object(&self, object: &crate::object::Object) -> Result<(), String> {
+        if !self.supports_ptr(object.ptr_width) {
+            return Err("§8.3: target does not support object ptr_width".into());
+        }
+        for f in &object.functions {
+            if !matches!(
+                f.kind,
+                crate::object::FnKind::Action
+                    | crate::object::FnKind::PermAction
+                    | crate::object::FnKind::Oracle
+                    | crate::object::FnKind::Lproc
+            ) {
+                continue;
+            }
+            let mut instructions = vec![];
+            f.flat_instrs(&mut instructions);
+            for ins in instructions {
+                if crate::action::is_gate_name(&ins.op)
+                    || [
+                        "qalloc",
+                        "qfree",
+                        "qborrow",
+                        "qreturn",
+                        "action_call",
+                        "adj",
+                        "ctl",
+                        "qpred",
+                        "qunpred",
+                    ]
+                    .contains(&ins.op.as_str())
+                {
+                    continue;
+                }
+                return Err(format!(
+                    "§8/§11: unimplemented: gate-level expansion for {} (milestone 4); required ref library is unpublished (bennett-vm-47t)",
+                    ins.op
+                ));
+            }
+        }
+        Ok(())
     }
 }

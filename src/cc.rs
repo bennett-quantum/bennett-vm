@@ -53,6 +53,8 @@ struct Activation {
 }
 #[derive(Clone)]
 struct Frame {
+    classes_before: BTreeMap<usize, String>,
+    classes_after: BTreeMap<usize, String>,
     wire_boundary: usize,
     region: Option<Invocation>,
     definitions: Vec<(Key, usize)>,
@@ -318,6 +320,20 @@ impl Machine {
                 self.data = d.clone();
             }
         }
+        for key in frame
+            .classes_before
+            .keys()
+            .chain(frame.classes_after.keys())
+            .collect::<BTreeSet<_>>()
+        {
+            if frame.classes_before.get(key) != frame.classes_after.get(key) {
+                if let Some(class) = frame.classes_before.get(key) {
+                    self.quantum.wire_classes.insert(*key, class.clone());
+                } else {
+                    self.quantum.wire_classes.remove(key);
+                }
+            }
+        }
         if control {
             self.stack = frame.control.clone();
             self.next_activation = frame.next_activation;
@@ -338,6 +354,7 @@ impl Machine {
         let before = self.data.clone();
         let wire_boundary = self.quantum.wire_count();
         self.pending_region = None;
+        let classes_before = self.quantum.wire_classes.clone();
         let env_before = self.env.clone();
         let control = self.stack.clone();
         let next_activation = self.next_activation;
@@ -411,6 +428,8 @@ impl Machine {
             ("memory", Json::Arr(mem)),
         ]));
         self.history.push(Frame {
+            classes_before,
+            classes_after: self.quantum.wire_classes.clone(),
             wire_boundary,
             region: self.pending_region.take(),
             definitions: self.definitions.clone(),
@@ -681,7 +700,7 @@ impl Machine {
             "qreg" => match op {
                 "qreg.new" => {
                     let n: usize = xs[1].parse().map_err(err)?;
-                    let ws = self.quantum.alloc_wires(n);
+                    let ws = self.quantum.target_alloc(n, &xs[0])?;
                     let id = self.data.new_handle(ws, None);
                     result = Some(Value::Qreg(id));
                 }
@@ -691,6 +710,7 @@ impl Machine {
                     if h.parent.is_some() || !self.quantum.is_clean(&h.wires) {
                         return Ok(Some(4));
                     }
+                    self.quantum.target_release(&h.wires.clone());
                     self.data.handles.get_mut(&id).unwrap().live = false;
                 }
                 "qreg.slice" => {
@@ -733,6 +753,7 @@ impl Machine {
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
                 let (v, bits) = self.quantum.measure(&ws, draw);
+                self.quantum.target_release(&ws);
                 self.data.handles.get_mut(&id).unwrap().live = false;
                 self.data.measurements.push(Json::obj(vec![
                     ("bits", Json::Str(bits)),
@@ -1073,14 +1094,19 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     if opts.positional.len() != 2 {
         return Err("command requires <object> <entry>".into());
     }
-    if opts.one("target")?.is_some() {
-        return Err(
-            "unimplemented: target (§8 launch lowering) (milestone 4); staged deliverable 9".into(),
-        );
-    }
     let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
     if obj.has_schedule && mode == Mode::Program {
-        return Err("unimplemented: schedule (§11 verbatim consumption) (milestone 4); staged deliverable 10".into());
+        let doc = crate::sched::object_schedule(&obj)?.unwrap();
+        let ids = crate::identity::compute(&obj)?;
+        crate::sched::validate_entries(&doc, &obj, &ids)?;
+        return crate::sched::require_library(doc.get("bindings").and_then(|b| b.get("expansion")));
+    }
+    let target = opts
+        .one("target")?
+        .map(|path| crate::target::Target::parse(&cliargs::read_object(path)?))
+        .transpose()?;
+    if let Some(t) = &target {
+        t.validate_object(&obj)?;
     }
     let name = cliargs::entry_name(&opts.positional[1]);
     let f = obj
@@ -1110,6 +1136,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     };
     let mut data = Data::new(&obj)?;
     let mut quantum = QuantumState::new();
+    quantum.target = target.map(std::sync::Arc::new);
     for raw in opts.all("mem") {
         let (n, h) = raw.split_once('=').ok_or("--mem requires global=hex")?;
         let g = obj
@@ -1162,7 +1189,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                 if bits.len() != *n || !bits.bytes().all(|b| b == b'0' || b == b'1') {
                     return Err("§10: E_ARG: qreg bits differ from signature".into());
                 }
-                let ws = quantum.alloc_wires(*n);
+                let ws = quantum.target_alloc(*n, "any")?;
                 let mut v = BigUint::zero();
                 for (i, b) in bits.bytes().enumerate() {
                     v.set_bit(i, b == b'1');
@@ -1503,9 +1530,12 @@ impl Resources {
             quantum: QuantumState::new(),
         })
     }
-    pub(crate) fn new_reg(&mut self, n: usize) -> u64 {
-        let ws = self.quantum.alloc_wires(n);
-        self.data.new_handle(ws, None)
+    pub(crate) fn set_target(&mut self, target: crate::target::Target) {
+        self.quantum.target = Some(std::sync::Arc::new(target));
+    }
+    pub(crate) fn new_reg(&mut self, n: usize, cls: &str) -> Result<u64, String> {
+        let ws = self.quantum.target_alloc(n, cls)?;
+        Ok(self.data.new_handle(ws, None))
     }
     pub(crate) fn reg_width(&self, id: u64) -> Option<usize> {
         self.data.handle(id).ok().map(|h| h.wires.len())
@@ -1523,6 +1553,7 @@ impl Resources {
         self.quantum.prepare(&self.data.handles[&id].wires, &v);
     }
     pub(crate) fn free(&mut self, id: u64) {
+        self.quantum.target_release(&self.data.handles[&id].wires);
         self.data.handles.get_mut(&id).unwrap().live = false;
     }
 }

@@ -1,14 +1,39 @@
-# Milestone 4 in progress — 2026-10-29
+# Milestone 4 partial implementation — 2026-10-29
 
-Target evaluator: five new hand-derived §8 test groups pass after red. Exact
-arbitrary precision rational arithmetic, closed target schema, canonical bytes
-and hash, ordered gate matching, nonnested scheme expansion and event-list
-resource accounting. No reference target evaluator exists; tests cite the spec.
+Milestone `bennett-vm-v23` is **not complete**. Gate-only target launch execution,
+exact target evaluation and accounting, schedule validation utilities and all
+15 published scheduler C exports are implemented. The mandatory `ref` expansion
+document is absent (47t), so no schedule is accepted or emitted; default requests
+return UNSUPPORTED with the exact library/version/reason. Full oracle/structured
+row lowering, designated dirty scheme pools, approximate scheduled realisations,
+and schedule-driven execution/accounting remain milestone 4. Branch enumeration
+and all four reversible devices remain implemented from milestones 1–3.
 
-Blockers: bennett-vm-47t (ISA does not publish the ref expansion document with
-ordinals/hash required by §11); bennett-vm-clh (E epsilon-zero fixture has no eps
-reference; hash fixture has a trailing newline). No foreign repository changed.
-Milestone v23 remains in progress; this is not a completion/conformance claim.
+Target tests cite §8; scheduler tests cite §11; no foreign crate code is consumed.
+Target input is exactly the §8 JSON document, canonical bytes required. Gate/scheme
+costs use arbitrary precision exact rationals; no binary64 cost arithmetic.
+Classes resolve in UTF-16 JCS order. Expanded native leaves are actually simulated;
+schemes have no own cost. The target author owes template correctness (§8.3).
+Class metadata is retained/restored with classical history, separate from Q state.
+Static known-zero divisors are rejected while loading; context-dependent errors
+are rejected when lowering. Event accounting is an explicit library operation on
+leaf events and live intervals; it is **not** an end-to-end resource estimate.
+
+The published harness cannot promote staged scenarios: its runner returns
+UNAVAILABLE unconditionally when `case.unavailable` exists. Its raw current verdict
+is **445 pass / 2 fail / 43 unavailable** (exit 1). The two failures are obsolete
+staging-prose probes, not changed semantic expected values: E requires the string
+"staged deliverable 9" instead of the actual §8.1 noncanonical-input error; H
+requires "staged deliverable 10" instead of the actual §11 unavailable-ref-library
+error. The integration test gates all 445 available cases and asserts the exact
+identity/reason of those two remaining probe failures, preserving the raw report.
+
+ISA gaps: `47t` missing ref expansion; `cxg` undefined eps_decade table indexing;
+`clh` contradictory E fixture data (epsilon-zero file has no forbidden reference;
+JCS hash file has a trailing newline, and hashes the newline). No conformance
+fixture/expected value was changed. All remaining staged APIs name milestone 5
+for rigorous certificates/estimates/coverage; milestone 4 target paths name their
+specific expansion/pool/index item. Full verification counts will follow below.
 
 # Milestone 3 verification — 2026-10-29
 

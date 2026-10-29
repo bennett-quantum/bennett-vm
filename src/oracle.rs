@@ -860,7 +860,7 @@ impl<'o> Machine<'o> {
             .to_string();
         let tk = &ins.operands[1];
         let budget = match self.args.get(tk) {
-            Some(Value::Token(b)) => *b,
+            Some(Value::Token(b) | Value::TokenId(_, b)) => *b,
             _ => {
                 return Err(diag(
                     "4.2",
@@ -1110,7 +1110,7 @@ pub fn run_oracle(
                 pseudo.insert(p.name.clone(), bits.clone());
                 pseudo_widths.insert(p.name.clone(), obj.ptr_width);
             }
-            (Type::Token, Value::Token(b)) => {
+            (Type::Token, Value::Token(b) | Value::TokenId(_, b)) => {
                 cliargs::validate_budget(obj, b)?;
             }
             (Type::F64, Value::F64(_)) => {}

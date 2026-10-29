@@ -911,7 +911,7 @@ impl<'o> Exec<'o> {
         for (ty, name) in types.iter().zip(names.iter()) {
             match ty {
                 crate::object::Type::Token => match self.args.get(name) {
-                    Some(Value::Token(b)) => out.push(Value::Token(*b)),
+                    Some(Value::Token(b) | Value::TokenId(_, b)) => out.push(Value::Token(*b)),
                     _ => {
                         return Err(diag(
                             "4.7",
@@ -976,7 +976,7 @@ impl<'o> Exec<'o> {
 
     fn token_arg(&self, name: &str) -> Result<Budget, String> {
         match self.args.get(name) {
-            Some(Value::Token(b)) => Ok(*b),
+            Some(Value::Token(b) | Value::TokenId(_, b)) => Ok(*b),
             _ => Err(diag(
                 "4.7",
                 format!(

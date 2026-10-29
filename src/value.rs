@@ -55,10 +55,15 @@ impl Budget {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
-    Int { width: usize, bits: BigUint },
+    Int {
+        width: usize,
+        bits: BigUint,
+    },
     Ptr(BigUint),
     F64(f64),
     Token(Budget),
+    /// Host-visible token identity is retained across classical calls/results.
+    TokenId(u64, Budget),
     Qreg(u64),
 }
 
@@ -89,7 +94,7 @@ impl Value {
             Value::Int { width, .. } => format!("i{width}"),
             Value::Ptr(_) => "ptr".into(),
             Value::F64(_) => "f64".into(),
-            Value::Token(_) => "token".into(),
+            Value::Token(_) | Value::TokenId(_, _) => "token".into(),
             Value::Qreg(_) => "qreg".into(),
         }
     }
@@ -107,7 +112,7 @@ impl Value {
                 ("type", Json::Str("f64".into())),
                 ("value", Json::Num(crate::json::format_f64(*v))),
             ]),
-            Value::Token(b) => Json::obj(vec![
+            Value::Token(b) | Value::TokenId(_, b) => Json::obj(vec![
                 ("type", Json::Str("token".into())),
                 ("value", b.to_json()),
             ]),
@@ -123,7 +128,9 @@ impl Value {
             Value::Int { width, bits } => format!("Int({width}, {bits})"),
             Value::Ptr(bits) => format!("Ptr({bits})"),
             Value::F64(v) => format!("F64({v})"),
-            Value::Token(b) => format!("Token({}, {}, {}, {})", b.steps, b.heap, b.stack, b.depth),
+            Value::Token(b) | Value::TokenId(_, b) => {
+                format!("Token({}, {}, {}, {})", b.steps, b.heap, b.stack, b.depth)
+            }
             Value::Qreg(id) => format!("Qreg({id})"),
         }
     }

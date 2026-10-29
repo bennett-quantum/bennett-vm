@@ -890,7 +890,7 @@ impl Machine {
             used.extend([xs[3].clone(), xs[4].clone()]);
             used.extend(mem_names);
             let budget = match self.read(&xs[1]).map_err(|_| err("missing oracle token"))? {
-                Value::Token(b) => b,
+                Value::Token(b) | Value::TokenId(_, b) => b,
                 _ => return Err(err("oracle call requires token")),
             };
             let args = self
@@ -1041,13 +1041,13 @@ pub fn cmd_reverse(args: &[String]) -> Result<(), String> {
     // Dispatch by entry kind before scanning tier-specific options.
     if args.len() >= 2 {
         let (obj, _) = crate::load(&cliargs::read_object(&args[0])?, false)?;
-        if let Some(f) = obj.function(cliargs::entry_name(&args[1])) {
-            if !matches!(f.kind, FnKind::Cc | FnKind::R) {
-                return Err(format!(
-                    "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
-                    f.kind.kind_str()
-                ));
-            }
+        if let Some(f) = obj.function(cliargs::entry_name(&args[1]))
+            && !matches!(f.kind, FnKind::Cc | FnKind::R)
+        {
+            return Err(format!(
+                "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
+                f.kind.kind_str()
+            ));
         }
     }
     command(args, Mode::Reverse)
@@ -1445,9 +1445,16 @@ impl Data {
         if before.bump != after.bump {
             self.bump = before.bump.clone();
         }
-        if before.table != after.table {
-            self.table = before.table.clone();
+        for entry in &after.table {
+            let previous = before.table.iter().find(|e| e.base == entry.base);
+            if previous != Some(entry) {
+                self.table.retain(|e| e.base != entry.base);
+                if let Some(previous) = previous {
+                    self.table.push(previous.clone());
+                }
+            }
         }
+        self.table.sort_by(|a, b| a.base.cmp(&b.base));
         if before.console != after.console {
             self.console = before.console.clone();
         }
@@ -1467,6 +1474,21 @@ impl Data {
             self.measurements = before.measurements.clone();
         }
         // Handle IDs are never recycled across host-visible calls.
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ResourceKey {
+    Allocator,
+    Entry(BigUint),
+    Memory(BigUint, BigUint),
+    Device(String),
+}
+impl ResourceKey {
+    pub(crate) fn overlaps(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Memory(a, b), Self::Memory(c, d)) => a < d && c < b,
+            _ => self == other,
+        }
     }
 }
 #[derive(Clone)]
@@ -1507,9 +1529,6 @@ impl Resources {
 #[derive(Clone)]
 pub(crate) struct RuntimeRun {
     machine: Machine,
-    tape_start: usize,
-    measurement_start: usize,
-    host_start: usize,
 }
 impl RuntimeRun {
     pub(crate) fn new(
@@ -1526,9 +1545,6 @@ impl RuntimeRun {
             .map(|(p, v)| ((0, p.name.clone()), vec![v.clone()]))
             .collect();
         Self {
-            tape_start: resources.data.tape.len(),
-            measurement_start: resources.data.measurements.len(),
-            host_start: resources.data.hosts.len(),
             machine: Machine {
                 quantum: resources.quantum.clone(),
                 quantum_events: vec![],
@@ -1563,12 +1579,50 @@ impl RuntimeRun {
         }
     }
     pub(crate) fn sync(&mut self, r: &Resources) {
-        self.machine.data = r.data.clone();
+        let local = &self.machine.data;
+        let mut shared = r.data.clone();
+        shared.entropy_pos = local.entropy_pos;
+        shared.tape = local.tape.clone();
+        shared.hosts = local.hosts.clone();
+        shared.measurements = local.measurements.clone();
+        self.machine.data = shared;
         self.machine.quantum = r.quantum.clone();
     }
     pub(crate) fn export(&self, r: &mut Resources) {
         r.data = self.machine.data.clone();
+        r.data.entropy_pos = 0;
+        r.data.tape.clear();
+        r.data.hosts.clear();
+        r.data.measurements.clear();
         r.quantum = self.machine.quantum.clone();
+    }
+    fn records(&self, field: fn(&Data) -> &Vec<Json>) -> Vec<Json> {
+        self.machine
+            .history
+            .iter()
+            .filter(|f| !f.reversed && !f.marker)
+            .flat_map(|f| match (&f.data, &f.after) {
+                (Some(before), Some(after)) if field(after).len() > field(before).len() => {
+                    field(after)[field(before).len()..].to_vec()
+                }
+                _ => vec![],
+            })
+            .collect()
+    }
+    pub(crate) fn created_regs(&self) -> Vec<u64> {
+        self.machine
+            .history
+            .last()
+            .and_then(|f| f.data.as_ref().zip(f.after.as_ref()))
+            .map(|(before, after)| {
+                after
+                    .handles
+                    .keys()
+                    .filter(|q| !before.handles.contains_key(q))
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
     pub(crate) fn terminal(&self) -> bool {
         self.machine.fault.is_some() || self.machine.stack.is_empty()
@@ -1583,26 +1637,68 @@ impl RuntimeRun {
         self.machine.history.iter().any(|f| f.measured)
     }
     pub(crate) fn tape(&self) -> Vec<Json> {
-        self.machine.data.tape[self.tape_start..].to_vec()
+        self.records(|d| &d.tape)
     }
     pub(crate) fn measurements(&self) -> Vec<Json> {
-        self.machine.data.measurements[self.measurement_start..].to_vec()
+        self.records(|d| &d.measurements)
     }
     pub(crate) fn history_len(&self) -> usize {
         self.machine.history.len()
     }
     // Locks are acquired before the instruction. Classical memory/devices share
     // an ordering domain; qreg operands lock only their actual handles.
-    pub(crate) fn touches(&self) -> (bool, Vec<u64>) {
+    pub(crate) fn touches(&self) -> (Vec<ResourceKey>, Vec<u64>) {
         let m = &self.machine;
         let Some(a) = m.stack.last() else {
-            return (false, vec![]);
+            return (vec![], vec![]);
         };
         let i = &m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index];
-        let memory = matches!(
-            i.op.split('.').next().unwrap(),
-            "load" | "store" | "alloc" | "free" | "hostcall" | "effect"
-        );
+        let mut memory = vec![];
+        let mut range = |p: &str, n: BigUint| {
+            if let Ok(p) = m.bits(p) {
+                memory.push(ResourceKey::Memory(p.clone(), p.add(&n)));
+            }
+        };
+        match i.op.split('.').next().unwrap() {
+            "alloc" => {
+                let n = m.bits(&i.operands[0]).unwrap_or_default();
+                memory.push(ResourceKey::Allocator);
+                memory.push(ResourceKey::Memory(
+                    m.data.bump.clone(),
+                    m.data.bump.add(&if n.is_zero() { u(1) } else { n }),
+                ));
+            }
+            "free" => {
+                if let Ok(p) = m.bits(&i.operands[0])
+                    && let Some(e) = m.data.table.iter().find(|e| e.base == p)
+                {
+                    memory.push(ResourceKey::Memory(p.clone(), p.add(&e.size)));
+                    memory.push(ResourceKey::Entry(p));
+                }
+            }
+            "load" | "store" => {
+                let w: usize = i.op.rsplit_once(".i").unwrap().1.parse().unwrap();
+                range(&i.operands[0], u((w / 8) as u64));
+            }
+            "hostcall" => range(&i.operands[1], m.bits(&i.operands[2]).unwrap_or_default()),
+            "effect" => {
+                let (dev, op) = i.operands[0].split_once('.').unwrap();
+                let (p, n) = match (dev, op) {
+                    ("clock", _) => (&i.operands[1], u(8)),
+                    ("block", _) => (&i.operands[2], u(512)),
+                    _ => (
+                        &i.operands[1],
+                        i.operands
+                            .get(2)
+                            .and_then(|n| m.bits(n).ok())
+                            .unwrap_or_default(),
+                    ),
+                };
+                range(p, n);
+                memory.push(ResourceKey::Device(dev.into()));
+            }
+            _ => {}
+        }
         let mut regs = vec![];
         for text in &i.operands {
             for name in
@@ -1616,6 +1712,21 @@ impl RuntimeRun {
                 }
             }
         }
+        let entries = memory
+            .iter()
+            .filter_map(|key| {
+                if let ResourceKey::Memory(p, end) = key {
+                    m.data
+                        .table
+                        .iter()
+                        .find(|e| e.live && e.base <= *p && *end <= e.base.add(&e.size))
+                        .map(|e| ResourceKey::Entry(e.base.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        memory.extend(entries);
         (memory, regs)
     }
     pub(crate) fn request(&self) -> Option<(String, Vec<u8>)> {
@@ -1647,7 +1758,24 @@ impl RuntimeRun {
         Ok(())
     }
     pub(crate) fn step(&mut self) -> Result<(), String> {
-        self.machine.step()
+        let m = &mut self.machine;
+        if let Some(a) = m.stack.last()
+            && m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op == "measure"
+        {
+            use std::io::Read;
+            let mut bs = [0u8; 8];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut bs))
+                .map_err(|e| format!("§14.2: measurement randomness unavailable: {e}"))?;
+            m.draws
+                .push((u64::from_le_bytes(bs) >> 11) as f64 / ((1u64 << 53) as f64));
+        }
+        let checkpoint = self.machine.clone();
+        if let Err(e) = self.machine.step() {
+            self.machine = checkpoint;
+            return Err(e);
+        }
+        Ok(())
     }
     pub(crate) fn reverse_to(&mut self, n: usize) -> Result<(), String> {
         if n > self.machine.history.len() {
@@ -1681,14 +1809,56 @@ impl RuntimeRun {
     pub(crate) fn snapshot(&self, state: &str) -> Json {
         Json::obj(vec![
             ("state", Json::Str(state.into())),
+            (
+                "fault",
+                self.machine.fault.map(Json::u64).unwrap_or(Json::Null),
+            ),
+            (
+                "instances",
+                Json::Arr(
+                    self.machine
+                        .env
+                        .iter()
+                        .map(|((id, name), values)| {
+                            Json::obj(vec![
+                                ("activation", Json::u64(*id)),
+                                ("name", Json::Str(name.clone())),
+                                ("values", vals(values)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "frames",
+                Json::Arr(
+                    self.machine
+                        .history
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            Json::obj(vec![
+                                ("index", Json::u64(i as u64)),
+                                ("reversed", Json::Bool(f.reversed)),
+                                ("uncall", Json::Bool(f.marker)),
+                                ("pure", Json::Bool(f.pure)),
+                                ("measured", Json::Bool(f.measured)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+            ("console_hex", Json::Str(hex(&self.machine.data.console))),
+            ("clock", Json::u64(self.machine.data.clock)),
+            (
+                "entropy_position",
+                Json::u64(self.machine.data.entropy_pos as u64),
+            ),
             ("history_length", Json::u64(self.history_len() as u64)),
             ("memory_digest", Json::Str(self.machine.data.digest())),
             ("trace", Json::Arr(self.machine.trace.clone())),
             ("tape", Json::Arr(self.tape())),
-            (
-                "host_requests",
-                Json::Arr(self.machine.data.hosts[self.host_start..].to_vec()),
-            ),
+            ("host_requests", Json::Arr(self.records(|d| &d.hosts))),
         ])
     }
 }

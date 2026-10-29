@@ -514,15 +514,23 @@ pub fn parse(text: &str) -> Result<Object, String> {
             "devices" => obj.devices = Some(parse_json_section(name, body)?),
             "layout" => obj.layout = Some(parse_layout(body)?),
             "schedule" => {
-                parse_json_section(name, body)?;
+                metadata_keys(
+                    name,
+                    &parse_json_section(name, body)?,
+                    &["bindings", "entries"],
+                )?;
                 obj.has_schedule = true;
             }
             "certificate" => {
-                parse_json_section(name, body)?;
+                metadata_keys(
+                    name,
+                    &parse_json_section(name, body)?,
+                    &["versions", "bindings", "producer", "regions", "composition"],
+                )?;
                 obj.has_certificate = true;
             }
             "coverage" => {
-                parse_json_section(name, body)?;
+                metadata_keys(name, &parse_json_section(name, body)?, &["entries"])?;
                 obj.has_coverage = true;
             }
             _ => unreachable!(),
@@ -1133,4 +1141,23 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
         line: line_no,
         raw: line,
     })
+}
+
+// §9.1: metadata is not an extension bag. Semantic schedule/certificate
+// consumers remain staged, but their top-level envelope is checked now.
+fn metadata_keys(name: &str, value: &Json, fields: &[&str]) -> Result<(), String> {
+    let object = value
+        .as_obj()
+        .ok_or_else(|| format!("§9.1: {name} must be an object"))?;
+    for field in object.keys() {
+        if !fields.contains(&field.as_str()) {
+            return Err(format!("§9.1: unknown {name} field {field:?}"));
+        }
+    }
+    for field in fields {
+        if !object.contains_key(*field) {
+            return Err(format!("§9.1: missing {name} field {field:?}"));
+        }
+    }
+    Ok(())
 }

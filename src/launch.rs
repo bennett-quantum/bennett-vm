@@ -7,7 +7,7 @@
 )]
 use crate::{
     bigint::BigUint,
-    cc::{Resources, RuntimeRun},
+    cc::{ResourceKey, Resources, RuntimeRun},
     json::Json,
     object::{FnKind, Object, Type},
     value::{Budget, Value},
@@ -82,9 +82,6 @@ fn id() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
-macro_rules! api { ($name:ident($($a:ident:$t:ty),* $(,)?) $body:block) => {
-    #[unsafe(no_mangle)] pub unsafe extern "C" fn $name($($a:$t),*)->i32 {status(|| $body)}
-}; }
 macro_rules! free {
     ($name:ident,$t:ty) => {
         #[unsafe(no_mangle)]
@@ -126,7 +123,7 @@ pub struct bennett_program_t {
     tokens: BTreeMap<u64, (String, Budget)>,
     runs: BTreeMap<u64, Run>,
     locks: BTreeMap<u64, u64>,
-    memory_owner: Option<u64>,
+    memory_locks: Vec<(ResourceKey, u64)>,
 }
 struct Encoded {
     kind: i32,
@@ -190,18 +187,27 @@ impl bennett_program_t {
         }
         run.runtime.sync(&self.resources);
         let (memory, regs) = self.runs[&r].runtime.touches();
-        if memory && self.memory_owner.is_some_and(|owner| owner != r)
-            || regs
+        if memory.iter().any(|key| {
+            self.memory_locks
                 .iter()
-                .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
+                .any(|(other, owner)| *owner != r && key.overlaps(other))
+        }) || regs
+            .iter()
+            .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
         {
             return Err(error(
                 INVALID,
                 "§10: resources owned exclusively by another non-CLOSED run",
             ));
         }
-        if memory {
-            self.memory_owner = Some(r)
+        for key in memory {
+            if !self
+                .memory_locks
+                .iter()
+                .any(|(k, owner)| *owner == r && *k == key)
+            {
+                self.memory_locks.push((key, r));
+            }
         }
         for q in regs {
             self.locks.insert(q, r);
@@ -221,6 +227,9 @@ impl bennett_program_t {
                 State::Completed
             };
         }
+        for q in run.runtime.created_regs() {
+            self.locks.insert(q, r);
+        }
         // New registers created by a run also remain exclusively owned.
         for v in run.runtime.values() {
             if let Value::Qreg(q) = v {
@@ -230,48 +239,173 @@ impl bennett_program_t {
         Ok(())
     }
 }
-api!(bennett_load(object:*const u8,len:usize,target:*const u8,tlen:usize,out:*mut *mut bennett_program_t) {
-    *get_mut(out)?=ptr::null_mut();
-    let raw=std::str::from_utf8(bytes(object,len)?).map_err(|_|error(ARG,"§16: invalid UTF-8 object"))?;
-    bytes(target,tlen)?;
-    let (obj,_)=crate::load(raw,false).map_err(|s|{
-        let code=if s.contains("version"){1}else if s.contains("ptr_width"){2}else if s.contains("device")||s.contains("service"){3}else{ARG};error(code,s)
-    })?;
-    if tlen!=0{return Err(error(5,"unimplemented: target (§8 launch lowering) (milestone 4)"))}
-    if obj.has_schedule{return Err(error(10,"unimplemented: schedule (§11 verbatim consumption) (milestone 4)"))}
-    let resources=Resources::new(&obj).map_err(|s|error(ARG,s))?;
-    output(out,bennett_program_t{obj:Arc::new(obj),resources,tokens:BTreeMap::new(),runs:BTreeMap::new(),locks:BTreeMap::new(),memory_owner:None})
-});
-api!(bennett_unload(p:*mut bennett_program_t) {
-    if get(p)?.runs.values().any(|r|r.state!=State::Closed){return Err(error(INVALID,"§10: bennett_unload with a run not CLOSED"))}
-    drop(Box::from_raw(p)); Ok(())
-});
-api!(bennett_budget(p:*mut bennett_program_t,region:*const c_char,steps:u64,heap:u64,stack:u64,depth:u64,out:*mut u64) {
-    let p=get_mut(p)?;let name=text(region)?.trim_start_matches('@');get_mut(out)?;
-    let f=p.obj.function(name).ok_or_else(||error(ARG,"§10: unknown budget region"))?;
-    if !matches!(f.kind,FnKind::Oracle|FnKind::Action){return Err(error(ARG,"§10: budget requires an oracle/action region"))}
-    let b=Budget{steps,heap,stack,depth};crate::cliargs::validate_budget(&p.obj,&b).map_err(|s|error(6,s))?;
-    let token=id();p.tokens.insert(token,(name.into(),b));*out=token;Ok(())
-});
-api!(bennett_qreg_new(p:*mut bennett_program_t,cls:*const c_char,n:u32,out:*mut u64) {
-    let p=get_mut(p)?;let cls=text(cls)?;get_mut(out)?;
-    if cls!="any" {return Err(error(5,"unimplemented: concrete target register classes (milestone 4)"))}
-    if n==0{return Err(error(ARG,"§3.3: empty register"))}
-    *out=p.resources.new_reg(n as usize);Ok(())
-});
-api!(bennett_qreg_prepare(p:*mut bennett_program_t,q:u64,bits:*const u8,nbits:usize) {
-    let p=get_mut(p)?;p.unlocked(q)?;let bs=bytes(bits,nbits)?;
-    if p.resources.reg_width(q)!=Some(nbits)||bs.iter().any(|b|*b>1){return Err(error(ARG,"§10: register width/bits mismatch"))}
-    if !p.resources.clean(q){return Err(error(7,"§10: E_QREG_NOT_CLEAN"))}p.resources.prepare(q,bs);Ok(())
-});
-api!(bennett_qreg_free(p:*mut bennett_program_t,q:u64) {
-    let p=get_mut(p)?;p.unlocked(q)?;
-    if p.resources.reg_width(q).is_none(){return Err(error(ARG,"§10: invalid register"))}
-    if !p.resources.clean(q){return Err(error(7,"§10: E_QREG_NOT_CLEAN"))}p.resources.free(q);Ok(())
-});
-api!(bennett_args_new(n:usize,out:*mut *mut bennett_args_t) {
-    get_mut(out)?;let mut values=vec![];values.try_reserve_exact(n).map_err(|_|error(12,"§10: E_NOMEM"))?;values.resize(n,None);output(out,bennett_args_t{values})
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_load(
+    object: *const u8,
+    len: usize,
+    target: *const u8,
+    tlen: usize,
+    out: *mut *mut bennett_program_t,
+) -> i32 {
+    status(|| {
+        *get_mut(out)? = ptr::null_mut();
+        let raw = std::str::from_utf8(bytes(object, len)?)
+            .map_err(|_| error(ARG, "§16: invalid UTF-8 object"))?;
+        bytes(target, tlen)?;
+        let (obj, _) = crate::load(raw, false).map_err(|s| {
+            let code = if s.contains("version") {
+                1
+            } else if s.contains("ptr_width") {
+                2
+            } else if s.contains("device") || s.contains("service") {
+                3
+            } else {
+                ARG
+            };
+            error(code, s)
+        })?;
+        if tlen != 0 {
+            return Err(error(
+                5,
+                "unimplemented: target (§8 launch lowering) (milestone 4)",
+            ));
+        }
+        if obj.has_schedule {
+            return Err(error(
+                10,
+                "unimplemented: schedule (§11 verbatim consumption) (milestone 4)",
+            ));
+        }
+        let resources = Resources::new(&obj).map_err(|s| error(ARG, s))?;
+        output(
+            out,
+            bennett_program_t {
+                obj: Arc::new(obj),
+                resources,
+                tokens: BTreeMap::new(),
+                runs: BTreeMap::new(),
+                locks: BTreeMap::new(),
+                memory_locks: vec![],
+            },
+        )
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_unload(p: *mut bennett_program_t) -> i32 {
+    status(|| {
+        if get(p)?.runs.values().any(|r| r.state != State::Closed) {
+            return Err(error(INVALID, "§10: bennett_unload with a run not CLOSED"));
+        }
+        drop(Box::from_raw(p));
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_budget(
+    p: *mut bennett_program_t,
+    region: *const c_char,
+    steps: u64,
+    heap: u64,
+    stack: u64,
+    depth: u64,
+    out: *mut u64,
+) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let name = text(region)?.trim_start_matches('@');
+        get_mut(out)?;
+        let f = p
+            .obj
+            .function(name)
+            .ok_or_else(|| error(ARG, "§10: unknown budget region"))?;
+        if !matches!(f.kind, FnKind::Oracle | FnKind::Action) {
+            return Err(error(ARG, "§10: budget requires an oracle/action region"));
+        }
+        let b = Budget {
+            steps,
+            heap,
+            stack,
+            depth,
+        };
+        crate::cliargs::validate_budget(&p.obj, &b).map_err(|s| error(6, s))?;
+        let token = id();
+        p.tokens.insert(token, (name.into(), b));
+        *out = token;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_qreg_new(
+    p: *mut bennett_program_t,
+    cls: *const c_char,
+    n: u32,
+    out: *mut u64,
+) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let cls = text(cls)?;
+        get_mut(out)?;
+        if cls != "any" {
+            return Err(error(
+                5,
+                "unimplemented: concrete target register classes (milestone 4)",
+            ));
+        }
+        if n == 0 {
+            return Err(error(ARG, "§3.3: empty register"));
+        }
+        *out = p.resources.new_reg(n as usize);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_qreg_prepare(
+    p: *mut bennett_program_t,
+    q: u64,
+    bits: *const u8,
+    nbits: usize,
+) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        p.unlocked(q)?;
+        let bs = bytes(bits, nbits)?;
+        if p.resources.reg_width(q) != Some(nbits) || bs.iter().any(|b| *b > 1) {
+            return Err(error(ARG, "§10: register width/bits mismatch"));
+        }
+        if !p.resources.clean(q) {
+            return Err(error(7, "§10: E_QREG_NOT_CLEAN"));
+        }
+        p.resources.prepare(q, bs);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_qreg_free(p: *mut bennett_program_t, q: u64) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        p.unlocked(q)?;
+        if p.resources.reg_width(q).is_none() {
+            return Err(error(ARG, "§10: invalid register"));
+        }
+        if !p.resources.clean(q) {
+            return Err(error(7, "§10: E_QREG_NOT_CLEAN"));
+        }
+        p.resources.free(q);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_args_new(n: usize, out: *mut *mut bennett_args_t) -> i32 {
+    status(|| {
+        get_mut(out)?;
+        let mut values = vec![];
+        values
+            .try_reserve_exact(n)
+            .map_err(|_| error(12, "§10: E_NOMEM"))?;
+        values.resize(n, None);
+        output(out, bennett_args_t { values })
+    })
+}
 unsafe fn set_arg(p: *mut bennett_args_t, i: usize, arg: Arg) -> Fallible<()> {
     let slot = get_mut(p)?
         .values
@@ -280,33 +414,101 @@ unsafe fn set_arg(p: *mut bennett_args_t, i: usize, arg: Arg) -> Fallible<()> {
     *slot = Some(arg);
     Ok(())
 }
-api!(bennett_args_set_int(p:*mut bennett_args_t,i:usize,width:u32,le:*const u8) {
-    if width==0{return Err(error(ARG,"§10: zero integer width"))}let mut v=BigUint::zero();for (i,b) in bytes(le,(width as usize).div_ceil(8))?.iter().enumerate(){v=v.bitor(&BigUint::from_u64(*b as u64).shl(8*i));}
-    set_arg(p,i,Arg::Int(width as usize,v.mask(width as usize)))
-});
-api!(bennett_args_set_f64(p:*mut bennett_args_t,i:usize,v:f64) {set_arg(p,i,Arg::F64(v))});
-api!(bennett_args_set_qreg(p:*mut bennett_args_t,i:usize,q:u64) {set_arg(p,i,Arg::Qreg(q))});
-api!(bennett_args_set_token(p:*mut bennett_args_t,i:usize,t:u64) {set_arg(p,i,Arg::Token(t))});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_args_set_int(
+    p: *mut bennett_args_t,
+    i: usize,
+    width: u32,
+    le: *const u8,
+) -> i32 {
+    status(|| {
+        if width == 0 {
+            return Err(error(ARG, "§10: zero integer width"));
+        }
+        let mut v = BigUint::zero();
+        for (i, b) in bytes(le, (width as usize).div_ceil(8))?.iter().enumerate() {
+            v = v.bitor(&BigUint::from_u64(*b as u64).shl(8 * i));
+        }
+        set_arg(p, i, Arg::Int(width as usize, v.mask(width as usize)))
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_args_set_f64(p: *mut bennett_args_t, i: usize, v: f64) -> i32 {
+    status(|| set_arg(p, i, Arg::F64(v)))
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_args_set_qreg(p: *mut bennett_args_t, i: usize, q: u64) -> i32 {
+    status(|| set_arg(p, i, Arg::Qreg(q)))
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_args_set_token(p: *mut bennett_args_t, i: usize, t: u64) -> i32 {
+    status(|| set_arg(p, i, Arg::Token(t)))
+}
 free!(bennett_args_free, bennett_args_t);
-api!(bennett_run(p:*mut bennett_program_t,entry:*const c_char,args:*const bennett_args_t,entropy:*const u8,entropy_len:usize,out:*mut u64) {
-    let p=get_mut(p)?;let name=text(entry)?.trim_start_matches('@');let args=get(args)?;get_mut(out)?;
-    let f=p.obj.function(name).filter(|f|f.kind==FnKind::Cc).ok_or_else(||error(ARG,"§10: run requires CC entry"))?;
-    if f.lists[0].len()!=args.values.len(){return Err(error(ARG,"§10: positional argument count differs"))}
-    let mut values=vec![];let mut regs=vec![];
-    for (param,arg) in f.lists[0].iter().zip(&args.values){
-        values.push(match (&param.ty,arg){
-            (Type::I(n),Some(Arg::Int(w,b))) if n==w=>Value::int(*n,b.clone()),
-            (Type::F64,Some(Arg::F64(v)))=>Value::F64(*v),
-            (Type::Qreg(n),Some(Arg::Qreg(q))) if p.resources.reg_width(*q)==Some(*n)=>{p.unlocked(*q)?;regs.push(*q);Value::Qreg(*q)},
-            (Type::Token,Some(Arg::Token(t)))=>Value::Token(p.tokens.get(t).ok_or_else(||error(ARG,"§10: token not scoped to this program"))?.1),
-            _=>return Err(error(ARG,"§10: positional argument type/width differs")),
-        });
-    }
-    if regs.iter().collect::<std::collections::BTreeSet<_>>().len()!=regs.len(){return Err(error(ARG,"§3.3: aliased register operands"))}
-    let entropy=bytes(entropy,entropy_len)?.to_vec();let r=id();
-    let runtime=RuntimeRun::new(p.obj.clone(),&p.resources,name,values,entropy);
-    for q in regs{p.locks.insert(q,r);}p.runs.insert(r,Run{state:State::Running,runtime,request:None});*out=r;Ok(())
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_run(
+    p: *mut bennett_program_t,
+    entry: *const c_char,
+    args: *const bennett_args_t,
+    entropy: *const u8,
+    entropy_len: usize,
+    out: *mut u64,
+) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let name = text(entry)?.trim_start_matches('@');
+        let args = get(args)?;
+        get_mut(out)?;
+        let f = p
+            .obj
+            .function(name)
+            .filter(|f| f.kind == FnKind::Cc)
+            .ok_or_else(|| error(ARG, "§10: run requires CC entry"))?;
+        if f.lists[0].len() != args.values.len() {
+            return Err(error(ARG, "§10: positional argument count differs"));
+        }
+        let mut values = vec![];
+        let mut regs = vec![];
+        for (param, arg) in f.lists[0].iter().zip(&args.values) {
+            values.push(match (&param.ty, arg) {
+                (Type::I(n), Some(Arg::Int(w, b))) if n == w => Value::int(*n, b.clone()),
+                (Type::F64, Some(Arg::F64(v))) => Value::F64(*v),
+                (Type::Qreg(n), Some(Arg::Qreg(q))) if p.resources.reg_width(*q) == Some(*n) => {
+                    p.unlocked(*q)?;
+                    regs.push(*q);
+                    Value::Qreg(*q)
+                }
+                (Type::Token, Some(Arg::Token(t))) => Value::TokenId(
+                    *t,
+                    p.tokens
+                        .get(t)
+                        .ok_or_else(|| error(ARG, "§10: token not scoped to this program"))?
+                        .1,
+                ),
+                _ => return Err(error(ARG, "§10: positional argument type/width differs")),
+            });
+        }
+        if regs.iter().collect::<std::collections::BTreeSet<_>>().len() != regs.len() {
+            return Err(error(ARG, "§3.3: aliased register operands"));
+        }
+        let entropy = bytes(entropy, entropy_len)?.to_vec();
+        let r = id();
+        let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy);
+        for q in regs {
+            p.locks.insert(q, r);
+        }
+        p.runs.insert(
+            r,
+            Run {
+                state: State::Running,
+                runtime,
+                request: None,
+            },
+        );
+        *out = r;
+        Ok(())
+    })
+}
 impl bennett_result_t {
     fn from_run(p: &mut bennett_program_t, r: u64) -> Self {
         let run = &p.runs[&r];
@@ -330,6 +532,7 @@ impl bennett_result_t {
                     ),
                     Value::F64(v) => (1, 64, v.to_le_bytes().to_vec()),
                     Value::Qreg(q) => (2, 64, q.to_le_bytes().to_vec()),
+                    Value::TokenId(t, _) => (3, 64, t.to_le_bytes().to_vec()),
                     Value::Token(b) => {
                         let t = p
                             .tokens
@@ -368,30 +571,129 @@ impl bennett_result_t {
         }
     }
 }
-api!(bennett_wait(p:*mut bennett_program_t,r:u64,result_out:*mut *mut bennett_result_t,request_out:*mut *mut bennett_request_t) {
-    get_mut(result_out)?;get_mut(request_out)?;let p=get_mut(p)?;
-    if !matches!(p.run_ref(r)?.state,State::Running|State::HostRequest|State::Completed|State::Failed){return Err(error(INVALID,"§10: wait on SUSPENDED/REVERSED/CLOSED"))}
-    while p.runs[&r].state==State::Running{p.step(r)?;}
-    *result_out=ptr::null_mut();*request_out=ptr::null_mut();
-    if let Some((s,b))=&p.runs[&r].request {output(request_out,bennett_request_t{service:CString::new(s.as_str()).unwrap(),payload:b.clone()})}
-    else {let result=bennett_result_t::from_run(p,r);output(result_out,result)}
-});
-api!(bennett_reply(p:*mut bennett_program_t,r:u64,payload:*const u8,len:usize) {
-    let bytes=bytes(payload,len)?;let run=get_mut(p)?.run_mut(r)?;if run.state!=State::HostRequest{return Err(error(INVALID,"§10: reply requires HOST_REQUEST"))}
-    run.runtime.reply(bytes).map_err(|s|error(INVALID,s))?;run.request=None;run.state=State::Running;Ok(())
-});
-api!(bennett_suspend(p:*mut bennett_program_t,r:u64) {let run=get_mut(p)?.run_mut(r)?;if run.state!=State::Running{return Err(error(INVALID,"§10: suspend requires RUNNING"))}run.state=State::Suspended;Ok(())});
-api!(bennett_resume(p:*mut bennett_program_t,r:u64) {let run=get_mut(p)?.run_mut(r)?;if run.state!=State::Suspended{return Err(error(INVALID,"§10: resume requires SUSPENDED"))}run.state=State::Running;Ok(())});
-api!(bennett_reverse(p:*mut bennett_program_t,r:u64) {
-    let p=get_mut(p)?;let resources=&mut p.resources;let run=p.runs.get_mut(&r).ok_or_else(||error(INVALID,"§10: unknown run"))?;
-    if run.state!=State::Completed{return Err(error(INVALID,"§10: reverse requires COMPLETED"))}
-    if run.runtime.measured(){return Err(error(NOT_REV,"§10: E_NOT_REVERSIBLE: run contains measure"))}
-    run.runtime.sync(resources);run.runtime.reverse_to(0).map_err(|s|error(NOT_REV,s))?;run.runtime.export(resources);run.state=State::Reversed;Ok(())
-});
-api!(bennett_run_close(p:*mut bennett_program_t,r:u64) {
-    let p=get_mut(p)?;let run=p.run_mut(r)?;if !matches!(run.state,State::Completed|State::Failed|State::Reversed){return Err(error(INVALID,"§10: close requires COMPLETED/FAILED/REVERSED"))}
-    run.state=State::Closed;p.locks.retain(|_,owner|*owner!=r);if p.memory_owner==Some(r){p.memory_owner=None}Ok(())
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_wait(
+    p: *mut bennett_program_t,
+    r: u64,
+    result_out: *mut *mut bennett_result_t,
+    request_out: *mut *mut bennett_request_t,
+) -> i32 {
+    status(|| {
+        get_mut(result_out)?;
+        get_mut(request_out)?;
+        let p = get_mut(p)?;
+        if !matches!(
+            p.run_ref(r)?.state,
+            State::Running | State::HostRequest | State::Completed | State::Failed
+        ) {
+            return Err(error(INVALID, "§10: wait on SUSPENDED/REVERSED/CLOSED"));
+        }
+        while p.runs[&r].state == State::Running {
+            p.step(r)?;
+        }
+        *result_out = ptr::null_mut();
+        *request_out = ptr::null_mut();
+        if let Some((s, b)) = &p.runs[&r].request {
+            output(
+                request_out,
+                bennett_request_t {
+                    service: CString::new(s.as_str()).unwrap(),
+                    payload: b.clone(),
+                },
+            )
+        } else {
+            let result = bennett_result_t::from_run(p, r);
+            output(result_out, result)
+        }
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_reply(
+    p: *mut bennett_program_t,
+    r: u64,
+    payload: *const u8,
+    len: usize,
+) -> i32 {
+    status(|| {
+        let bytes = bytes(payload, len)?;
+        let run = get_mut(p)?.run_mut(r)?;
+        if run.state != State::HostRequest {
+            return Err(error(INVALID, "§10: reply requires HOST_REQUEST"));
+        }
+        run.runtime.reply(bytes).map_err(|s| error(INVALID, s))?;
+        run.request = None;
+        run.state = State::Running;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_suspend(p: *mut bennett_program_t, r: u64) -> i32 {
+    status(|| {
+        let run = get_mut(p)?.run_mut(r)?;
+        if run.state != State::Running {
+            return Err(error(INVALID, "§10: suspend requires RUNNING"));
+        }
+        run.state = State::Suspended;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_resume(p: *mut bennett_program_t, r: u64) -> i32 {
+    status(|| {
+        let run = get_mut(p)?.run_mut(r)?;
+        if run.state != State::Suspended {
+            return Err(error(INVALID, "§10: resume requires SUSPENDED"));
+        }
+        run.state = State::Running;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_reverse(p: *mut bennett_program_t, r: u64) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let resources = &mut p.resources;
+        let run = p
+            .runs
+            .get_mut(&r)
+            .ok_or_else(|| error(INVALID, "§10: unknown run"))?;
+        if run.state != State::Completed {
+            return Err(error(INVALID, "§10: reverse requires COMPLETED"));
+        }
+        if run.runtime.measured() {
+            return Err(error(
+                NOT_REV,
+                "§10: E_NOT_REVERSIBLE: run contains measure",
+            ));
+        }
+        run.runtime.sync(resources);
+        run.runtime.reverse_to(0).map_err(|s| error(NOT_REV, s))?;
+        run.runtime.export(resources);
+        run.state = State::Reversed;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_run_close(p: *mut bennett_program_t, r: u64) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let run = p.run_mut(r)?;
+        if !matches!(
+            run.state,
+            State::Completed | State::Failed | State::Reversed
+        ) {
+            return Err(error(
+                INVALID,
+                "§10: close requires COMPLETED/FAILED/REVERSED",
+            ));
+        }
+        run.state = State::Closed;
+        p.runs.remove(&r);
+        p.locks.retain(|_, owner| *owner != r);
+        p.memory_locks.retain(|(_, owner)| *owner != r);
+        Ok(())
+    })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_result_nvalues(p: *const bennett_result_t) -> usize {
     assert!(!p.is_null(), "§10: null result");
@@ -417,17 +719,56 @@ pub unsafe extern "C" fn bennett_result_tape_length(p: *const bennett_result_t) 
     assert!(!p.is_null(), "§10: null result");
     (*p).tape_length
 }
-api!(bennett_result_get(p:*const bennett_result_t,i:usize,kind:*mut i32,width:*mut u32,out:*mut u8,cap:usize) {
-    let v=get(p)?.values.get(i).ok_or_else(||error(ARG,"§10: result index out of range"))?;
-    get_mut(kind)?;get_mut(width)?;
-    if cap<v.bytes.len()||out.is_null(){return Err(error(ARG,"§10: result capacity too small/null"))}
-    ptr::copy_nonoverlapping(v.bytes.as_ptr(),out,v.bytes.len());*kind=v.kind;*width=v.width;Ok(())
-});
-api!(bennett_result_measurement(p:*const bennett_result_t,i:usize,reg:*mut u64,out:*mut u8,cap:usize,nbits:*mut usize) {
-    let (q,b)=get(p)?.measurements.get(i).ok_or_else(||error(ARG,"§10: measurement index out of range"))?;
-    get_mut(reg)?;get_mut(nbits)?;if cap<b.len()||out.is_null(){return Err(error(ARG,"§10: measurement capacity too small/null"))}
-    ptr::copy_nonoverlapping(b.as_ptr(),out,b.len());*reg=*q;*nbits=b.len();Ok(())
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_result_get(
+    p: *const bennett_result_t,
+    i: usize,
+    kind: *mut i32,
+    width: *mut u32,
+    out: *mut u8,
+    cap: usize,
+) -> i32 {
+    status(|| {
+        let v = get(p)?
+            .values
+            .get(i)
+            .ok_or_else(|| error(ARG, "§10: result index out of range"))?;
+        get_mut(kind)?;
+        get_mut(width)?;
+        if cap < v.bytes.len() || out.is_null() {
+            return Err(error(ARG, "§10: result capacity too small/null"));
+        }
+        ptr::copy_nonoverlapping(v.bytes.as_ptr(), out, v.bytes.len());
+        *kind = v.kind;
+        *width = v.width;
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_result_measurement(
+    p: *const bennett_result_t,
+    i: usize,
+    reg: *mut u64,
+    out: *mut u8,
+    cap: usize,
+    nbits: *mut usize,
+) -> i32 {
+    status(|| {
+        let (q, b) = get(p)?
+            .measurements
+            .get(i)
+            .ok_or_else(|| error(ARG, "§10: measurement index out of range"))?;
+        get_mut(reg)?;
+        get_mut(nbits)?;
+        if cap < b.len() || out.is_null() {
+            return Err(error(ARG, "§10: measurement capacity too small/null"));
+        }
+        ptr::copy_nonoverlapping(b.as_ptr(), out, b.len());
+        *reg = *q;
+        *nbits = b.len();
+        Ok(())
+    })
+}
 free!(bennett_result_free, bennett_result_t);
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_request_service(p: *const bennett_request_t) -> *const c_char {
@@ -444,29 +785,97 @@ pub unsafe extern "C" fn bennett_request_payload(
     (*p).payload.as_ptr()
 }
 free!(bennett_request_free, bennett_request_t);
-api!(bennett_tape_open(p:*mut bennett_program_t,r:u64,out:*mut *mut bennett_tape_iter_t) {
-    let run=get(p)?.run_ref(r)?;let entries=run.runtime.tape().iter().map(|v|{
-        let dev=CString::new(v.get("dev").unwrap().as_str().unwrap()).unwrap();let op=CString::new(v.get("op").unwrap().as_str().unwrap()).unwrap();
-        let Json::Arr(args)=v.get("args").unwrap() else {unreachable!()};
-        let bytes=args.iter().flat_map(|v|v.as_u64().unwrap().to_le_bytes()).collect();(dev,op,bytes)
-    }).collect();output(out,bennett_tape_iter_t{entries,next:0})
-});
-api!(bennett_tape_next(p:*mut bennett_tape_iter_t,dev:*mut *const c_char,op:*mut *const c_char,args:*mut *const u8,alen:*mut usize) {
-    let p=get_mut(p)?;get_mut(dev)?;get_mut(op)?;get_mut(args)?;get_mut(alen)?;
-    let (d,o,b)=p.entries.get(p.next).ok_or_else(||error(INVALID,"§10: end of effect tape (ABI defines no end sentinel; E_INVALID_STATE)"))?;
-    *dev=d.as_ptr();*op=o.as_ptr();*args=b.as_ptr();*alen=b.len();p.next+=1;Ok(())
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_tape_open(
+    p: *mut bennett_program_t,
+    r: u64,
+    out: *mut *mut bennett_tape_iter_t,
+) -> i32 {
+    status(|| {
+        let run = get(p)?.run_ref(r)?;
+        let entries = run
+            .runtime
+            .tape()
+            .iter()
+            .map(|v| {
+                let dev = CString::new(v.get("dev").unwrap().as_str().unwrap()).unwrap();
+                let op = CString::new(v.get("op").unwrap().as_str().unwrap()).unwrap();
+                let Json::Arr(args) = v.get("args").unwrap() else {
+                    unreachable!()
+                };
+                let bytes = args
+                    .iter()
+                    .flat_map(|v| v.as_u64().unwrap().to_le_bytes())
+                    .collect();
+                (dev, op, bytes)
+            })
+            .collect();
+        output(out, bennett_tape_iter_t { entries, next: 0 })
+    })
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_tape_next(
+    p: *mut bennett_tape_iter_t,
+    dev: *mut *const c_char,
+    op: *mut *const c_char,
+    args: *mut *const u8,
+    alen: *mut usize,
+) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        get_mut(dev)?;
+        get_mut(op)?;
+        get_mut(args)?;
+        get_mut(alen)?;
+        let (d, o, b) = p.entries.get(p.next).ok_or_else(|| {
+            error(
+                INVALID,
+                "§10: end of effect tape (ABI defines no end sentinel; E_INVALID_STATE)",
+            )
+        })?;
+        *dev = d.as_ptr();
+        *op = o.as_ptr();
+        *args = b.as_ptr();
+        *alen = b.len();
+        p.next += 1;
+        Ok(())
+    })
+}
 free!(bennett_tape_free, bennett_tape_iter_t);
-api!(bennett_estimate_run(p:*mut bennett_program_t,region:*const c_char,token:u64,out:*mut *mut bennett_estimate_t) {
-    let p=get(p)?;text(region)?;*get_mut(out)?=ptr::null_mut();if !p.tokens.contains_key(&token){return Err(error(ARG,"§10: unknown token"))}
-    Err(error(5,"unimplemented: estimates/certificates (§8/§12) (milestone 4–5)"))
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_estimate_run(
+    p: *mut bennett_program_t,
+    region: *const c_char,
+    token: u64,
+    out: *mut *mut bennett_estimate_t,
+) -> i32 {
+    status(|| {
+        let p = get(p)?;
+        text(region)?;
+        *get_mut(out)? = ptr::null_mut();
+        if !p.tokens.contains_key(&token) {
+            return Err(error(ARG, "§10: unknown token"));
+        }
+        Err(error(
+            5,
+            "unimplemented: estimates/certificates (§8/§12) (milestone 4–5)",
+        ))
+    })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_nresources(_p: *const bennett_estimate_t) -> usize {
     eprintln!("unimplemented: estimates (milestone 4–5)");
     0
 }
-api!(bennett_estimate_get(_p:*const bennett_estimate_t,_i:usize,_name:*mut *const c_char,_value:*mut *const c_char) {Err(error(5,"unimplemented: estimates (milestone 4–5)"))});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_estimate_get(
+    _p: *const bennett_estimate_t,
+    _i: usize,
+    _name: *mut *const c_char,
+    _value: *mut *const c_char,
+) -> i32 {
+    status(|| Err(error(5, "unimplemented: estimates (milestone 4–5)")))
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_certificate(
     _p: *const bennett_estimate_t,
@@ -479,7 +888,17 @@ pub unsafe extern "C" fn bennett_estimate_certificate(
     ptr::null()
 }
 free!(bennett_estimate_free, bennett_estimate_t);
-api!(bennett_coverage_get(p:*mut bennett_program_t,out:*mut *mut bennett_coverage_t) {get(p)?;*get_mut(out)?=ptr::null_mut();Err(error(5,"unimplemented: coverage (§13) (milestone 4–5)"))});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_coverage_get(
+    p: *mut bennett_program_t,
+    out: *mut *mut bennett_coverage_t,
+) -> i32 {
+    status(|| {
+        get(p)?;
+        *get_mut(out)? = ptr::null_mut();
+        Err(error(5, "unimplemented: coverage (§13) (milestone 4–5)"))
+    })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_coverage_jcs(
     _p: *const bennett_coverage_t,
@@ -492,8 +911,30 @@ pub unsafe extern "C" fn bennett_coverage_jcs(
     ptr::null()
 }
 free!(bennett_coverage_free, bennett_coverage_t);
-api!(bennett_run_step(p:*mut bennett_program_t,r:u64) {get_mut(p)?.step(r)});
-api!(bennett_run_snapshot(p:*mut bennett_program_t,r:u64,out:*mut *mut bennett_snapshot_t) {let run=get(p)?.run_ref(r)?;output(out,bennett_snapshot_t{jcs:run.runtime.snapshot(&format!("{:?}",run.state)).to_jcs().into_bytes()})});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_run_step(p: *mut bennett_program_t, r: u64) -> i32 {
+    status(|| get_mut(p)?.step(r))
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_run_snapshot(
+    p: *mut bennett_program_t,
+    r: u64,
+    out: *mut *mut bennett_snapshot_t,
+) -> i32 {
+    status(|| {
+        let run = get(p)?.run_ref(r)?;
+        output(
+            out,
+            bennett_snapshot_t {
+                jcs: run
+                    .runtime
+                    .snapshot(&format!("{:?}", run.state))
+                    .to_jcs()
+                    .into_bytes(),
+            },
+        )
+    })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_snapshot_jcs(
     p: *const bennett_snapshot_t,
@@ -504,12 +945,33 @@ pub unsafe extern "C" fn bennett_snapshot_jcs(
     (*p).jcs.as_ptr()
 }
 free!(bennett_snapshot_free, bennett_snapshot_t);
-api!(bennett_run_reverse_to(p:*mut bennett_program_t,r:u64,n:u64) {
-    let p=get_mut(p)?;let resources=&mut p.resources;let run=p.runs.get_mut(&r).ok_or_else(||error(INVALID,"unknown run"))?;
-    if !matches!(run.state,State::Suspended|State::Completed|State::Failed){return Err(error(INVALID,"reverse_to requires SUSPENDED/COMPLETED/FAILED"))}
-    let n=usize::try_from(n).map_err(|_|error(ARG,"history index overflow"))?;
-    run.runtime.sync(resources);run.runtime.reverse_to(n).map_err(|s|error(NOT_REV,s))?;run.runtime.export(resources);run.request=None;run.state=State::Suspended;Ok(())
-});
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_run_reverse_to(p: *mut bennett_program_t, r: u64, n: u64) -> i32 {
+    status(|| {
+        let p = get_mut(p)?;
+        let resources = &mut p.resources;
+        let run = p
+            .runs
+            .get_mut(&r)
+            .ok_or_else(|| error(INVALID, "unknown run"))?;
+        if !matches!(
+            run.state,
+            State::Suspended | State::Completed | State::Failed
+        ) {
+            return Err(error(
+                INVALID,
+                "reverse_to requires SUSPENDED/COMPLETED/FAILED",
+            ));
+        }
+        let n = usize::try_from(n).map_err(|_| error(ARG, "history index overflow"))?;
+        run.runtime.sync(resources);
+        run.runtime.reverse_to(n).map_err(|s| error(NOT_REV, s))?;
+        run.runtime.export(resources);
+        run.request = None;
+        run.state = State::Suspended;
+        Ok(())
+    })
+}
 pub fn cmd_run_program(args: &[String]) -> Result<(), String> {
     crate::cc::cmd_program(args)
 }

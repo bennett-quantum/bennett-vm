@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "bennett_vm",
+  "project_id": "4bad6e6c-8d44-443d-90c7-56d2b06fd8b0"
+}

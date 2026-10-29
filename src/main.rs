@@ -53,12 +53,8 @@ fn run(args: &[String]) -> Result<(), String> {
         "run-cc" => bennett_vm::cc::cmd_run_cc(&args[1..], false),
         "reverse" => bennett_vm::cc::cmd_reverse(&args[1..]),
         "run-program" => bennett_vm::launch::cmd_run_program(&args[1..]),
-        "step-check" => {
-            Err("unimplemented: step-check (§3.6 predicated step machine) (milestone 3)".into())
-        }
-        "run-action" => {
-            Err("unimplemented: run-action (exact-amplitude action output) (milestone 3)".into())
-        }
+        "step-check" => bennett_vm::stepcli::check(&args[1..]),
+        "run-action" => bennett_vm::qcli::command(&args[1..], false),
         other => Err(format!("unknown subcommand {other}\n{USAGE}")),
     }
 }

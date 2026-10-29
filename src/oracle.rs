@@ -152,7 +152,7 @@ pub fn lproc_closure(obj: &Object, oracle: &Function) -> Vec<String> {
 
 /// §3.6 index order: oracle first, then lproc SCCs ordered by scc hash
 /// with members in name (SCC index) order.
-fn index_order(obj: &Object, oracle: &Function) -> Result<Vec<String>, String> {
+pub(crate) fn index_order(obj: &Object, oracle: &Function) -> Result<Vec<String>, String> {
     let closure = lproc_closure(obj, oracle);
     // SCCs among the closure, via identity's reference graph restricted
     // to lift.call edges (references_of also covers data refs, which do

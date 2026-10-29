@@ -1044,10 +1044,10 @@ pub fn cmd_reverse(args: &[String]) -> Result<(), String> {
         if let Some(f) = obj.function(cliargs::entry_name(&args[1]))
             && !matches!(f.kind, FnKind::Cc | FnKind::R)
         {
-            return Err(format!(
-                "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
-                f.kind.kind_str()
-            ));
+            if matches!(f.kind, FnKind::Action | FnKind::PermAction) {
+                return crate::qcli::command(args, true);
+            }
+            return crate::stepcli::reverse(args);
         }
     }
     command(args, Mode::Reverse)

@@ -30,24 +30,19 @@ fn published_conformance_report() {
     std::fs::write(repo.join(".tmp/conformance.log"), &report).unwrap();
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "Full milestone-3+ suite is expected to remain RED; audit improved/staged cases before changing this assertion.\n{report}"
+        Some(2),
+        "All available cases must pass; exit 2 counts staged unavailable cases.\n{report}"
     );
     assert!(
         report.contains("| all |") && report.contains("490 |"),
         "Must run all 490 published cases, without filtering: {report}"
     );
-    // The full report remains red; milestone 2's served G and E probes must pass.
+    // Every available published case is now a hard gate.
     for line in report.lines().filter(|l| l.starts_with("FAIL ")) {
-        assert!(
-            !line.starts_with("FAIL G-")
-                && !line.starts_with("FAIL E-")
-                && !line.starts_with("FAIL H-"),
-            "Launch/staged refusal regression: {line}"
-        );
+        panic!("Published conformance regression: {line}");
     }
     println!(
-        "Full conformance verdict remains RED (exit 1); report: {}",
+        "All available conformance cases pass (exit 2: staged cases unavailable); report: {}",
         repo.join(".tmp/conformance.log").display()
     );
 }

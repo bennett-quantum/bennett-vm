@@ -3,11 +3,12 @@
 //!
 //! The state is a sparse superposition over stable wire ids (bit `i`
 //! of a basis key is wire `i`; freed wires keep their bit at zero).
-//! Amplitudes are `f64` pairs: on a device simulator this serves Born
-//! probabilities and basis execution; exact-amplitude output of a
-//! standalone `run-action` is milestone 3.
+//! Exact amplitudes determine support, cleanliness and equality. The binary64
+//! cache is used only for Born probabilities and CLI display; permutations are
+//! executed by branch enumeration without discarding relative or global phase.
 
 use crate::bigint::BigUint;
+use crate::exact::Exact;
 use crate::object::{Function, Instr, Object};
 use crate::value::{Budget, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -16,16 +17,10 @@ pub type Amp = (f64, f64);
 type OutcomeCache = BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)>;
 type NormalizedCall<'a> = (bool, Option<&'a str>, &'a str, Vec<String>);
 
-fn c_add(a: Amp, b: Amp) -> Amp {
-    (a.0 + b.0, a.1 + b.1)
-}
-fn c_mul(a: Amp, b: Amp) -> Amp {
-    (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
-}
-
 #[derive(Clone, Debug)]
 pub struct QuantumState {
     pub amps: BTreeMap<BigUint, Amp>,
+    exact: BTreeMap<BigUint, Exact>,
     next_wire: usize,
 }
 
@@ -33,7 +28,11 @@ impl QuantumState {
     pub fn new() -> QuantumState {
         let mut amps = BTreeMap::new();
         amps.insert(BigUint::zero(), (1.0, 0.0));
-        QuantumState { amps, next_wire: 0 }
+        QuantumState {
+            amps,
+            exact: BTreeMap::from([(BigUint::zero(), Exact::one())]),
+            next_wire: 0,
+        }
     }
     pub fn wire_count(&self) -> usize {
         self.next_wire
@@ -60,15 +59,27 @@ impl QuantumState {
     pub fn alloc_wires(&mut self, n: usize) -> Vec<usize> {
         (0..n).map(|_| self.alloc_wire()).collect()
     }
-    fn prune(&mut self) {
-        self.amps.retain(|_, a| !(a.0 == 0.0 && a.1 == 0.0));
-        if self.amps.is_empty() {
-            self.amps.insert(BigUint::zero(), (0.0, 0.0));
-        }
+    fn refresh(&mut self) {
+        self.exact.retain(|_, a| !a.is_zero());
+        self.amps = self
+            .exact
+            .iter()
+            .map(|(k, a)| (k.clone(), a.value()))
+            .collect();
+    }
+    pub fn set_state(&mut self, state: BTreeMap<BigUint, Amp>) {
+        self.exact = state
+            .into_iter()
+            .map(|(k, (r, i))| (k, Exact::pair(r, i)))
+            .collect();
+        self.refresh();
+    }
+    pub fn exact_equals(&self, other: &Self) -> bool {
+        self.exact == other.exact
     }
     /// Set basis bits on wires that start at zero in every component.
     pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
-        self.amps = std::mem::take(&mut self.amps)
+        self.exact = std::mem::take(&mut self.exact)
             .into_iter()
             .map(|(mut k, a)| {
                 for (i, w) in wires.iter().enumerate() {
@@ -79,6 +90,7 @@ impl QuantumState {
                 (k, a)
             })
             .collect();
+        self.refresh();
     }
     pub fn extract(key: &BigUint, wires: &[usize]) -> BigUint {
         let mut v = BigUint::zero();
@@ -106,28 +118,43 @@ impl QuantumState {
     }
     /// Controlled single-qubit matrix `[[a,b],[c,d]]`.
     pub fn apply1(&mut self, target: usize, controls: &[usize], m: [[Amp; 2]; 2]) {
-        let old = std::mem::take(&mut self.amps);
-        let mut next: BTreeMap<BigUint, Amp> = BTreeMap::new();
-        for (k, amp) in old {
-            let enabled = controls.iter().all(|c| k.bit(*c));
-            if !enabled {
-                let e = next.entry(k).or_insert((0.0, 0.0));
-                *e = c_add(*e, amp);
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let m = m.map(|r| {
+            r.map(|(re, im)| {
+                let component = |v: f64| {
+                    if v.abs() == h {
+                        if v < 0. {
+                            Exact::sqrt_half().neg()
+                        } else {
+                            Exact::sqrt_half()
+                        }
+                    } else {
+                        Exact::pair(v, 0.)
+                    }
+                };
+                component(re).add(&component(im).mul(&Exact::pair(0., 1.)))
+            })
+        });
+        self.apply_exact(target, controls, m);
+    }
+    pub fn apply_exact(&mut self, target: usize, controls: &[usize], m: [[Exact; 2]; 2]) {
+        let mut next = BTreeMap::<BigUint, Exact>::new();
+        for (k, a) in std::mem::take(&mut self.exact) {
+            if !controls.iter().all(|c| k.bit(*c)) {
+                next.insert(k, a);
                 continue;
             }
-            let bit = k.bit(target) as usize;
-            for (out_bit, coef) in [(0usize, m[0][bit]), (1usize, m[1][bit])] {
-                if coef == (0.0, 0.0) {
-                    continue;
-                }
+            let bit = usize::from(k.bit(target));
+            for (out, row) in m.iter().enumerate() {
                 let mut nk = k.clone();
-                nk.set_bit(target, out_bit == 1);
-                let entry = next.entry(nk).or_insert((0.0, 0.0));
-                *entry = c_add(*entry, c_mul(coef, amp));
+                nk.set_bit(target, out == 1);
+                let v = a.mul(&row[bit]);
+                let prev = next.remove(&nk).unwrap_or_else(Exact::zero);
+                next.insert(nk, prev.add(&v));
             }
         }
-        self.amps = next;
-        self.prune();
+        self.exact = next;
+        self.refresh();
     }
     /// Flip `target` where every control is 1 (permutation gate).
     pub fn flip(&mut self, target: usize, controls: &[usize]) {
@@ -138,38 +165,30 @@ impl QuantumState {
         );
     }
     pub fn phase_if_all(&mut self, wires: &[usize], phase: Amp) {
-        for (k, a) in self.amps.iter_mut() {
+        for (k, a) in &mut self.exact {
             if wires.iter().all(|w| k.bit(*w)) {
-                *a = c_mul(phase, *a);
+                *a = a.mul(&Exact::pair(phase.0, phase.1));
             }
         }
+        self.refresh();
     }
     pub fn swap(&mut self, a: usize, b: usize) {
-        if a == b {
-            return;
-        }
-        self.amps = std::mem::take(&mut self.amps)
-            .into_iter()
-            .map(|(mut k, amp)| {
-                let (ba, bb) = (k.bit(a), k.bit(b));
-                k.set_bit(a, bb);
-                k.set_bit(b, ba);
-                (k, amp)
-            })
-            .collect();
+        self.map_basis(|k| {
+            let mut nk = k.clone();
+            nk.set_bit(a, k.bit(b));
+            nk.set_bit(b, k.bit(a));
+            nk
+        });
     }
-    /// Map every basis key through a classical function (branch
-    /// enumeration of a permutation segment, NorthStar §4.2).
     pub fn map_basis(&mut self, mut f: impl FnMut(&BigUint) -> BigUint) {
-        let old = std::mem::take(&mut self.amps);
-        let mut next: BTreeMap<BigUint, Amp> = BTreeMap::new();
-        for (k, a) in old {
+        let mut next = BTreeMap::<BigUint, Exact>::new();
+        for (k, a) in std::mem::take(&mut self.exact) {
             let nk = f(&k);
-            let e = next.entry(nk).or_insert((0.0, 0.0));
-            *e = c_add(*e, a);
+            let prev = next.remove(&nk).unwrap_or_else(Exact::zero);
+            next.insert(nk, prev.add(&a));
         }
-        self.amps = next;
-        self.prune();
+        self.exact = next;
+        self.refresh();
     }
     /// Measure `wires` (wire 0 first in `bits`); `draw` in [0,1) picks
     /// the outcome in ascending value order by cumulative probability.
@@ -207,6 +226,11 @@ impl QuantumState {
                 }
                 (k, (a.0 * norm, a.1 * norm))
             })
+            .collect();
+        self.exact = self
+            .amps
+            .iter()
+            .map(|(k, (r, i))| (k.clone(), Exact::pair(*r, *i)))
             .collect();
         let mut bits = String::new();
         for i in 0..wires.len() {
@@ -402,13 +426,8 @@ impl<'o> Exec<'o> {
             "rx" | "ry" | "rz" => {
                 let th = self.angle(&ins.operands[0])?;
                 let t = self.wire(&ins.operands[1])?;
-                let (c, s) = ((th / 2.0).cos(), (th / 2.0).sin());
-                let m: [[Amp; 2]; 2] = match ins.op.as_str() {
-                    "rx" => [[(c, 0.0), (0.0, -s)], [(0.0, -s), (c, 0.0)]],
-                    "ry" => [[(c, 0.0), (-s, 0.0)], [(s, 0.0), (c, 0.0)]],
-                    _ => [[(c, -s), (0.0, 0.0)], [(0.0, 0.0), (c, s)]],
-                };
-                self.state.apply1(t, &pred, m);
+                self.state
+                    .apply_exact(t, &pred, Exact::rotation(&ins.op, th));
             }
             _ => return Err(format!("unimplemented: gate {} (milestone 3)", ins.op)),
         }

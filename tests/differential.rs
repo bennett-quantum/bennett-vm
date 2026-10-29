@@ -937,6 +937,7 @@ fn spec_examples_are_extracted_and_diffed() {
             name,
             &s(&["run-oracle", &p, name, "--input", "3", "--budget", "256"]),
         );
+        coherent_corpus(Path::new(&p));
         count += 1;
     }
     assert_eq!(count, 2, "every complete object in the spec must be diffed");
@@ -1181,5 +1182,156 @@ fn history_reverses_actual_region_invocations() {
                 ]),
             );
         }
+    }
+}
+
+/// Exact support and phase-sensitive component comparison. No global-phase
+/// alignment: §4.4 requires equality including global phase. Tolerance applies
+/// only to the binary64 display of exact amplitudes (absolute 2e-12).
+fn assert_coherent(args: &[String]) {
+    use bennett_vm::json::Json;
+    fn compare(a: &Json, b: &Json, path: &str) {
+        match (a, b) {
+            (Json::Obj(a), Json::Obj(b)) => {
+                assert_eq!(
+                    a.keys().collect::<Vec<_>>(),
+                    b.keys().collect::<Vec<_>>(),
+                    "support/fields {path}"
+                );
+                for (k, v) in a {
+                    compare(v, &b[k], &format!("{path}.{k}"));
+                }
+            }
+            (Json::Arr(a), Json::Arr(b)) => {
+                assert_eq!(a.len(), b.len(), "{path}");
+                for (i, (a, b)) in a.iter().zip(b).enumerate() {
+                    compare(a, b, &format!("{path}[{i}]"));
+                }
+            }
+            (Json::Num(a), Json::Num(b)) if path.contains("state.") => {
+                let a = a.parse::<f64>().unwrap();
+                let b = b.parse::<f64>().unwrap();
+                assert!(
+                    (a - b).abs() <= 2e-12,
+                    "phase-sensitive amplitude {path}: {a} != {b}"
+                );
+            }
+            _ => assert_eq!(a, b, "{path}"),
+        }
+    }
+    let a = run(&reference(), args);
+    let b = run(Path::new(vm()), args);
+    assert_eq!(
+        a.status.code(),
+        b.status.code(),
+        "{args:?}\nref {}\nvm {}",
+        show(&a),
+        show(&b)
+    );
+    assert!(
+        a.status.success(),
+        "coherent fixture must execute, not merely agree on refusal: {args:?}\n{}",
+        show(&a)
+    );
+    let aj = bennett_vm::json::parse(std::str::from_utf8(&a.stdout).unwrap().trim()).unwrap();
+    let bj = bennett_vm::json::parse(std::str::from_utf8(&b.stdout).unwrap().trim()).unwrap();
+    compare(&aj, &bj, &format!("{args:?}"));
+    record(args, &a);
+}
+fn coherent_corpus(path: &Path) {
+    use bennett_vm::object::{FnKind, Type};
+    let text = std::fs::read_to_string(path).unwrap();
+    let (obj, _) = bennett_vm::load(&text, false).unwrap();
+    for f in &obj.functions {
+        if f.kind == FnKind::Oracle {
+            for budget in ["0", "1", "8", "64"] {
+                let input = f.lists[0].iter().map(|_| "1").collect::<Vec<_>>().join(",");
+                let mut args = s(&[
+                    "reverse",
+                    path.to_str().unwrap(),
+                    &f.name,
+                    "--input",
+                    &input,
+                    "--budget",
+                    budget,
+                ]);
+                for p in &f.lists[4] {
+                    args.extend(s(&[
+                        "--arg",
+                        match p.ty {
+                            Type::Token => "token:32",
+                            Type::F64 => "f64:0.5",
+                            _ => "1",
+                        },
+                    ]));
+                }
+                assert_coherent(&args);
+            }
+            let mut args = s(&[
+                "step-check",
+                path.to_str().unwrap(),
+                &f.name,
+                "--samples",
+                "4",
+                "--seed",
+                "1,2,3,4",
+                "--budget",
+                "64",
+            ]);
+            for p in &f.lists[4] {
+                args.extend(s(&[
+                    "--arg",
+                    match p.ty {
+                        Type::Token => "token:32",
+                        Type::F64 => "f64:0.5",
+                        _ => "1",
+                    },
+                ]));
+            }
+            assert_coherent(&args);
+        } else if matches!(f.kind, FnKind::Action | FnKind::PermAction) {
+            let mut n = 0;
+            for list in &f.lists[..3] {
+                for p in list {
+                    n += match p.ty {
+                        Type::Wire(w) => w,
+                        Type::Region(a, w) => (1usize << a) * w,
+                        _ => panic!(),
+                    };
+                }
+            }
+            for basis in [
+                "0".repeat(n),
+                "1".repeat(n),
+                (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect(),
+            ] {
+                for cmd in ["run-action", "reverse"] {
+                    for adj in [false, true] {
+                        let mut args =
+                            s(&[cmd, path.to_str().unwrap(), &f.name, "--basis", &basis]);
+                        if adj {
+                            args.push("--adjoint".into());
+                        }
+                        for p in &f.lists[3] {
+                            args.extend(s(&[
+                                "--arg",
+                                match p.ty {
+                                    Type::Token => "token:64",
+                                    Type::F64 => "f64:0.5",
+                                    _ => "1",
+                                },
+                            ]));
+                        }
+                        assert_coherent(&args);
+                    }
+                }
+            }
+        }
+    }
+}
+#[test]
+fn coherent_commands_on_every_fixture() {
+    for path in fixture_files() {
+        coherent_corpus(&path);
     }
 }

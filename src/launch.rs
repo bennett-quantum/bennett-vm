@@ -946,6 +946,7 @@ pub unsafe extern "C" fn bennett_run_snapshot(
                         State::Reversed => "REVERSED",
                         State::Closed => "CLOSED",
                     })
+                    .map_err(|e| error(5, e))?
                     .to_jcs()
                     .into_bytes(),
             },

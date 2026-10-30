@@ -1,45 +1,46 @@
-Milestone 4 PARTIAL; parent bennett-vm-v23 BLOCKED, not closed (2026-10-29).
-Commits: 70ac9f0 exact targets; 5111c14 target execution/scheduler exports;
-subsequent final commit contains sector/path hardening and this handoff.
+Milestone 4 independent target work VERIFIED 2026-10-30; parent v23 remains BLOCKED.
+Read docs/PROGRESS.md top section for current evidence; older sections are historical.
 
-Read docs/PROGRESS.md first: exact counts, deciding sentences, limits and next work.
-56 Rust tests pass; 160 launch C checks; scheduler C consumer calls all 15
-published bennett_sched.h functions. 1,076/1,076 CLI differential comparisons
-agree (1,050 JSON, 26 diagnostics); zero remaining CLI divergences.
-All 7 runnable D and 10 runnable G commands now participate in the differential
-harness; five additional block-image boundary comparisons participate too.
+Commits this resumed session start with dbdfe60 (recovered structured work); the
+subsequent implementation/docs commit contains native QRAM and final accounting.
+Child v23.4 is complete: native target leaves for bundles, qif/loops/while flags,
+local image creation/actual inverse image gates; explicit designated dirty-scheme
+and qborrow pools; ordered per-logical-gate request batches with achieved-error
+charging and exact permutation enforcement; native qram load/store/exchange;
+actual event/live-interval accounting including classical/effect and inverse rows.
+CLI target_resources/target_error and immutable launch snapshots expose the
+accumulated program ledger at the observed boundary, not per-run estimates/certs.
 
-Raw unchanged conformance: 445 pass / 2 fail / 43 unavailable, exit 1.
-A21/0/0 B35/0/0 C339/0/0 D7/0/5 E0/1/14 F33/0/2 G10/0/13 H0/1/9.
-The two FAILs are obsolete staging-prose probes: E receives strict noncanonical
-JCS diagnostic; H receives explicit E_SCHEDULE_INFEASIBLE missing-ref reason.
-Integration test preserves the raw verdict and gates exactly those reasons;
-it does not claim full conformance green or promote 43 hard-coded unavailable cases.
+Gates: 72 Rust tests pass, 160 launch C checks, all 15 scheduler exports,
+21,888 one-row inverse checks. 1,076/1,076 CLI differential comparisons agree
+(1,050 JSON / 26 diagnostics), zero divergences. Raw logs .tmp/resume-tests.log,
+.tmp/resume-clippy.log, .tmp/resume-conformance-final.log.
+Standalone published conformance: 445 PASS / 0 FAIL / 46 UNAVAILABLE, exit 2,
+491 cases. Per-suite pass/fail/unavailable:
+A21/0/0 B35/0/0 C339/0/0 D7/0/5 E0/0/16 F33/0/2 G10/0/13 H0/0/10.
+The concurrent ISA agent fixed E fixtures and semantic staging-refusal probes;
+this implementer only read their published artifacts. E/H still report hard-coded
+UNAVAILABLE; no fabricated promotion. New E-epsilon-zero-exact increases total.
 
-Implemented supported exact-rational target AST, strict §8 target input format,
-UTF16 JCS class order, first matching native gates/non-nested schemes, actual
-native-leaf simulation for gate-only actions, capacity/class history, explicit
-leaf-event/live-interval accounting. No automatic scheme-correctness proof is
-claimed; author owns it (§8.3). Scheduler request setters own copies and valid
-requests return UNSUPPORTED, reason ref@0.8, no schedule/certificate. Selector,
-binding, path, timing and schema validation utilities have hand-derived tests.
-Devices retain all prior behavior; partial block images now reject at device
-initialization (not check), matching reference; complete sectors read/reverse.
+Blocking 47t: §11 ref expansion document/hash/ordinals/scratch/removable subset
+is unpublished until accepted ISA 0.9. Full lifted/oracle arithmetic and dispatch,
+comparators/multiplexers/inrange scans, qinplace oracle calls and non-native qram
+therefore fail with explicit milestone-4 item/47t. Verbatim schedules, scheduled
+shares/defaults/timing/accounting/reproducibility wait too. Do not guess a private
+ref library. cxg: eps_decade index remains undefined. The fixture-gap clh has
+published repairs; 47i partial-sector clarification remains tracked.
+Parent v23 stays BLOCKED, not closed. Next complete milestone 4 after publication,
+then milestone 5 JIT; estimates/rigorous certificates/coverage still name 5.
 
-ISA gaps (all labeled isa-0.9, filed locally):
-47t: no published ref expansion document/hash/ordinals/scratch/removable subset;
-cxg: eps_decade table index is named but never defined;
-clh: E epsilon-zero fixture contains no forbidden eps; JCS hash fixture has newline;
-47i: clarify complete-sector block_image encoding/partial-final-sector policy.
-Completed child beads v23.1/v23.2/v23.3; parent depends on 47t/cxg and stays blocked.
+Gotchas from red-green recovery: invalid caller idle designation was silently
+accepted; fixed before allocation. Inherited while-adjoint witness contradicted
+§5.3's explicit adjoint order; implementation was right. qload allocated unclassed
+wires; fixed for native qram. Borrow frames omitted dirty ownership replacement;
+zero-time allocations omitted peak; qfree adjoint lost original class; all fixed
+with hand-derived regressions. Resource fixture initially used an unsupported
+16-bit target width because parsing treated the spec's example list as an enum;
+fixed to honor pointer parameters. A previous byte-equality target test needed to
+compare all execution fields plus separately hand-derived new ledger fields.
 
-Remaining M4: full oracle/structured row lowering, dirty-scheme caller idle pool,
-requested approximation shares, verbatim schedules, schedule reproducibility and
-integrated resource accounting. Do not substitute a private guessed ref library.
-After M4: milestone 5 JIT; estimates/rigorous certs/coverage retain loud milestone5
-errors. Branch enumeration and exact coherent tier remain implemented and gated.
-
-Headless/offline with TMPDIR under .tmp, no dependencies, other repository edits,
-pushes or Dolt remote sync. Gates: fmt --check, strict all-target Clippy,
-cargo test --offline, git diff --check. Logs .tmp/m4-final-tests.log and
-.tmp/conformance.log. Full conformance still exits 1; report it honestly.
+Headless/offline, TMPDIR .tmp, absolute paths, std-only; no foreign repo edits,
+no push, no Dolt remote sync. Keep commits path-scoped and retry index.lock.

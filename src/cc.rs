@@ -300,6 +300,7 @@ impl Machine {
         if frame.reversed || frame.marker {
             return Ok(());
         }
+        self.quantum.classical_event()?;
         if let Some(invocation) = &frame.region {
             let inverse = invocation.inverse();
             apply_invocation(&self.obj, &mut self.quantum, &inverse)?;
@@ -1395,6 +1396,13 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             ]);
         }
     }
+    if m.quantum.target.is_some() {
+        out.push(("target_resources", m.quantum.target_accounting()?));
+        out.push((
+            "target_error",
+            Json::Str(m.quantum.target_error().decimal()),
+        ));
+    }
     println!("{}", Json::obj(out).to_jcs());
     Ok(())
 }
@@ -1841,8 +1849,8 @@ impl RuntimeRun {
         self.machine.results.clear();
         Ok(())
     }
-    pub(crate) fn snapshot(&self, state: &str) -> Json {
-        Json::obj(vec![
+    pub(crate) fn snapshot(&self, state: &str) -> Result<Json, String> {
+        let mut out = vec![
             ("state", Json::Str(state.into())),
             (
                 "fault",
@@ -1894,6 +1902,17 @@ impl RuntimeRun {
             ("trace", Json::Arr(self.machine.trace.clone())),
             ("tape", Json::Arr(self.tape())),
             ("host_requests", Json::Arr(self.records(|d| &d.hosts))),
-        ])
+        ];
+        if self.machine.quantum.target.is_some() {
+            out.push((
+                "target_resources",
+                self.machine.quantum.target_accounting()?,
+            ));
+            out.push((
+                "target_error",
+                Json::Str(self.machine.quantum.target_error().decimal()),
+            ));
+        }
+        Ok(Json::obj(out))
     }
 }

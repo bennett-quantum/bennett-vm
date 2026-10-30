@@ -11,11 +11,19 @@ use crate::bigint::BigUint;
 use crate::exact::Exact;
 use crate::object::{Function, Instr, Object};
 use crate::value::{Budget, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 pub type Amp = (f64, f64);
 type OutcomeCache = BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)>;
 type NormalizedCall<'a> = (bool, Option<&'a str>, &'a str, Vec<String>);
+
+/// A resolved logical-gate request, in the known structured expansion order.
+/// This diagnostic Rust API does not claim §11 library ordinals or a schedule.
+#[derive(Clone, Debug)]
+pub struct GateRequest {
+    pub epsilon_share: crate::target::Rational,
+    pub realisation: Option<String>,
+}
 
 #[derive(Clone, Debug)]
 pub struct QuantumState {
@@ -28,6 +36,9 @@ pub struct QuantumState {
     events: Vec<crate::target::Event>,
     live: Vec<crate::target::LiveInterval>,
     time: crate::target::Rational,
+    peak: BTreeMap<String, usize>,
+    dirty: BTreeSet<usize>,
+    requests: Option<VecDeque<GateRequest>>,
 }
 
 impl QuantumState {
@@ -44,6 +55,9 @@ impl QuantumState {
             events: vec![],
             live: vec![],
             time: crate::target::Rational::zero(),
+            peak: BTreeMap::new(),
+            dirty: BTreeSet::new(),
+            requests: None,
         }
     }
     pub fn wire_count(&self) -> usize {
@@ -271,12 +285,13 @@ pub struct Exec<'o> {
     state: &'o mut QuantumState,
     bundles: HashMap<String, Vec<usize>>,
     regions: HashMap<String, RegionWires>,
-    local_images: HashMap<String, Vec<BigUint>>,
+    local_images: BTreeMap<String, Vec<BigUint>>,
     args: HashMap<String, Value>,
     pred: Vec<usize>,
     borrowed: Vec<String>,
     idle: Vec<usize>,
     func: String,
+    exact_required: bool,
 }
 
 fn diag(rule: &str, msg: impl std::fmt::Display) -> String {
@@ -397,19 +412,14 @@ impl<'o> Exec<'o> {
                         .ok_or("§8.3: target gate wire has no allocated class".into())
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            return self.state.emit_target_gate_with(
-                crate::target::Gate {
-                    op: op.clone(),
-                    controls,
-                    own_controls: own,
-                    targets,
-                    classes,
-                    theta,
-                },
-                &crate::target::Rational::zero(),
-                None,
-                &self.idle,
-            );
+            return self.emit_gate_request(crate::target::Gate {
+                op: op.clone(),
+                controls,
+                own_controls: own,
+                targets,
+                classes,
+                theta,
+            });
         }
         let pred = self.pred.clone();
         match ins.op.as_str() {
@@ -505,6 +515,28 @@ impl<'o> Exec<'o> {
         Ok(())
     }
 
+    fn emit_gate_request(&mut self, g: crate::target::Gate) -> Result<(), String> {
+        let request = if let Some(requests) = &mut self.state.requests {
+            requests
+                .pop_front()
+                .ok_or("§8: missing logical gate request")?
+        } else {
+            GateRequest {
+                epsilon_share: crate::target::Rational::zero(),
+                realisation: None,
+            }
+        };
+        if self.exact_required && !request.epsilon_share.is_zero() {
+            return Err("§4.4/§5.3: permutation actions require epsilon zero transitively".into());
+        }
+        self.state.emit_target_gate_with(
+            g,
+            &request.epsilon_share,
+            request.realisation.as_deref(),
+            &self.idle,
+        )
+    }
+
     fn implicit_gate(
         &mut self,
         op: &str,
@@ -546,19 +578,14 @@ impl<'o> Exec<'o> {
                     .ok_or_else(|| "§8.3: implicit gate wire has no class".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.state.emit_target_gate_with(
-            crate::target::Gate {
-                op: op.into(),
-                controls,
-                own_controls: own.len(),
-                targets: targets.to_vec(),
-                classes,
-                theta: None,
-            },
-            &crate::target::Rational::zero(),
-            None,
-            &self.idle,
-        )
+        self.emit_gate_request(crate::target::Gate {
+            op: op.into(),
+            controls,
+            own_controls: own.len(),
+            targets: targets.to_vec(),
+            classes,
+            theta: None,
+        })
     }
 
     fn xor_bundle(&mut self, src: &[usize], dst: &[usize]) -> Result<(), String> {
@@ -593,6 +620,43 @@ impl<'o> Exec<'o> {
         // Exact branchwise form: the controlled operations below are
         // permutations/phases selected by basis comparisons; on a
         // superposition they are defined branch by branch.
+        if let Some(t) = self.state.target.clone() {
+            t.validate_predicate_depth(self.pred.len())?;
+            let qram = crate::target::field(&t.document, "qram")?;
+            if qram == &crate::json::Json::Null {
+                return Err("unimplemented: quantum-memory comparator expansion (milestone 4); unpublished ref library (bennett-vm-47t)".into());
+            }
+            let vars = BTreeMap::from([
+                ("a".into(), crate::target::Rational::from(region.a as u64)),
+                ("w".into(), crate::target::Rational::from(region.w as u64)),
+                (
+                    "c".into(),
+                    crate::target::Rational::from(self.pred.len() as u64),
+                ),
+            ]);
+            let costs = crate::target::field(crate::target::field(qram, mode)?, "cost")?
+                .as_obj()
+                .unwrap();
+            let mut cost = BTreeMap::new();
+            for (name, expr) in costs {
+                let value = crate::target::eval(expr, &vars, &t.tables)?;
+                if value.negative() {
+                    return Err("§8.1: negative qram cost".into());
+                }
+                cost.insert(name.clone(), value);
+            }
+            let wires = region
+                .cells
+                .iter()
+                .flatten()
+                .chain(addr)
+                .chain(value)
+                .chain(&self.pred)
+                .copied()
+                .collect();
+            self.state
+                .record_event(cost["time"].clone(), wires, cost, &[]);
+        }
         let pred = self.pred.clone();
         match mode {
             "load" => {
@@ -712,8 +776,10 @@ impl<'o> Exec<'o> {
             }
         }
         let mut cells = Vec::new();
-        for cell in image.iter().take(ncells) {
-            let wires = self.state.target_alloc(w, "any")?;
+        for _ in 0..ncells {
+            cells.push(self.state.target_alloc(w, "any")?);
+        }
+        for (cell, wires) in image.iter().zip(&cells) {
             if !cell.is_zero() {
                 // Image gates are unconditional (§3.5).
                 for (i, w) in wires.iter().enumerate() {
@@ -722,7 +788,6 @@ impl<'o> Exec<'o> {
                     }
                 }
             }
-            cells.push(wires);
         }
         self.regions
             .insert(name.clone(), RegionWires { cells, a, w });
@@ -735,7 +800,7 @@ impl<'o> Exec<'o> {
         for name in locals {
             let region = self.region(&name)?;
             let image = self.local_images.get(&name).cloned().unwrap_or_default();
-            for (i, cell) in region.cells.iter().enumerate() {
+            for (i, cell) in region.cells.iter().enumerate().rev() {
                 let want = &image[i];
                 let got = self.state.constant_value(cell);
                 if got.as_ref() != Some(want) {
@@ -747,11 +812,13 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
-                for (i, w) in cell.iter().enumerate() {
+                for (i, w) in cell.iter().enumerate().rev() {
                     if want.bit(i) {
                         self.implicit_gate("x", &[], &[*w], &[])?;
                     }
                 }
+            }
+            for cell in &region.cells {
                 self.state.target_release(cell);
             }
             self.regions.remove(&name);
@@ -786,7 +853,26 @@ impl<'o> Exec<'o> {
                             "designated idle set lacks requested borrowed wires",
                         ));
                     }
-                    self.idle.drain(..n).collect()
+                    let requested = &ins.operands[0];
+                    let selected = self
+                        .idle
+                        .iter()
+                        .copied()
+                        .filter(|w| {
+                            self.state.target.is_none()
+                                || requested == "any"
+                                || self.state.wire_classes.get(w) == Some(requested)
+                        })
+                        .take(n)
+                        .collect::<Vec<_>>();
+                    if selected.len() != n {
+                        return Err(
+                            "§8.3: designated idle set lacks requested borrowed class".into()
+                        );
+                    }
+                    self.idle.retain(|w| !selected.contains(w));
+                    self.state.dirty.extend(&selected);
+                    selected
                 } else {
                     self.state.target_alloc(n, &ins.operands[0])?
                 };
@@ -813,6 +899,9 @@ impl<'o> Exec<'o> {
                     self.state.target_release(&wires);
                 }
                 if op == "qreturn" {
+                    for w in &wires {
+                        self.state.dirty.remove(w);
+                    }
                     self.idle.extend(wires);
                 }
                 self.bundles.remove(&name);
@@ -867,7 +956,7 @@ impl<'o> Exec<'o> {
             "qload" => {
                 let region = self.region(&ins.operands[0])?;
                 let addr = self.bundle(&base_name(&ins.operands[1]))?;
-                let dst = self.state.alloc_wires(region.w);
+                let dst = self.state.target_alloc(region.w, "any")?;
                 self.bundles.insert(ins.lhs[0].clone(), dst.clone());
                 self.region_dispatch(&region, &addr, &dst, "load")
             }
@@ -886,6 +975,7 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
+                self.state.target_release(&dst);
                 self.bundles.remove(&dname);
                 Ok(())
             }
@@ -1388,6 +1478,47 @@ pub fn execute_action_inner(
     )
 }
 
+/// Execute a complete explicit request batch transactionally. Missing/unused
+/// requests fail; they never silently fall back. History reversal still applies
+/// actual inverse gates and never uses this transaction's saved state.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_action_with_requests(
+    obj: &Object,
+    state: &mut QuantumState,
+    name: &str,
+    muts: &[Vec<usize>],
+    ins_b: &[Vec<usize>],
+    mems: &[RegionWires],
+    args: &[Value],
+    adjoint: bool,
+    inherited_pred: &[usize],
+    idle: &[usize],
+    requests: &[GateRequest],
+) -> Result<(), String> {
+    if state.target.is_none() || state.requests.is_some() {
+        return Err("§8: explicit requests require a target and cannot nest".into());
+    }
+    let mut trial = state.clone();
+    trial.requests = Some(requests.iter().cloned().collect());
+    execute_action_with_idle(
+        obj,
+        &mut trial,
+        name,
+        muts,
+        ins_b,
+        mems,
+        args,
+        adjoint,
+        inherited_pred,
+        idle,
+    )?;
+    if !trial.requests.take().unwrap().is_empty() {
+        return Err("§8: unused logical gate requests".into());
+    }
+    *state = trial;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn execute_action_with_idle(
     obj: &Object,
@@ -1432,6 +1563,9 @@ pub fn execute_action_with_idle(
             "§9.4: invalid designated idle set (duplicates, nonlive or active interface)".into(),
         );
     }
+    if let Some(t) = &state.target {
+        t.validate_function(f)?;
+    }
     let mut bundles: HashMap<String, Vec<usize>> = HashMap::new();
     for (p, wires) in f.lists[0].iter().zip(muts.iter()) {
         bundles.insert(p.name.clone(), wires.clone());
@@ -1460,12 +1594,13 @@ pub fn execute_action_with_idle(
         state,
         bundles,
         regions,
-        local_images: HashMap::new(),
+        local_images: BTreeMap::new(),
         args: arg_env,
         pred: inherited_pred.to_vec(),
         borrowed: Vec::new(),
         idle: idle.to_vec(),
         func: name.to_string(),
+        exact_required: f.kind == crate::object::FnKind::PermAction,
     };
     // §4.6: all lexical regions exist at entry, including those inside
     // zero-trip loops or declared after their first use.
@@ -1510,16 +1645,17 @@ fn collect_qregions(ins: &Instr, out: &mut impl FnMut(&Instr)) {
 }
 
 /// Static bundle widths of an action body, for adjoint alloc/free swaps.
-fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, usize> {
-    let mut widths: HashMap<String, usize> = HashMap::new();
+// Width plus declared class: inverse allocation must retain both (§5.3).
+fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, (usize, String)> {
+    let mut widths = HashMap::new();
     for list in [&f.lists[0], &f.lists[1]] {
         for p in list.iter() {
             if let crate::object::Type::Wire(n) = p.ty {
-                widths.insert(p.name.clone(), n);
+                widths.insert(p.name.clone(), (n, "any".into()));
             }
         }
     }
-    fn walk(instrs: &[Instr], widths: &mut HashMap<String, usize>) {
+    fn walk(instrs: &[Instr], widths: &mut HashMap<String, (usize, String)>) {
         for ins in instrs {
             match ins.op.as_str() {
                 "qalloc" | "qborrow" => {
@@ -1527,14 +1663,14 @@ fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, usize> {
                         ins.lhs.first(),
                         ins.operands.get(1).and_then(|s| s.parse::<usize>().ok()),
                     ) {
-                        widths.insert(lhs.clone(), n);
+                        widths.insert(lhs.clone(), (n, ins.operands[0].clone()));
                     }
                 }
                 "qcopy" => {
                     if let (Some(lhs), Some(src)) = (ins.lhs.first(), ins.operands.first())
-                        && let Some(w) = widths.get(&base_name(src)).copied()
+                        && let Some(w) = widths.get(&base_name(src)).cloned()
                     {
-                        widths.insert(lhs.clone(), w);
+                        widths.insert(lhs.clone(), (w.0, "any".into()));
                     }
                 }
                 _ => {}
@@ -1551,7 +1687,7 @@ fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, usize> {
 }
 
 /// Adjoint of an instruction list (§5.3 table).
-fn adjoint_list(instrs: &[Instr], widths: &HashMap<String, usize>) -> Vec<Instr> {
+fn adjoint_list(instrs: &[Instr], widths: &HashMap<String, (usize, String)>) -> Vec<Instr> {
     let mut out = Vec::new();
     for ins in instrs.iter().rev() {
         out.push(adjoint_instr(ins, widths));
@@ -1576,7 +1712,7 @@ fn renamed(
     }
 }
 
-fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
+fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>) -> Instr {
     let op = ins.op.as_str();
     match op {
         "s" => renamed(ins, "sdg", vec![], ins.operands.clone(), vec![]),
@@ -1595,24 +1731,30 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, usize>) -> Instr {
         "qalloc" => renamed(ins, "qfree", vec![], ins.lhs.clone(), vec![]),
         "qfree" => {
             let name = base_name(&ins.operands[0]);
-            let n = widths.get(&name).copied().unwrap_or(1);
+            let (n, class) = widths
+                .get(&name)
+                .cloned()
+                .expect("validated allocation has width/class");
             renamed(
                 ins,
                 "qalloc",
                 vec![name],
-                vec!["any".into(), n.to_string()],
+                vec![class, n.to_string()],
                 vec![],
             )
         }
         "qborrow" => renamed(ins, "qreturn", vec![], ins.lhs.clone(), vec![]),
         "qreturn" => {
             let name = base_name(&ins.operands[0]);
-            let n = widths.get(&name).copied().unwrap_or(1);
+            let (n, class) = widths
+                .get(&name)
+                .cloned()
+                .expect("validated allocation has width/class");
             renamed(
                 ins,
                 "qborrow",
                 vec![name],
-                vec!["any".into(), n.to_string()],
+                vec![class, n.to_string()],
                 vec![],
             )
         }
@@ -1820,6 +1962,14 @@ impl QuantumState {
                 self.wire_classes.insert(*w, c.clone());
             }
         }
+        let mut used = BTreeMap::<String, usize>::new();
+        for c in self.wire_classes.values() {
+            *used.entry(c.clone()).or_default() += 1;
+        }
+        for (c, n) in used {
+            let peak = self.peak.entry(c).or_default();
+            *peak = (*peak).max(n);
+        }
         Ok(wires)
     }
     pub(crate) fn target_release(&mut self, wires: &[usize]) {
@@ -1837,10 +1987,43 @@ impl QuantumState {
     }
     /// Actual execution accounting, separate from the milestone-5 estimate ABI.
     pub fn target_accounting(&self) -> Result<crate::json::Json, String> {
-        self.target
+        let mut result = self
+            .target
             .as_ref()
             .ok_or("§8: no target installed")?
-            .account(&self.events, &self.live)
+            .account(&self.events, &self.live)?;
+        // Allocations can have zero duration. Capacity still observes them.
+        if let crate::json::Json::Obj(m) = &mut result {
+            for (name, resource) in self
+                .target
+                .as_ref()
+                .unwrap()
+                .document
+                .get("resources")
+                .unwrap()
+                .as_obj()
+                .unwrap()
+            {
+                if resource.get("kind").and_then(crate::json::Json::as_str) == Some("peak") {
+                    let peak = m.get_mut(name).unwrap();
+                    if let crate::json::Json::Obj(values) = peak {
+                        for (c, n) in &self.peak {
+                            let previous = values
+                                .get(c)
+                                .and_then(crate::json::Json::as_str)
+                                .unwrap()
+                                .parse::<usize>()
+                                .unwrap();
+                            values.insert(
+                                c.clone(),
+                                crate::json::Json::Str((*n).max(previous).to_string()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
     pub fn target_error(&self) -> crate::target::Rational {
         self.emitted
@@ -1863,7 +2046,7 @@ impl QuantumState {
                 class: class.clone(),
                 start: self.time.clone(),
                 end: end.clone(),
-                dirty: dirty.contains(w),
+                dirty: dirty.contains(w) || self.dirty.contains(w),
             });
         }
         self.events.push(crate::target::Event {

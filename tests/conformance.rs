@@ -1,4 +1,4 @@
-//! Run the complete published harness unchanged; keep its raw red verdict.
+//! Run the complete published harness unchanged; retain unavailable cases.
 use std::{path::Path, process::Command};
 #[test]
 fn published_conformance_report() {
@@ -28,33 +28,28 @@ fn published_conformance_report() {
     );
     std::fs::create_dir_all(repo.join(".tmp")).unwrap();
     std::fs::write(repo.join(".tmp/conformance.log"), &report).unwrap();
-    // The published harness hard-codes old staged-refusal prose for these probes.
-    // Keep its FAIL verdict visible; require the actual new, rule-derived refusal.
-    assert_eq!(output.status.code(), Some(1), "{report}");
-    assert!(
-        report.contains("| all | 445 | 2 | 43 | 490 |"),
-        "must execute all cases: {report}"
-    );
-    let failures = report
-        .lines()
-        .filter(|l| l.starts_with("FAIL "))
-        .collect::<Vec<_>>();
-    assert_eq!(failures.len(), 2, "new conformance failure: {report}");
-    assert!(
-        failures[0].starts_with("FAIL E-target-staged-probe:")
-            && failures[0].contains("§8.1: target must be in RFC 8785 canonical form"),
-        "{}",
-        failures[0]
-    );
-    assert!(
-        failures[1].starts_with("FAIL H-schedule-staged-probe:")
-            && failures[1].contains("E_SCHEDULE_INFEASIBLE")
-            && failures[1].contains("expansion library ref@0.8"),
-        "{}",
-        failures[1]
-    );
+    // The published suite now checks semantic refusal reasons for E/H and
+    // includes E-epsilon-zero-exact. Exit 2 reports unavailable cases, not FAIL.
+    assert_eq!(output.status.code(), Some(2), "{report}");
+    for row in [
+        "| A | 21 | 0 | 0 | 21 |",
+        "| B | 35 | 0 | 0 | 35 |",
+        "| C | 339 | 0 | 0 | 339 |",
+        "| D | 7 | 0 | 5 | 12 |",
+        "| E | 0 | 0 | 16 | 16 |",
+        "| F | 33 | 0 | 2 | 35 |",
+        "| G | 10 | 0 | 13 | 23 |",
+        "| H | 0 | 0 | 10 | 10 |",
+        "| all | 445 | 0 | 46 | 491 |",
+    ] {
+        assert!(
+            report.contains(row),
+            "must execute every published case: {report}"
+        );
+    }
+    assert!(!report.lines().any(|l| l.starts_with("FAIL ")), "{report}");
     println!(
-        "445 available conformance cases pass; two obsolete staging-prose probes FAIL, 43 cases unavailable; raw report: {}",
+        "445 available cases pass; 46 unavailable; raw published report: {}",
         repo.join(".tmp/conformance.log").display()
     );
 }

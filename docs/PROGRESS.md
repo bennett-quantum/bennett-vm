@@ -1,16 +1,127 @@
-# Milestone 4 resumed — 2026-10-30 (verification in progress)
+# Milestone 4 independent target work verified — 2026-10-30
 
-Resumed uncommitted structured-gate, dirty-scheme and event-accounting work
-under child v23.4 after infrastructure interruption. Six target execution
-witnesses pass: bundle/branch/loop expansion, while flags and adjoint order,
-unconditional local images, designated entangled dirty scratch, achieved-error
-charging and invalid idle designations. Initial run: four passed/two failed.
-The idle failure was an entry validation bug, fixed before any allocation;
-the while expected order contradicted §5.3's explicit adjoint table and was
-corrected to its deciding sentence. No reference code consumed.
+Child `bennett-vm-v23.4` completed. Parent `bennett-vm-v23` remains BLOCKED
+on `47t` (unpublished §11 reference expansion library) and `cxg` (undefined
+`eps_decade` indexing). No private library, hash, scratch identities or ordinals
+were invented. This section supersedes the historical verification below.
 
-The remaining milestone and full gate are not yet claimed complete. See the
-previous verified baseline below; subsequent session results supersede it.
+## Delivered and deciding contract sentences
+
+- Explicit gates, bundle copy/XOR/exchange, qif toggles, bounded loops, while
+  flags and local-image setup/cleanup now execute real target native leaves.
+  §4.5: “`cx s[i] d[i]` under the predicate”; §4.6 lists qif's toggles and
+  interleaves forward while bodies with flag computation. §5.3 explicitly
+  specifies the adjoint's different order: “flags computed forward ... adj A
+  for i = n..1 under c_i; flags uncomputed”. The initial inherited adjoint
+  expected order contradicted that sentence; the implementation was retained.
+- §4.6: a local region is “created at function entry (unconditional allocation,
+  X gates from the data image ...)”, then “image gates reversed, cells released
+  clean”. All its cells are allocated before image gates and remain live until
+  all reversed image gates finish; cleanup order is deterministic. An explicit
+  allocation's declared class also survives the §5.3 qalloc/qfree adjoint swap.
+- Native `qram` load/store/exchange evaluate costs with exactly `a,w,c`, execute
+  the §4.6 selected-cell permutation coherently and record one event per native
+  access. **768** independent basis cases cover all cell contents, targets,
+  addresses and inherited predicate values for all three access kinds. A separate
+  address-superposition witness preserves relative phase. When `qram` is null,
+  comparator decomposition still names 47t and milestone 4, before action entry;
+  direct Rust calls cannot silently bypass this target guard.
+- Designated dirty scheme scratch and qborrow pools preserve caller wire IDs,
+  enforce class/uniqueness/liveness/interface disjointness and consume no extra
+  physical capacity. §9.4: “callees `qborrow` only from the caller's designated
+  idle set”. Entangled scratch is tested against an external reference. §8.2:
+  “borrowed wires to the borrower at `dirty_rate`, replacing the owner's charge”.
+  Explicit borrow frames and dirty schemes both replace ownership charges.
+- Resolved `GateRequest` batches select per-logical-gate realisations and exact
+  rational epsilon shares in the known structured expansion order; they are a
+  diagnostic Rust API, **not** §11 schedules or library ordinals. Missing/unused
+  requests fail transactionally. §8.1: “the error charged ... is the entry's
+  evaluated `epsilon`”; two requested shares 0.01/0 with achieved 0.001/0 charge
+  0.001. §4.4: “Oracles and permutation actions require ε = 0 for every gate”;
+  permutation actions reject nonzero shares, including nested permutation calls.
+  Ordinary unscheduled target calls retain exact shares. Scheme correctness
+  remains the target author's obligation, not an automatic proof claim (§8.3).
+- Integrated actual accounting records native leaves, classical rows and effects
+  once, includes inverse execution and slices wire ownership over their durations.
+  §8.2: “Classical instructions and effects take `classical_step_time`”; an
+  eight-row device entry costs 8 forward / 16 forward+reverse. Seven classical
+  rows plus eight H/S scheme leaves cost 15, with occupancy 26 and peak 2.
+  Native-image example: 22 X gates + two 10-time loads + eight 2-time CXs = 58;
+  occupancy = 25*58 + 8*36 = 1738, peak 33. §8.4 peak includes allocations even
+  when every event has zero duration. Template gates obey §3.3 disjointness and
+  effective predicate depth is checked against target capabilities.
+- Target-backed CLI output and immutable launch snapshots expose
+  `target_resources` and `target_error`. These are actual accumulated simulator
+  ledger values at the observed boundary; stateful execution carries the program
+  ledger between runs, not a per-run estimate or certificate. Untargeted output
+  is unchanged. The full §10 estimate/certificate/coverage API still explicitly
+  names milestone 5. A Rust consumer of the exported C ABI checks snapshots,
+  reversal accounting and saved-pointer immutability in addition to the existing
+  C11 consumers. Target pointer support now follows the object's parameter range
+  instead of treating §8.3's illustrative `[32,64]` array as an enum; the published
+  16-bit classical fixture exercises this through real target execution.
+
+## Final gates and corpus
+
+Headless/offline, std-only, sole implementer; display variables unset and TMPDIR
+under `.tmp`. **72 Rust tests pass, zero failed/ignored** (16 new target-execution
+integration groups), **160 launch C checks**, all **15 scheduler exports** and the
+existing **21,888 one-row inverse checks**. `cargo fmt --check`, strict all-target
+Clippy and `git diff --check` pass. Raw test log `.tmp/resume-tests.log`.
+
+**1,076 / 1,076 CLI differential comparisons agree, zero divergence:** 1,050 JSON
+and 26 diagnostics. Counts and comparison limits remain those of the prior
+milestone-4 gate below (including the opaque memory-fingerprint exception).
+Target-only fields are separately hand-derived and do not alter untargeted
+reference comparisons. No reference implementation code was read/copied/linked.
+
+The other agent's published fixture/probe repairs were observed read-only.
+`tests/targets.rs` now consumes the corrected canonical hash vector, negative
+zero-epsilon case and separate valid `E-epsilon-zero-exact`; it still independently
+mutates a trailing LF and forbidden eps reference. The report test gates every
+suite in the unchanged 491-case harness, with zero allowed failures. No ISA repo
+file or published expected value was edited by this implementer.
+
+Final standalone conformance (exit **2**, unavailable cases remain unavailable):
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A | 21 | 0 | 0 | 21 |
+| B | 35 | 0 | 0 | 35 |
+| C | 339 | 0 | 0 | 339 |
+| D | 7 | 0 | 5 | 12 |
+| E | 0 | 0 | 16 | 16 |
+| F | 33 | 0 | 2 | 35 |
+| G | 10 | 0 | 13 | 23 |
+| H | 0 | 0 | 10 | 10 |
+| **all** | **445** | **0** | **46** | **491** |
+
+Raw standalone verdict: `.tmp/resume-conformance-final.log`; the integration
+invocation separately writes `.tmp/conformance.log`. E/H are still hard-coded
+UNAVAILABLE by the published runner, including successfully refused semantic
+probes; local native-target tests do not promote those results.
+
+Observed ISA checkout HEAD `92c26af045b816f5ef1e283a7b734aa244d8f320`.
+Observed executable SHA-256 (separate fingerprints, no claim about source builds):
+VM `49c9b7b432e8122134c5383ffd2af98d75272b1a4061b0a0a2f343445c41828e`;
+reference `679de84f8c016ac2626a2eca2c262129d204ae9f7723cec00a92cead0f4beff5`;
+conformance `267079641cfae28432a82a0deddf2b03b2f09372fd3215ff1aa3704464e41189`.
+
+## What remains blocked, without reducing scope
+
+§11: the expansion document must supply row decompositions, generated ordinals,
+scratch identities and the removable subset; it is unpublished until accepted
+ISA 0.9 (`47t`). Lifted-row/dispatch arithmetic, comparators, multiplexers,
+`inrange` scans, oracle compute/commit/cleanup lowering, qinplace's oracle calls,
+and non-native quantum-memory comparator expansion therefore remain explicit
+`unimplemented: <item> (milestone 4)` paths. Verbatim schedules, schedule-derived
+accuracy defaults/shares, start times, integrated **scheduled** accounting and
+reproducibility also wait on that library. `cxg` still blocks eps_decade tables.
+No successful schedule or certificate is claimed. Child v23.4 closes; parent v23
+stays BLOCKED. Finish milestone 4 after publication, then **milestone 5 JIT**.
+No push or Dolt remote synchronization.
+
+# Historical milestone-4 baseline
 
 # Milestone 4 partial implementation — 2026-10-29
 

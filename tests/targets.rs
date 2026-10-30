@@ -78,10 +78,15 @@ fn exact_decimal_ast_and_load_errors() {
 }
 #[test]
 fn canonical_target_schema_and_hash() {
-    // §8.1: SHA-256 of JCS bytes. Published file's newline is NOT JCS.
+    // §8.1: SHA-256 of precisely the canonical bytes, excluding any LF.
     let raw = published("E-jcs-target-hash", "target.json");
-    assert!(Target::parse(&raw).unwrap_err().contains("canonical"));
-    let t = Target::parse(raw.trim_end()).unwrap();
+    assert_eq!(raw, raw.trim_end());
+    let t = Target::parse(&raw).unwrap();
+    assert!(
+        Target::parse(&format!("{raw}\n"))
+            .unwrap_err()
+            .contains("canonical")
+    );
     assert_eq!(
         t.hash,
         bennett_vm::sha256::sha256_hex(raw.trim_end().as_bytes())
@@ -101,8 +106,13 @@ fn canonical_target_schema_and_hash() {
             .unwrap_err()
             .contains("mbu must be false")
     );
-    // The staged epsilon-zero file actually has no eps reference: spec says accept.
-    Target::parse(published("E-epsilon-zero-entry", "target.json").trim_end()).unwrap();
+    // The ISA fixtures now separate the forbidden eps reference and exact entry.
+    assert!(
+        Target::parse(&published("E-epsilon-zero-entry", "target.json"))
+            .unwrap_err()
+            .contains("epsilon zero entry references eps")
+    );
+    Target::parse(&published("E-epsilon-zero-exact", "target.json")).unwrap();
     let mut v = base();
     if let Json::Obj(m) = &mut v
         && let Json::Arr(gs) = m.get_mut("gates").unwrap()
@@ -255,7 +265,20 @@ fn launch_uses_target_scheme_and_rejects_missing_alphabet() {
         "{}",
         String::from_utf8_lossy(&lowered.stderr)
     );
-    assert_eq!(plain.stdout, lowered.stdout);
+    let plain = j(std::str::from_utf8(&plain.stdout).unwrap().trim());
+    let mut lowered = j(std::str::from_utf8(&lowered.stdout).unwrap().trim());
+    if let Json::Obj(m) = &mut lowered {
+        // §8.2: seven classical steps plus eight native H/S leaves = 15;
+        // both caller wires live for 13 units, hence occupancy 26.
+        assert_eq!(m.remove("target_error"), Some(Json::Str("0".into())));
+        assert_eq!(
+            m.remove("target_resources"),
+            Some(j(
+                r#"{"time":"15","peak_qubits":{"fast":"2"},"qubit_second":{"fast":"26"}}"#
+            ))
+        );
+    }
+    assert_eq!(plain, lowered);
     // No x native or scheme in published target: must fail with exact gate reason.
     std::fs::write(&path, base().to_jcs()).unwrap();
     let bad = run(true);

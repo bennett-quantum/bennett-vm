@@ -64,14 +64,18 @@ frames, never re-execution.
 4. **Devices, targets, lowering, schedules (in progress; blocked on 47t/cxg).** §8 target
    descriptions, launch-time lowering to the target gate alphabet,
    §11 schedule consumption verbatim-or-reject, resource accounting.
-   Delivered subset: exact target AST/schema/hash, ordered matching, nonnested
-   template expansion, actual native-leaf simulation for gate-only actions,
-   class capacity/history, event-list accounting, schedule validation utilities
-   and all 15 scheduler ABI exports. No schedule is accepted/emitted while the
-   mandatory published `ref` expansion document is absent (47t); eps_decade
-   indexing also lacks a definition (cxg). Full row lowering, dirty scheme pools,
-   approximate scheduled realisations and integrated scheduled accounting remain
-   here, without changing scope. See PROGRESS.md for the raw red conformance verdict.
+   Delivered: exact target AST/schema/hash, ordered matching and nonnested
+   native templates; structured action/bundle/loop/local-image lowering;
+   designated class-aware dirty pools; explicit accuracy request batches and
+   achieved-error charging; native QRAM primitives; integrated actual
+   leaf/classical/effect accounting exposed in CLI and immutable snapshots;
+   schedule validation utilities and all 15 scheduler ABI exports.
+   Full lifted/oracle rows and non-native memory comparator decomposition need
+   the published ref library (47t), as do schedule ordinals/scratch, verbatim
+   execution, default scheduled accuracy allocation, timing and reproducibility.
+   No schedule is accepted/emitted while that library is absent. eps_decade
+   indexing also lacks a definition (cxg). No capability is removed from scope.
+   Current raw conformance: zero failures, unavailable cases retained; see PROGRESS.
 5. **JIT tier.** §5.7 transformations (inlining, structure
    recovery, dispatch re-indexing) proven extensional by the
    milestone-1 harness, then native codegen for CC and oracle

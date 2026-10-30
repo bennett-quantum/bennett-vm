@@ -229,7 +229,7 @@ impl Target {
             return Err("§8.3: empty pointer widths".into());
         }
         for w in widths {
-            if ![Some(32), Some(64)].contains(&w.as_u64()) {
+            if !w.as_u64().is_some_and(|n| (1..=128).contains(&n)) {
                 return Err("§8.3: invalid pointer width".into());
             }
         }
@@ -560,6 +560,7 @@ impl Target {
         ))
     }
     fn native(&self, g: &Gate, eps: &R) -> Result<Option<Leaf>, String> {
+        self.validate_gate_request(g)?;
         for e in arr(field(&self.document, "gates")?)? {
             if !covers(e, g)? {
                 continue;
@@ -589,7 +590,7 @@ impl Target {
         }
         Ok(None)
     }
-    pub fn lower(&self, g: &Gate, eps: &R, choice: Option<&str>) -> Result<Lowered, String> {
+    fn validate_gate_request(&self, g: &Gate) -> Result<(), String> {
         if g.own_controls > g.controls.len()
             || own_controls(&g.op, g.own_controls + g.targets.len())? != g.own_controls
         {
@@ -602,14 +603,28 @@ impl Target {
         if wires.len() != g.controls.len() + g.targets.len() {
             return Err("§3.3: gate operands must be disjoint".into());
         }
-        if eps.negative() || eps > &R::from(1) {
-            return Err("§8.1: eps outside [0,1]".into());
-        }
         registry(&g.op)?;
         if g.classes.len() != g.controls.len() + g.targets.len()
             || g.classes.iter().any(|c| !self.classes.contains_key(c))
         {
             return Err("§8.3: gate operand classes mismatch".into());
+        }
+        self.validate_predicate_depth(g.controls.len() - g.own_controls)
+    }
+    pub(crate) fn validate_predicate_depth(&self, depth: usize) -> Result<(), String> {
+        if let Some(max) = limit(field(
+            field(&self.document, "capabilities")?,
+            "max_predicate_depth",
+        )?)? && depth > max
+        {
+            return Err("§8.3: effective predicate depth exceeds target capability".into());
+        }
+        Ok(())
+    }
+    pub fn lower(&self, g: &Gate, eps: &R, choice: Option<&str>) -> Result<Lowered, String> {
+        self.validate_gate_request(g)?;
+        if eps.negative() || eps > &R::from(1) {
+            return Err("§8.1: eps outside [0,1]".into());
         }
         if choice.is_none_or(|s| s == "native") {
             if let Some(leaf) = self.native(g, eps)? {
@@ -1071,10 +1086,21 @@ impl Target {
             ) {
                 continue;
             }
-            let mut instructions = vec![];
-            f.flat_instrs(&mut instructions);
-            for ins in instructions {
-                if crate::action::is_gate_name(&ins.op)
+            self.validate_function(f)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_function(&self, f: &crate::object::Function) -> Result<(), String> {
+        let mut instructions = vec![];
+        f.flat_instrs(&mut instructions);
+        for ins in instructions {
+            let call_oracle = matches!(ins.op.as_str(), "adj" | "ctl")
+                && ins.operands.iter().any(|o| o == "oracle_call");
+            let native_qram = matches!(ins.op.as_str(), "qload" | "qunload" | "qstore" | "qexchm")
+                && field(&self.document, "qram")? != &Json::Null;
+            if !call_oracle
+                && (crate::action::is_gate_name(&ins.op)
+                    || native_qram
                     || [
                         "qalloc",
                         "qfree",
@@ -1094,15 +1120,14 @@ impl Target {
                         "qregion",
                         "qregion_release",
                     ]
-                    .contains(&ins.op.as_str())
-                {
-                    continue;
-                }
-                return Err(format!(
-                    "§8/§11: unimplemented: gate-level expansion for {} (milestone 4); required ref library is unpublished (bennett-vm-47t)",
-                    ins.op
-                ));
+                    .contains(&ins.op.as_str()))
+            {
+                continue;
             }
+            return Err(format!(
+                "§8/§11: unimplemented: gate-level expansion for {} (milestone 4); required ref library is unpublished (bennett-vm-47t)",
+                ins.op
+            ));
         }
         Ok(())
     }

@@ -41,20 +41,22 @@ synchronization; execution advances at `wait` or `run_step`. VM extensions add
 immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
 [tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
 
-The current gate has **56 passing Rust tests**, including 160 launch C checks
-and a scheduler C consumer calling all 15 published functions, **1,076 agreeing
-CLI comparisons** and the existing 21,888 one-row inverse checks. Raw published
-conformance is **445 pass / 2 fail / 43 unavailable** (exit 1). Both FAILs are
-obsolete staging-prose probes; full details and deciding sentences are in PROGRESS.
+The current gate has **72 passing Rust tests**, **160 launch C checks**, a
+scheduler C consumer calling all **15** published exports, **1,076 agreeing CLI
+comparisons** and **21,888 one-row inverse checks**. Published conformance is
+**445 pass / 0 fail / 46 unavailable**, 491 cases (exit 2). See PROGRESS for the
+per-suite report, comparison limits and unchanged unavailable classifications.
 
-Milestone 4 is **partial and blocked**: target-backed gate-only actions execute
-native leaves from actual scheme expansion; exact-rational target evaluation,
-class capacity/history and event-list accounting are available. Target input is
-exactly ISA §8 JCS, without vendor extensions. Scheduler request/response exports
-consume the published header; requests return explicit UNSUPPORTED because the
-mandatory `ref` expansion document is not published. No schedules/certificates
-are fabricated. Use the Rust `target`/`sched` modules and `run-program --target`;
-full row lowering and integrated scheduled execution/accounting remain M4.
+Milestone 4 remains **partial and blocked** on the unpublished §11 `ref` expansion
+library and undefined `eps_decade` indexing. Target-backed structured actions and
+native QRAM execute actual native operations. Designated dirty pools, explicit
+accuracy-request batches, class capacities and actual sequential event accounting
+are implemented. Target-backed CLI output and immutable launch snapshots expose
+`target_resources` / `target_error` (accumulated program ledger at that boundary).
+These are not estimates or certificates. Target schema remains exactly ISA §8.
 
-Next: resolve ISA gaps and finish milestone 4, then milestone 5 JIT.
-No future North-Star capability is removed from scope.
+No schedule/library hash/ordinals are fabricated. Lifted/oracle row decomposition,
+non-native memory comparators, verbatim scheduled execution/accounting and
+reproducibility wait on the published expansion contract. Scheduler requests
+return explicit UNSUPPORTED. Finish milestone 4 after publication, then milestone
+5 JIT. No future North-Star capability is removed from scope.

@@ -1,6 +1,6 @@
 # Published unavailable metadata re-baseline — 2026-10-30
 
-Initial published ISA checkout `0b913da`; final observed checkout `5663477`;
+Initial published ISA checkout `0b913da`; final tested checkout `e332108`;
 VM starting HEAD `16caaca`. Only published
 spec/fixture data and black-box binaries were used across repository boundaries.
 No ISA files were changed, no dependency added, no push or Dolt sync performed.
@@ -21,17 +21,21 @@ Observed rows in both interpreter and JIT (PASS / FAIL / UNAVAILABLE / TOTAL):
 | B | 35 / 0 / 0 / 35 | 35 / 0 / 0 / 35 |
 | C | 339 / 0 / 0 / 339 | 339 / 0 / 1 / 340 |
 | D | 7 / 0 / 6 / 13 | 7 / 0 / 6 / 13 |
-| E | 0 / 0 / 16 / 16 | 0 / 0 / 19 / 19 |
+| E | 0 / 0 / 16 / 16 | 0 / 0 / 20 / 20 |
 | F | 33 / 0 / 2 / 35 | 33 / 0 / 4 / 37 |
 | G | 10 / 0 / 14 / 24 | 10 / 0 / 14 / 24 |
 | H | 0 / 0 / 10 / 10 | 0 / 0 / 10 / 10 |
-| all | 445 / 0 / 48 / 493 | 445 / 0 / 55 / 500 |
+| all | 445 / 0 / 48 / 493 | 445 / 0 / 56 / 501 |
 
 Initially `0b913da` yielded 445/0/54/499 (E 0/0/18/18). During the gate,
 upstream advanced to `5663477`, adding `E-ref-09-copy-native` with a published
 reason naming b-isa-spec-8r4 / b-isa-spec-cbk / b-isa-spec-8sc. Both engine
 reports accepted the addition without any code/count-pin change and now show
-445/0/55/500. This draft catalog checkpoint is not the complete ref library.
+445/0/55/500. A second concurrent addition, `E-ref-09-ripple` at `e332108`,
+also names b-isa-spec-8r4 / b-isa-spec-cbk and remains pending 0.9. Final
+focused conformance (including scratch corruption) passes in both engines at
+445/0/56/501 (`.tmp/rebaseline-final-published.log`). Neither draft catalog
+checkpoint is the complete ref library.
 
 The six originally added pending-0.9 ids are `A-measure-draw-order-09`,
 `C-multiblock-09`, `E-ref-09-qxor-witness`, `E-topology-grid-09`,
@@ -56,12 +60,13 @@ cargo test --offline in interpreter and BENNETT_VM_ENGINE=jit modes, and
 scripts/pre-push. **108 tests pass per full run, zero failures/ignored.**
 All commands run headless/offline with project-local TMPDIR. Logs:
 .tmp/rebaseline-{fmt,clippy,interpreter,jit,pre-push}.log and the gate exit
-summary .tmp/rebaseline-gates.json (all five exits 0). Latest raw reports
-.tmp/conformance-{interpreter,jit}.log both show 445/0/55/500, exit 2.
+summary .tmp/rebaseline-gates.json (all five exits 0). The full gate passed
+before the final concurrent ripple addition. Focused conformance was re-run for that published addition: latest raw reports
+.tmp/conformance-{interpreter,jit}.log both show 445/0/56/501, exit 2.
 The first strict Clippy run flagged nested pattern matching in the scratch
 fixture setup; explicit destructuring fixed it before all final gates passed.
 
-## Unavailable ids (55 observed; no total pin)
+## Unavailable ids (56 observed; no total pin)
 
 - `A-measure-draw-order-09`
 - `C-multiblock-09`
@@ -84,6 +89,7 @@ fixture setup; explicit destructuring fixed it before all final gates passed.
 - `E-mbu-must-be-false`
 - `E-ref-09-copy-native`
 - `E-ref-09-qxor-witness`
+- `E-ref-09-ripple`
 - `E-scheme-correctness-negative`
 - `E-scheme-expansion`
 - `E-table-index`

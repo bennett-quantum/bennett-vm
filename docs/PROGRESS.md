@@ -1,3 +1,41 @@
+# Published conformance baseline refresh — 2026-10-30 (bennett-vm-w0x)
+
+Inspected `bennett-isa-spec` commit `91aa124` against its parent, restricted
+to the published `conformance/` fixtures and documentation. Exactly two cases
+were added, no executable case changed. Both explicitly say unavailable pending
+ISA 0.9, have no CLI probe, and witness omissions in accepted ISA 0.8:
+
+- `D-sampled-relation-invocation`: §12.1 sampled payload has no expected
+  comparison relation; §12.3 has no standalone resolved arguments/budget or
+  tuple interchange. Existing **bennett-vm-clw / b-isa-spec-9uy** tracks this.
+- `G-estimate-resolved-class-decimal`: §10 estimate_run has no argument field;
+  estimate_get's decimal scalar has no per-class encoding (§8.2) or rounding
+  for permitted rational costs such as 1/3 (§8.1). Existing
+  **bennett-vm-hsd / b-isa-spec-c15** tracks this.
+
+No passable ISA 0.8 case was relabelled, and no new FAIL was found. Existing
+47t (unpublished ref expansion) and cxg (eps_decade) blockers remain in scope.
+Changed pins (PASS / FAIL / UNAVAILABLE / TOTAL), identical in both engines:
+
+| Suite | Before | After |
+|---|---|---|
+| D | 7 / 0 / 5 / 12 | 7 / 0 / 6 / 13 |
+| G | 10 / 0 / 13 / 23 | 10 / 0 / 14 / 24 |
+| all | 445 / 0 / 46 / 491 | 445 / 0 / 48 / 493 |
+
+All other rows stay A 21/0/0/21, B 35/0/0/35, C 339/0/0/339,
+E 0/0/16/16, F 33/0/2/35, H 0/0/10/10. The published harness remains
+unchanged and exits 2 (unavailable), not an implementation pass for those cases.
+RED: `cargo test --offline --test conformance published_conformance_report`
+failed on the old pins (`.tmp/baseline-red.log`).
+
+GREEN: fmt --check, offline all-target Clippy with -D warnings, offline cargo
+test in interpreter and BENNETT_VM_ENGINE=jit modes (**101 passed, zero failed
+or ignored per mode**), and scripts/pre-push (**101 passed**) all succeed.
+Runs unset DISPLAY/WAYLAND_DISPLAY/DBUS_SESSION_BUS_ADDRESS/BROWSER and use
+repository-local TMPDIR=.tmp. Logs: `.tmp/baseline-{clippy,interpreter,jit,pre-push}.log`;
+raw harness `.tmp/conformance-{interpreter,jit}.log` shows 445/0/48/493.
+
 # Certificate and launch-report follow-up — 2026-10-30
 
 Available implementation: **bennett-vm-abx.1**. Parent **bennett-vm-abx** remains

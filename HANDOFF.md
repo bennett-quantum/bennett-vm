@@ -1,3 +1,9 @@
+State (2026-10-30 ~14:30Z, maintainer pause): main pushed at 29d3bce. Today: RFC 8785 / ECMAScript number serializer
+(bead ciz closed; 132,238-value independent comparison), tests/conformance.rs validates published `unavailable.reason`
+instead of pinning totals (exact pass pins stay), targets grid witness runs in both engines; 108 tests per engine.
+At the 0.8 frontier: remaining work needs ISA 0.9 (ref library 47t, estimates hsd, replay clw, eps_decade cxg,
+block image 47i; all maintainer-ratified as drafted, see bd notes). Read ../bennett/HANDOFF.md first.
+
 Certificate/report follow-up — 2026-10-30. Read docs/PROGRESS.md top.
 
 Completed available paths (child bennett-vm-abx.1); parent abx remains BLOCKED

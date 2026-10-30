@@ -502,7 +502,8 @@ pub unsafe extern "C" fn bennett_run(
         }
         let entropy = bytes(entropy, entropy_len)?.to_vec();
         let r = id();
-        let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy);
+        let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy)
+            .map_err(|e| error(INVALID, e))?;
         for q in regs {
             p.locks.insert(q, r);
         }

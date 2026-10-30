@@ -2,7 +2,9 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match run(&args) {
+    let outcome = run(&args);
+    bennett_vm::jit::audit();
+    match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
             eprintln!("{msg}");
@@ -28,6 +30,7 @@ fn read_object(path: &str) -> Result<String, String> {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
+    bennett_vm::jit::selection()?;
     let Some(cmd) = args.first() else {
         println!("{USAGE}");
         return Ok(());

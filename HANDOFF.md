@@ -1,3 +1,10 @@
+Milestone 5 implementation is in progress (bead bennett-vm-npe).
+Read docs/PROGRESS.md top section for current JIT evidence and modes.
+Private graph passes and x86-64 Linux codegen are implemented; initial existing
+1,076-invocation corpus agrees for every pass, composition and JIT (zero diverge).
+Published conformance in JIT mode:445/0/46. Full stateful/native gate pending.
+M4 blockers below remain unchanged. No push.
+
 Milestone 4 independent target work VERIFIED 2026-10-30; parent v23 remains BLOCKED.
 Read docs/PROGRESS.md top section for current evidence; older sections are historical.
 

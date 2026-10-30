@@ -10,6 +10,7 @@ pub mod cc;
 pub mod cliargs;
 pub mod exact;
 pub mod identity;
+pub mod jit;
 pub mod json;
 pub mod launch;
 pub mod object;

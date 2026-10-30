@@ -1236,13 +1236,20 @@ impl<'o> Machine<'o> {
         let mut current = self.oracle_name.clone();
         let mut block_i = 0usize;
         let mut instr_i = 0usize;
-        loop {
+        let program = crate::jit::for_object(obj)?;
+        let start = program
+            .as_ref()
+            .map(|p| p.row(&current, 0, 0))
+            .transpose()?;
+        let mut finished = None;
+        let mut execute = |effective: Option<&Instr>| -> Result<Option<usize>, String> {
             if self.steps >= self.budget.steps {
-                return Ok(Outcome {
+                finished = Some(Outcome {
                     payload: BigUint::zero(),
                     code: BigUint::from_u64(FAULT_BUDGET_STEPS),
                     steps: self.steps,
                 });
+                return Ok(None);
             }
             let func = obj
                 .function(&current)
@@ -1262,7 +1269,7 @@ impl<'o> Machine<'o> {
                 })?
                 .clone();
             self.steps += 1;
-            match self.exec_row(func, &ins)? {
+            match self.exec_row(func, effective.unwrap_or(&ins))? {
                 Flow::Next => {
                     instr_i += 1;
                 }
@@ -1271,18 +1278,20 @@ impl<'o> Machine<'o> {
                     instr_i = i;
                 }
                 Flow::HaltOk => {
-                    return Ok(Outcome {
+                    finished = Some(Outcome {
                         payload: self.result_val.clone(),
                         code: BigUint::zero(),
                         steps: self.steps,
                     });
+                    return Ok(None);
                 }
                 Flow::HaltFault(code) => {
-                    return Ok(Outcome {
+                    finished = Some(Outcome {
                         payload: BigUint::zero(),
                         code: code.mask(self.fault_width),
                         steps: self.steps,
                     });
+                    return Ok(None);
                 }
                 Flow::Call(callee) => {
                     let callee_f = obj.function(&callee).ok_or_else(|| {
@@ -1302,11 +1311,12 @@ impl<'o> Machine<'o> {
                         .cmp_big(&BigUint::from_u64(self.budget.stack))
                         == std::cmp::Ordering::Greater;
                     if over_depth || over_stack {
-                        return Ok(Outcome {
+                        finished = Some(Outcome {
                             payload: BigUint::zero(),
                             code: BigUint::from_u64(FAULT_BUDGET_DEPTH),
                             steps: self.steps,
                         });
+                        return Ok(None);
                     }
                     let arg_names = crate::validate::list_operand(&ins.operands[1])?;
                     let mut arg_vals = Vec::new();
@@ -1368,7 +1378,18 @@ impl<'o> Machine<'o> {
                 }
             }
             let _ = &self.index_order;
+            Ok(Some(if let Some(p) = &program {
+                p.row(&current, block_i, instr_i)?
+            } else {
+                0
+            }))
+        };
+        if let Some(p) = &program {
+            p.run(start.unwrap(), |_, ins| execute(Some(ins)))?;
+        } else {
+            while execute(None)?.is_some() {}
         }
+        finished.ok_or_else(|| "§5.7: oracle left execution without an outcome".into())
     }
 }
 

@@ -7,51 +7,54 @@ fn published_conformance_report() {
         .parent()
         .unwrap()
         .join("bennett-isa-spec/conformance/target/debug/bennett-isa-conformance");
-    let output = Command::new(&harness)
-        .args(["--bin", env!("CARGO_BIN_EXE_bennett-vm")])
-        .env("TMPDIR", repo.join(".tmp"))
-        .env_remove("DISPLAY")
-        .env_remove("WAYLAND_DISPLAY")
-        .env_remove("DBUS_SESSION_BUS_ADDRESS")
-        .env_remove("BROWSER")
-        .output()
-        .unwrap_or_else(|e| {
-            panic!(
-                "{}: {e}; build the published harness separately",
-                harness.display()
-            )
-        });
-    let report = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    std::fs::create_dir_all(repo.join(".tmp")).unwrap();
-    std::fs::write(repo.join(".tmp/conformance.log"), &report).unwrap();
-    // The published suite now checks semantic refusal reasons for E/H and
-    // includes E-epsilon-zero-exact. Exit 2 reports unavailable cases, not FAIL.
-    assert_eq!(output.status.code(), Some(2), "{report}");
-    for row in [
-        "| A | 21 | 0 | 0 | 21 |",
-        "| B | 35 | 0 | 0 | 35 |",
-        "| C | 339 | 0 | 0 | 339 |",
-        "| D | 7 | 0 | 5 | 12 |",
-        "| E | 0 | 0 | 16 | 16 |",
-        "| F | 33 | 0 | 2 | 35 |",
-        "| G | 10 | 0 | 13 | 23 |",
-        "| H | 0 | 0 | 10 | 10 |",
-        "| all | 445 | 0 | 46 | 491 |",
-    ] {
-        assert!(
-            report.contains(row),
-            "must execute every published case: {report}"
+    for mode in ["interpreter", "jit"] {
+        let output = Command::new(&harness)
+            .args(["--bin", env!("CARGO_BIN_EXE_bennett-vm")])
+            .env("BENNETT_VM_ENGINE", mode)
+            .env("TMPDIR", repo.join(".tmp"))
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("BROWSER")
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{}: {e}; build the published harness separately",
+                    harness.display()
+                )
+            });
+        let report = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::create_dir_all(repo.join(".tmp")).unwrap();
+        std::fs::write(repo.join(format!(".tmp/conformance-{mode}.log")), &report).unwrap();
+        // The published suite now checks semantic refusal reasons for E/H and
+        // includes E-epsilon-zero-exact. Exit 2 reports unavailable cases, not FAIL.
+        assert_eq!(output.status.code(), Some(2), "{report}");
+        for row in [
+            "| A | 21 | 0 | 0 | 21 |",
+            "| B | 35 | 0 | 0 | 35 |",
+            "| C | 339 | 0 | 0 | 339 |",
+            "| D | 7 | 0 | 5 | 12 |",
+            "| E | 0 | 0 | 16 | 16 |",
+            "| F | 33 | 0 | 2 | 35 |",
+            "| G | 10 | 0 | 13 | 23 |",
+            "| H | 0 | 0 | 10 | 10 |",
+            "| all | 445 | 0 | 46 | 491 |",
+        ] {
+            assert!(
+                report.contains(row),
+                "must execute every published case: {report}"
+            );
+        }
+        assert!(!report.lines().any(|l| l.starts_with("FAIL ")), "{report}");
+        println!(
+            "{mode}: 445 available cases pass; 46 unavailable; raw published report: {}",
+            repo.join(format!(".tmp/conformance-{mode}.log")).display()
         );
     }
-    assert!(!report.lines().any(|l| l.starts_with("FAIL ")), "{report}");
-    println!(
-        "445 available cases pass; 46 unavailable; raw published report: {}",
-        repo.join(".tmp/conformance.log").display()
-    );
 }
 #[test]
 fn metadata_unknown_fields_are_load_errors() {

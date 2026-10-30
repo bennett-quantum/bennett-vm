@@ -1,3 +1,36 @@
+# Milestone 5 JIT implementation — 2026-10-30 (verification in progress)
+
+Bead `bennett-vm-npe` claimed. Private source-row graph implements ISA §5.7
+inlining (one level per call site, including recursive callees), CFG continuation
+recovery, private dispatch re-indexing and block-local integer constant folding.
+Reference bodies, canonical label values, row budget units, activation/history
+boundaries and source trace fields remain intact. CC/R and sequential F_B run
+through the graph; x86-64 Linux codegen emits real executable direct-threaded
+control and nine integer arithmetic kernels. Complex rows and arbitrary-width
+integers use the VM runtime helpers; no reference source/dependency is consumed.
+Code mappings transition RW to immutable RX, never RWX. Errors/panics return
+across native frames before propagation. Other hosts fail explicitly as milestone 5.
+
+Selection: `BENNETT_VM_ENGINE=interpreter|inline|structure|reindex|simplify|optimised|jit`;
+interpreter remains default. Optional `BENNETT_JIT_AUDIT=1` reports native runs,
+row callbacks and integer operations to stderr. Pure Q action gates and the
+literal reversible step checker retain their dedicated runtime semantics;
+JIT selection compiles the CC/R and oracle segments they invoke. The audit
+records which invocations actually execute native segments; identity/validation
+commands are compared too, without claiming they execute native code.
+
+Red: missing JIT module and later missing native integer kernels, logs
+`.tmp/m5-red.log`, `.tmp/m5-arithmetic-red.log`. Green: six focused JIT tests.
+Existing harness is extended at its common invocation point: every invocation
+compares each individual pass, all passes, and native execution byte-for-byte
+with the untransformed VM, then retains its original reference comparison.
+Initial full gate `.tmp/m5-differential.log`: 1,076/1,076 per mode agree,
+zero divergences. Published conformance runs unchanged in both interpreter and
+JIT modes: **445 pass / 0 fail / 46 unavailable**, 491 cases (exit 2).
+Logs `.tmp/conformance-interpreter.log` and `.tmp/conformance-jit.log`.
+Formatting/strict Clippy passed; full Rust and C/JIT stateful gates still pending.
+M4 blockers 47t/cxg stay explicit and unchanged. No push or foreign repository edits.
+
 # Milestone 4 independent target work verified — 2026-10-30
 
 Child `bennett-vm-v23.4` completed. Parent `bennett-vm-v23` remains BLOCKED

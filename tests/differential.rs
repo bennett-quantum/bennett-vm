@@ -47,15 +47,56 @@ fn vm() -> &'static str {
     env!("CARGO_BIN_EXE_bennett-vm")
 }
 
-fn run(bin: &Path, args: &[String]) -> Output {
+fn raw_run(bin: &Path, args: &[String], mode: &str) -> Output {
     Command::new(bin)
         .args(args)
+        .env("BENNETT_VM_ENGINE", mode)
+        .env("BENNETT_JIT_AUDIT", "1")
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("DBUS_SESSION_BUS_ADDRESS")
         .env_remove("BROWSER")
         .output()
         .unwrap_or_else(|e| panic!("cannot run {}: {e}", bin.display()))
+}
+
+// The unchanged reference comparison now obliges every pass separately and
+// their composition, then executes the same invocation through native code.
+fn run(bin: &Path, args: &[String]) -> Output {
+    let baseline = raw_run(bin, args, "interpreter");
+    if bin == Path::new(vm()) {
+        for mode in [
+            "inline",
+            "structure",
+            "reindex",
+            "simplify",
+            "optimised",
+            "jit",
+        ] {
+            let transformed = raw_run(bin, args, mode);
+            assert!(
+                baseline.status.code() == transformed.status.code()
+                    && baseline.stdout == transformed.stdout,
+                "TRANSFORMATION DIVERGENCE {mode} {args:?}\nbaseline {}\ntransformed {}",
+                show(&baseline),
+                show(&transformed)
+            );
+            if std::env::var_os("BENNETT_HARNESS_COUNTS").is_some() {
+                let audit = String::from_utf8_lossy(&transformed.stderr);
+                let audit = audit.lines().find(|l| l.starts_with("JIT_AUDIT ")).unwrap();
+                eprintln!(
+                    "JIT_HARNESS {mode} {} {} {audit}",
+                    args[0],
+                    if transformed.status.success() {
+                        "json"
+                    } else {
+                        "diagnostic"
+                    }
+                );
+            }
+        }
+    }
+    baseline
 }
 
 fn show(out: &Output) -> String {

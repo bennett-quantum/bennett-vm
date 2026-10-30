@@ -77,6 +77,7 @@ struct Segment {
 }
 #[derive(Clone)]
 struct Machine {
+    program: Option<std::sync::Arc<crate::jit::Program>>,
     quantum: QuantumState,
     quantum_events: Vec<Invocation>,
     pending_region: Option<Invocation>,
@@ -346,6 +347,52 @@ impl Machine {
         Ok(())
     }
     fn step(&mut self) -> Result<(), String> {
+        if let Some(p) = self.program.clone() {
+            let a = self.stack.last().unwrap();
+            let start = p.row(&a.function, a.block, a.index)?;
+            p.run(start, |_, ins| {
+                self.step_row(Some(ins))?;
+                Ok(None)
+            })
+        } else {
+            self.step_row(None)
+        }
+    }
+    fn drive(&mut self, limit: Option<u64>, fuel: u64) -> Result<(), String> {
+        let p = self.program.clone();
+        if let Some(p) = p {
+            let a = self.stack.last().unwrap();
+            let start = p.row(&a.function, a.block, a.index)?;
+            p.run(start, |_, ins| {
+                if limit.is_some_and(|n| self.steps >= n) {
+                    return Ok(None);
+                }
+                if self.steps >= fuel {
+                    return Err("§3.4: execution fuel exhausted".into());
+                }
+                self.step_row(Some(ins))?;
+                if self.fault.is_some() {
+                    return Ok(None);
+                }
+                self.stack
+                    .last()
+                    .map(|a| p.row(&a.function, a.block, a.index))
+                    .transpose()
+            })
+        } else {
+            while !self.stack.is_empty() && self.fault.is_none() {
+                if limit.is_some_and(|n| self.steps >= n) {
+                    break;
+                }
+                if self.steps >= fuel {
+                    return Err("§3.4: execution fuel exhausted".into());
+                }
+                self.step_row(None)?;
+            }
+            Ok(())
+        }
+    }
+    fn step_row(&mut self, effective: Option<&Instr>) -> Result<(), String> {
         let a = self.stack.last().unwrap().clone();
         let obj = self.obj.clone();
         let f = obj.function(&a.function).unwrap();
@@ -365,7 +412,7 @@ impl Machine {
         self.definitions.clear();
         self.stack.last_mut().unwrap().index += 1;
         self.quantum.classical_event()?;
-        let fault = self.exec(&ins)?;
+        let fault = self.exec(effective.unwrap_or(&ins))?;
         if let Some(code) = fault {
             self.data = before.clone();
             self.fault = Some(code);
@@ -1236,6 +1283,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let entry_data = data.clone();
     let entry_env = env.clone();
     let mut m = Machine {
+        program: crate::jit::for_object(&obj)?,
         quantum,
         quantum_events: vec![],
         pending_region: None,
@@ -1271,15 +1319,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         .one("steps")?
         .map(|s| cliargs::parse_u64(s, "forward steps"))
         .transpose()?;
-    while !m.stack.is_empty() && m.fault.is_none() {
-        if limit.is_some_and(|n| m.steps >= n) {
-            break;
-        }
-        if m.steps >= budget.steps {
-            return Err("§3.4: execution fuel exhausted".into());
-        }
-        m.step()?;
-    }
+    m.drive(limit, budget.steps)?;
     if m.reply_pos != m.replies.len() {
         return Err("§10: unused host replies".into());
     }
@@ -1580,15 +1620,17 @@ impl RuntimeRun {
         name: &str,
         args: Vec<Value>,
         entropy: Vec<u8>,
-    ) -> Self {
+    ) -> Result<Self, String> {
+        let program = crate::jit::for_object(&obj)?;
         let f = obj.function(name).unwrap();
         let env = f.lists[0]
             .iter()
             .zip(&args)
             .map(|(p, v)| ((0, p.name.clone()), vec![v.clone()]))
             .collect();
-        Self {
+        Ok(Self {
             machine: Machine {
+                program,
                 quantum: resources.quantum.clone(),
                 quantum_events: vec![],
                 pending_region: None,
@@ -1619,7 +1661,7 @@ impl RuntimeRun {
                 definitions: vec![],
                 stateful: true,
             },
-        }
+        })
     }
     pub(crate) fn sync(&mut self, r: &Resources) {
         let local = &self.machine.data;

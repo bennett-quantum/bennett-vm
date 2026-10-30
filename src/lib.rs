@@ -7,9 +7,11 @@
 pub mod action;
 pub mod bigint;
 pub mod cc;
+pub mod certificate;
 pub mod cliargs;
 pub mod exact;
 pub mod identity;
+pub mod interval;
 pub mod jit;
 pub mod json;
 pub mod launch;
@@ -38,6 +40,9 @@ pub fn version() -> &'static str {
 pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Identities), String> {
     let obj = object::parse(text)?;
     validate::validate(&obj)?;
+    if let Some(coverage) = certificate::object_document(&obj, "coverage")? {
+        certificate::validate_coverage(&coverage)?;
+    }
     let ids = identity::compute(&obj)?;
     if !hash_only {
         identity::check_hashes(&obj, &ids)?;

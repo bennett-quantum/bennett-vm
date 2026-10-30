@@ -1576,6 +1576,9 @@ pub(crate) struct Resources {
     quantum: QuantumState,
 }
 impl Resources {
+    pub(crate) fn has_target(&self) -> bool {
+        self.quantum.target.is_some()
+    }
     pub(crate) fn new(obj: &Object) -> Result<Self, String> {
         Ok(Self {
             data: Data::new(obj)?,

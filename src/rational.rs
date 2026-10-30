@@ -24,6 +24,39 @@ impl Rational {
             d: d.divmod(&a).0,
         }
     }
+    /// Round to p significant binary digits, outward in the requested direction.
+    pub(crate) fn binary_round(&self, p: usize, upper: bool) -> Result<Self, String> {
+        if p < 2 {
+            return Err("§12.1: precision_bits must be at least 2".into());
+        }
+        if self.n.is_zero() {
+            return Ok(Self::zero());
+        }
+        let mut e = isize::try_from(self.n.bits()).map_err(|_| "host limit: interval exponent")?
+            - isize::try_from(self.d.bits()).map_err(|_| "host limit: interval exponent")?;
+        if (e >= 0 && self.n < self.d.shl(e as usize))
+            || (e < 0 && self.n.shl(e.unsigned_abs()) < self.d)
+        {
+            e -= 1;
+        }
+        let shift = e
+            .checked_sub(isize::try_from(p - 1).map_err(|_| "host limit: interval precision")?)
+            .ok_or("host limit: interval exponent")?;
+        let (n, d) = if shift >= 0 {
+            (self.n.clone(), self.d.shl(shift as usize))
+        } else {
+            (self.n.shl(shift.unsigned_abs()), self.d.clone())
+        };
+        let (mut q, rem) = n.divmod(&d);
+        if !rem.is_zero() && upper != self.neg {
+            q = q.add(&U::from_u64(1));
+        }
+        Ok(if shift >= 0 {
+            Self::new(self.neg, q.shl(shift as usize), U::from_u64(1))
+        } else {
+            Self::new(self.neg, q, U::from_u64(1).shl(shift.unsigned_abs()))
+        })
+    }
     pub fn zero() -> Self {
         Self::from(0)
     }

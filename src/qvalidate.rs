@@ -533,3 +533,154 @@ fn exhaustive_frame(
     }
     Ok(())
 }
+
+/// §12.1 translation witness: check the named object frame, never only the
+/// producer's V/W lists. Point ordinals follow nested textual order (§9.2).
+pub(crate) fn translation_witness(
+    obj: &Object,
+    name: &str,
+    w: &crate::json::Json,
+) -> Result<(), String> {
+    use crate::json::Json;
+    let fail = || {
+        err(
+            "12.1",
+            "translation_lemma witness must name the complete V; W; V^-1; W frame and satisfy §5.6 (i)-(iv)",
+        )
+    };
+    let f = obj.function(name).ok_or_else(fail)?;
+    let mut env = BTreeMap::new();
+    let mut bs = BTreeSet::new();
+    let mut points = vec![];
+    for p in f.lists.iter().flatten() {
+        if let Some(n) = p.ty.width() {
+            env.insert(p.name.clone(), n);
+        }
+    }
+    for b in &f.blocks {
+        fn flatten<'a>(xs: &'a [Instr], out: &mut Vec<&'a Instr>) {
+            for i in xs {
+                out.push(i);
+                for body in &i.nested {
+                    flatten(body, out);
+                }
+            }
+        }
+        let mut flat = vec![];
+        flatten(&b.instrs, &mut flat);
+        for (ordinal, i) in flat.into_iter().enumerate() {
+            if matches!(i.op.as_str(), "qalloc" | "qborrow") {
+                env.insert(i.lhs[0].clone(), i.operands[1].parse().map_err(|_| fail())?);
+                if i.op == "qborrow" {
+                    bs.extend(wires(&env, &i.lhs[0])?);
+                }
+            }
+            points.push((format!("{}:{ordinal}", b.name), i));
+        }
+    }
+    let point_list = |key: &str| -> Result<Vec<String>, String> {
+        w.get(key)
+            .and_then(Json::as_arr)
+            .ok_or_else(fail)?
+            .iter()
+            .map(|p| p.as_str().map(str::to_string).ok_or_else(fail))
+            .collect()
+    };
+    let frame = point_list("frame")?;
+    if frame.len() != 2 {
+        return Err(fail());
+    }
+    let first = points
+        .iter()
+        .position(|(p, _)| p == &frame[0])
+        .ok_or_else(fail)?;
+    let last = points
+        .iter()
+        .position(|(p, _)| p == &frame[1])
+        .ok_or_else(fail)?;
+    if first > last {
+        return Err(fail());
+    }
+    let v = point_list("V")?;
+    let ww = point_list("W")?;
+    if v.is_empty() || ww.is_empty() {
+        return Err(fail());
+    }
+    let frame_seq = &points[first..=last];
+    if frame_seq.len() != 2 * (v.len() + ww.len()) {
+        return Err(fail());
+    }
+    let refs = |ps: &[String]| -> Result<Vec<&Instr>, String> {
+        ps.iter()
+            .map(|p| {
+                points
+                    .iter()
+                    .find(|(q, _)| p == q)
+                    .map(|(_, i)| *i)
+                    .ok_or_else(fail)
+            })
+            .collect()
+    };
+    let vg = refs(&v)?;
+    let wg = refs(&ww)?;
+    if frame_seq[..v.len()].iter().map(|(p, _)| p).ne(v.iter())
+        || frame_seq[v.len()..v.len() + ww.len()]
+            .iter()
+            .map(|(p, _)| p)
+            .ne(ww.iter())
+    {
+        return Err(fail());
+    }
+    let want = vg.iter().chain(&wg).chain(vg.iter().rev()).chain(&wg);
+    for ((_, actual), wanted) in frame_seq.iter().zip(want) {
+        if actual.op != wanted.op || actual.operands != wanted.operands || !actual.nested.is_empty()
+        {
+            return Err(fail());
+        }
+    }
+    let wire_set = |key: &str| -> Result<BTreeSet<Wire>, String> {
+        let mut out = BTreeSet::new();
+        for p in point_list(key)? {
+            out.extend(wires(&env, &p)?);
+        }
+        Ok(out)
+    };
+    let b = wire_set("B")?;
+    let x = wire_set("X")?;
+    if b.is_empty() || !b.is_subset(&bs) || !x.is_disjoint(&bs) {
+        return Err(fail());
+    }
+    let mut targets = BTreeSet::new();
+    let mut controls = BTreeSet::new();
+    for g in vg {
+        let (cs, t) = flip(g, &env)?;
+        if !b.contains(&t) || !cs.iter().all(|c| x.contains(c)) {
+            return Err(fail());
+        }
+    }
+    for g in wg {
+        let (cs, t) = flip(g, &env)?;
+        if b.contains(&t) || x.contains(&t) || cs.iter().filter(|c| b.contains(*c)).count() > 1 {
+            return Err(fail());
+        }
+        targets.insert(t);
+        controls.extend(cs);
+    }
+    if !targets.is_disjoint(&controls) {
+        return Err(fail());
+    }
+    // Do not certify a producer-selected interior of a larger frame. Adjacent
+    // permutation gates must also belong to this maximal contiguous frame.
+    let permutation = |i: &Instr| {
+        matches!(
+            i.op.as_str(),
+            "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch"
+        )
+    };
+    if first > 0 && permutation(points[first - 1].1)
+        || last + 1 < points.len() && permutation(points[last + 1].1)
+    {
+        return Err(fail());
+    }
+    Ok(())
+}

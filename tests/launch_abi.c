@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
     EQ(bennett_run_close(p,rb),BENNETT_OK);bennett_result_free(result);bennett_args_free(a);
     /* §10 stubs permitted by PLAN milestone 2: loud failure, no fake estimate. */
     bennett_estimate_t* estimate=(void*)1;EQ(bennett_estimate_run(p,"inc8",token,&estimate),BENNETT_E_TARGET);assert(!estimate&&strstr(bennett_last_error(),"unimplemented:"));
-    EQ(bennett_estimate_nresources(NULL),0);EQ(bennett_estimate_get(NULL,0,NULL,NULL),BENNETT_E_TARGET);assert(!bennett_estimate_certificate(NULL,&len)&&len==0);bennett_estimate_free(NULL);
+    EQ(bennett_estimate_nresources(NULL),0);EQ(bennett_estimate_get(NULL,0,NULL,NULL),BENNETT_E_ARG);assert(!bennett_estimate_certificate(NULL,&len)&&len==0);bennett_estimate_free(NULL);
     bennett_coverage_t* coverage=(void*)1;EQ(bennett_coverage_get(p,&coverage),BENNETT_E_TARGET);assert(!coverage&&strstr(bennett_last_error(),"unimplemented:"));assert(!bennett_coverage_jcs(NULL,&len)&&len==0);bennett_coverage_free(NULL);
     EQ(bennett_unload(p),BENNETT_OK);
     printf("C ABI: %u checks passed\n",checks); return 0;

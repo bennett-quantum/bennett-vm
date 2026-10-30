@@ -145,10 +145,11 @@ pub struct bennett_tape_iter_t {
     next: usize,
 }
 pub struct bennett_estimate_t {
-    _private: (),
+    resources: Vec<(CString, CString)>,
+    certificate: Vec<u8>,
 }
 pub struct bennett_coverage_t {
-    _private: (),
+    jcs: Vec<u8>,
 }
 pub struct bennett_snapshot_t {
     jcs: Vec<u8>,
@@ -330,7 +331,7 @@ pub unsafe extern "C" fn bennett_budget(
             .obj
             .function(name)
             .ok_or_else(|| error(ARG, "§10: unknown budget region"))?;
-        if !matches!(f.kind, FnKind::Oracle | FnKind::Action) {
+        if !matches!(f.kind, FnKind::Oracle | FnKind::Action | FnKind::PermAction) {
             return Err(error(ARG, "§10: budget requires an oracle/action region"));
         }
         let b = Budget {
@@ -861,41 +862,86 @@ pub unsafe extern "C" fn bennett_estimate_run(
 ) -> i32 {
     status(|| {
         let p = get(p)?;
-        text(region)?;
         *get_mut(out)? = ptr::null_mut();
-        if !p.tokens.contains_key(&token) {
-            return Err(error(ARG, "§10: unknown token"));
+        let name = text(region)?.trim_start_matches('@');
+        let f = p
+            .obj
+            .function(name)
+            .filter(|f| matches!(f.kind, FnKind::Oracle | FnKind::Action | FnKind::PermAction))
+            .ok_or_else(|| error(ARG, "§10: E_ARG: unknown/non-region estimate subject"))?;
+        let (token_region, _budget) = p
+            .tokens
+            .get(&token)
+            .ok_or_else(|| error(ARG, "§10: E_ARG: unknown program-scoped token"))?;
+        if token_region != name {
+            return Err(error(
+                ARG,
+                "§10: E_ARG: estimate token belongs to another region",
+            ));
+        }
+        if !p.resources.has_target() {
+            return Err(error(
+                5,
+                "§8/§10: unimplemented: resource estimate requires a named target from bennett-estimate",
+            ));
+        }
+        if f.kind == FnKind::Oracle {
+            return Err(error(
+                10,
+                "§8.2/§11: E_SCHEDULE_INFEASIBLE: unimplemented: padded oracle resource estimate requires ref@0.8 (b-isa-spec-8r4; bennett-vm-47t); request scheduling from bennett-estimate",
+            ));
         }
         Err(error(
             5,
-            "unimplemented: estimates/certificates (§8/§12) (milestone 5)",
+            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding (ISA gap); no simulator run is substituted for an estimate",
         ))
     })
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bennett_estimate_nresources(_p: *const bennett_estimate_t) -> usize {
-    eprintln!("unimplemented: estimates (milestone 5)");
-    0
+pub unsafe extern "C" fn bennett_estimate_nresources(p: *const bennett_estimate_t) -> usize {
+    let mut n = 0;
+    status(|| {
+        n = get(p)?.resources.len();
+        Ok(())
+    });
+    n
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_get(
-    _p: *const bennett_estimate_t,
-    _i: usize,
-    _name: *mut *const c_char,
-    _value: *mut *const c_char,
+    p: *const bennett_estimate_t,
+    i: usize,
+    name: *mut *const c_char,
+    value: *mut *const c_char,
 ) -> i32 {
-    status(|| Err(error(5, "unimplemented: estimates (milestone 5)")))
+    status(|| {
+        let p = get(p)?;
+        let (n, v) = p
+            .resources
+            .get(i)
+            .ok_or_else(|| error(ARG, "§10: E_ARG: resource index out of range"))?;
+        get_mut(name)?;
+        get_mut(value)?;
+        *name = n.as_ptr();
+        *value = v.as_ptr();
+        Ok(())
+    })
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_certificate(
-    _p: *const bennett_estimate_t,
+    p: *const bennett_estimate_t,
     len: *mut usize,
 ) -> *const u8 {
     if !len.is_null() {
-        *len = 0
+        *len = 0;
     }
-    eprintln!("unimplemented: estimate certificates (milestone 5)");
-    ptr::null()
+    let mut out = ptr::null();
+    status(|| {
+        let p = get(p)?;
+        *get_mut(len)? = p.certificate.len();
+        out = p.certificate.as_ptr();
+        Ok(())
+    });
+    out
 }
 free!(bennett_estimate_free, bennett_estimate_t);
 #[unsafe(no_mangle)]
@@ -904,21 +950,35 @@ pub unsafe extern "C" fn bennett_coverage_get(
     out: *mut *mut bennett_coverage_t,
 ) -> i32 {
     status(|| {
-        get(p)?;
         *get_mut(out)? = ptr::null_mut();
-        Err(error(5, "unimplemented: coverage (§13) (milestone 5)"))
+        let p = get(p)?;
+        let doc=crate::certificate::object_document(&p.obj,"coverage").map_err(|e|error(ARG,e))?
+            .ok_or_else(||error(5,"§10/§13: unimplemented: source coverage must be supplied by bennett-driver in the object's coverage section"))?;
+        crate::certificate::validate_coverage(&doc).map_err(|e| error(ARG, e))?;
+        output(
+            out,
+            bennett_coverage_t {
+                jcs: doc.to_jcs().into_bytes(),
+            },
+        )
     })
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_coverage_jcs(
-    _p: *const bennett_coverage_t,
+    p: *const bennett_coverage_t,
     len: *mut usize,
 ) -> *const u8 {
     if !len.is_null() {
-        *len = 0
+        *len = 0;
     }
-    eprintln!("unimplemented: coverage (milestone 5)");
-    ptr::null()
+    let mut out = ptr::null();
+    status(|| {
+        let p = get(p)?;
+        *get_mut(len)? = p.jcs.len();
+        out = p.jcs.as_ptr();
+        Ok(())
+    });
+    out
 }
 free!(bennett_coverage_free, bennett_coverage_t);
 #[unsafe(no_mangle)]

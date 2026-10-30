@@ -1,3 +1,27 @@
+# Certificate/report implementation in progress — 2026-10-30
+
+Bead bennett-vm-abx claimed. Initial red logs .tmp/cert-red.log,
+.tmp/reports-red.log, .tmp/oracle-cert-red.log, .tmp/interval-red.log.
+Focused green: four certificate, four interval algebra and three launch report
+checks. Full gates and verification-reference integration follow in this session.
+No other repository changed; no push or Dolt sync; no dependencies.
+
+Implemented full-tuple table/program replay, exact phase/workspace checks,
+partial-domain/evidence labels, xoshiro256** rejection sampling, literal oracle
+compute/commit/inverse replay, translation witnesses and inverse pair totality.
+Interval algebra uses outward-rounded significant binary rational endpoints,
+complex Hermitian LDL† strictly positive pivots, Frobenius comparisons and the
+SDP dual with unnormalised Choi/partial trace. These algebraic checks alone do
+not establish an executable claim: schedule contexts require ref@0.8, still
+unpublished (b-isa-spec-8r4 / bennett-vm-47t). No realised matrix is trusted.
+
+Coverage copies validated producer entries, preserves canonical bytes and owns
+its accessors independently of the program. Missing source coverage names
+bennett-driver. Estimate request validates region/token/target and rejects
+missing contracts explicitly; bennett-vm-hsd (isa-0.9) records absent resolved
+classical arguments, per-class scalar encoding and rational-decimal rounding.
+No basis simulator result is presented as a padded resource estimate.
+
 # Milestone 5 JIT verified — 2026-10-30
 
 Milestone `bennett-vm-npe`: ISA **0.8** §5.7 private executor passes and

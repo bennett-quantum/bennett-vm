@@ -1,3 +1,10 @@
+Certificate/report follow-up active (bennett-vm-abx). Read PROGRESS.md top.
+Coverage now owns and returns the producer report; missing coverage names
+bennett-driver. Claims have independent replay and interval algebra, but
+executable schedule contexts still reject b-isa-spec-8r4. Full estimate request
+semantics blocked additionally by bennett-vm-hsd (isa-0.9); errors name
+bennett-estimate. Focused gates green; final integration/gates follow.
+
 Milestone 5 JIT VERIFIED 2026-10-30; epic bennett-vm-npe completed.
 Read docs/PROGRESS.md top section for full evidence, counting limits and JIT modes.
 

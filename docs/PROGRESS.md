@@ -1,3 +1,77 @@
+# JCS binary64 number canonicalisation — 2026-10-30 (bennett-vm-ciz)
+
+Implemented RFC 8785 §3.2.2.3 / ES2019 §7.1.12.1 without dependencies.
+All JSON numbers, including integer tokens, now pass through binary64 for
+canonical emission. Shortest digits come from std LowerExp; our layout follows
+ES steps 6–10: decimal for 1e-6 <= abs(value) < 1e21, otherwise lowercase e
+with an explicit positive exponent sign. Both zero signs emit `0`. Parsing
+retains original decimal text for exact §8 rational evaluation; canonical-byte
+checks reject spellings that change after binary64 round-trip. §9.1's large
+exact integers remain decimal strings.
+
+Rust's shortest formatting alone is insufficient: RFC Appendix B's bits
+`43143ff3c1cb0959` are exactly 1424953923781206.25, but Rust emits `.3` while
+ES Note 2 requires `.2`. The formatter checks adjacent even significands via
+exact integer/dyadic midpoint equality (2*v = (s+candidate)*10^q), cancels
+powers of two, and compares odd integers using checked powers of five. A
+candidate must also round-trip before replacement. No floating distance or
+approximate epsilon decides the tie. External malformed/nonfinite numeric
+input returns a parse error; attempts to emit a manually constructed nonfinite
+number fail explicitly rather than outputting NaN/Infinity.
+
+Sources: [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html#section-3.2.2.3),
+[ES2019 NumberToString](https://262.ecma-international.org/10.0/#sec-tostring-applied-to-the-number-type).
+No sibling implementation source was read or copied.
+
+RED: six new integration tests failed against the original implementation
+(`.tmp/jcs-red.log`). GREEN focused: all six pass, covering every requested
+boundary, both signs, -0, integer rounding, malformed grammar/leading zeros/+,
+nonfinite input/emission, noncanonical E/trailing zeros/exponents, RFC Appendix B
+bit-pattern answers, and target acceptance/hash/exact-rational cost checks
+(`.tmp/jcs-focused.log`).
+
+Independent ECMAScript check: **132,238 finite binary64 inputs agree with
+Node v24.11.1 JSON.stringify, zero differences**. Corpus includes fixed-seed
+(8785) random bit patterns, neighbors at every binary exponent in both signs,
+and 10,000 decimal halfway constructions in both signs. This exercises both
+layout and digit/tie selection, not a comparison with Rust's own formatter.
+Report: `.tmp/jcs-ecmascript-comparison.json`.
+
+## Targets witness replay
+
+The exact 1,980-byte grid projection
+`../bennett-targets/.tmp/vm-jcs-exponent-witness.json` matches the validator's
+`canon` response byte for byte (black-box binary invocation). It contains
+`1e-8`, `2e-8` and `2e-7`. Before: VM exit 1, “§8.1: target must be in
+RFC 8785 canonical form”. After, in **both interpreter and JIT**:
+
+```sh
+/home/tobias/Projects/bennett-workspace/bennett-vm/target/debug/bennett-vm run-program /home/tobias/Projects/bennett-workspace/bennett-isa-spec/conformance/cases/objects/registers.bisa views --target /home/tobias/Projects/bennett-workspace/bennett-targets/.tmp/vm-jcs-exponent-witness.json
+```
+
+Exit **0**, status COMPLETED, run_state CLOSED, 7 steps, no fault,
+`target_error="0"`. Resources: gate_count 2, peak buffer 2/data 0,
+qubit_second buffer **0.00000018**/data 0, time **0.00000011**.
+The minimized `docs/verification.json` case
+`../bennett-targets/.tmp/verify/canonical-small-exponent.json` likewise gets
+past canonical validation in both modes; its cx-only alphabet then correctly
+reports “§8.3: unsupported gate x at c=0” for this program. That minimized
+validation fixture is not a complete grid execution target. Raw CLI commands,
+stdout/stderr and exit codes: `.tmp/jcs-targets-witness.json`; validator response:
+`.tmp/jcs-grid-validator.json`. No sibling file was edited.
+
+## Full gate
+
+All green before closing ciz: fmt --check; cargo clippy --offline --all-targets
+-- -D warnings; cargo test --offline in interpreter and BENNETT_VM_ENGINE=jit
+modes (**107 passed per mode, zero failures/ignored**); scripts/pre-push
+(**107 passed**). The published harness remains **445 PASS / 0 FAIL /
+48 UNAVAILABLE / 493 total**, unchanged by the JCS fix in either mode.
+All commands run headless with TMPDIR under this repository's .tmp. Logs:
+`.tmp/jcs-{clippy,interpreter,jit,pre-push}.log`. No dependency was added,
+no scope was narrowed, no push or Dolt remote sync occurred. Existing ISA 0.9
+47t/hsd/clw/cxg blockers remain; no new maintainer blocker was discovered.
+
 # Published conformance baseline refresh — 2026-10-30 (bennett-vm-w0x)
 
 Inspected `bennett-isa-spec` commit `91aa124` against its parent, restricted

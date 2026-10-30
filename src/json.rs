@@ -1,8 +1,8 @@
 //! Minimal JSON with RFC 8785 (JCS) canonical emission.
 //!
-//! Numbers keep their source text; JCS emission re-serialises integers
-//! exactly and floats through `f64` shortest round-trip (the object
-//! schemas of §9.1 carry only integers and decimal strings).
+//! Numbers keep their source text (including exact §8 decimal costs); JCS
+//! emission uses binary64 and ECMAScript's shortest round-trip spelling.
+//! Larger exact integers belong in decimal strings per object §9.1.
 
 use std::collections::BTreeMap;
 
@@ -123,24 +123,93 @@ impl Json {
 }
 
 fn canonical_number(raw: &str) -> String {
-    if raw.bytes().all(|c| c.is_ascii_digit())
-        || (raw.starts_with('-') && raw.len() > 1 && raw[1..].bytes().all(|c| c.is_ascii_digit()))
-    {
-        return raw.to_string();
-    }
-    match raw.parse::<f64>() {
-        Ok(v) if v.is_finite() => format_f64(v),
-        _ => raw.to_string(),
-    }
+    format_f64(raw.parse::<f64>().expect("validated JSON number"))
 }
 
-/// Shortest round-trip decimal (Rust `Display` for f64 is shortest).
+/// RFC 8785 §3.2.2.3 / ES2019 §7.1.12.1, including Note 2.
+/// Panics on nonfinite values, which are not JCS numbers. External JSON is
+/// checked by `parse` before emission; manually constructed numbers must agree.
 pub fn format_f64(v: f64) -> String {
+    assert!(v.is_finite(), "RFC 8785: nonfinite JSON number");
     if v == 0.0 {
         return "0".to_string();
     }
-    let s = format!("{v}");
-    s
+    // LowerExp supplies shortest round-trip digits, independently of layout.
+    let shortest = format!("{:e}", v.abs());
+    let (mantissa, exponent) = shortest.split_once('e').unwrap();
+    let digits = mantissa.replace('.', "");
+    let mut s = digits.parse::<u64>().unwrap();
+    let mut q = exponent.parse::<i32>().unwrap() - digits.len() as i32 + 1;
+
+    // Rust chooses the upper decimal at a halfway tie. ECMAScript Note 2
+    // requires the even significand instead. Use exact binary/integer equality,
+    // never a rounded floating-point distance, to recognize these ties.
+    if s % 2 == 1 {
+        for even in [s - 1, s + 1] {
+            if decimal_midpoint(v.abs(), s + even, q)
+                && format!("{even}e{q}").parse::<f64>().unwrap() == v.abs()
+            {
+                s = even;
+                break;
+            }
+        }
+    }
+    while s % 10 == 0 {
+        s /= 10;
+        q += 1;
+    }
+    let digits = s.to_string();
+    let k = digits.len() as i32;
+    let n = k + q;
+    let mut out = if v.is_sign_negative() { "-" } else { "" }.to_string();
+    // ES steps 6–10, with n the decimal point position and k the digit count.
+    if k <= n && n <= 21 {
+        out.push_str(&digits);
+        out.push_str(&"0".repeat((n - k) as usize));
+    } else if 0 < n && n <= 21 {
+        out.push_str(&digits[..n as usize]);
+        out.push('.');
+        out.push_str(&digits[n as usize..]);
+    } else if -6 < n && n <= 0 {
+        out.push_str("0.");
+        out.push_str(&"0".repeat((-n) as usize));
+        out.push_str(&digits);
+    } else {
+        out.push_str(&digits[..1]);
+        if k > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        out.push('e');
+        out.push_str(&format!("{:+}", n - 1));
+    }
+    out
+}
+
+/// Is 2*v exactly `sum * 10^q`? `sum` is odd (adjacent odd/even digits).
+fn decimal_midpoint(v: f64, sum: u64, q: i32) -> bool {
+    let bits = v.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (m, e) = if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1u64 << 52), exponent - 1075)
+    };
+    let twos = m.trailing_zeros();
+    if e + 1 + twos as i32 != q {
+        return false;
+    }
+    let (mut binary, mut decimal) = (m >> twos, sum);
+    let scaled = if q < 0 { &mut binary } else { &mut decimal };
+    for _ in 0..q.unsigned_abs() {
+        let Some(product) = scaled.checked_mul(5) else {
+            // The other side fits in u64, so an overflow cannot be equal.
+            return false;
+        };
+        *scaled = product;
+    }
+    binary == decimal
 }
 
 fn write_jcs_string(s: &str, out: &mut String) {
@@ -357,23 +426,45 @@ impl Parser<'_> {
         if self.peek()? == b'-' {
             self.i += 1;
         }
-        while self.i < self.b.len()
-            && matches!(
-                self.b[self.i],
-                b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
-            )
-        {
-            self.i += 1;
+        match self.b.get(self.i) {
+            Some(b'0') => self.i += 1,
+            Some(b'1'..=b'9') => self.digits(),
+            _ => return Err(format!("invalid JSON number at byte {start}")),
         }
-        if start == self.i {
-            return Err(format!("invalid JSON value at byte {start}"));
+        if self.b.get(self.i) == Some(&b'.') {
+            self.i += 1;
+            self.required_digits()?;
+        }
+        if matches!(self.b.get(self.i), Some(b'e' | b'E')) {
+            self.i += 1;
+            if matches!(self.b.get(self.i), Some(b'+' | b'-')) {
+                self.i += 1;
+            }
+            self.required_digits()?;
         }
         let raw = std::str::from_utf8(&self.b[start..self.i])
             .unwrap()
             .to_string();
-        raw.parse::<f64>()
+        let value = raw
+            .parse::<f64>()
             .map_err(|_| format!("invalid JSON number {raw:?}"))?;
+        if !value.is_finite() {
+            return Err(format!("RFC 8785: nonfinite JSON number {raw:?}"));
+        }
         Ok(Json::Num(raw))
+    }
+    fn digits(&mut self) {
+        while matches!(self.b.get(self.i), Some(b'0'..=b'9')) {
+            self.i += 1;
+        }
+    }
+    fn required_digits(&mut self) -> Result<(), String> {
+        let start = self.i;
+        self.digits();
+        if self.i == start {
+            return Err(format!("expected JSON number digit at byte {start}"));
+        }
+        Ok(())
     }
 }
 

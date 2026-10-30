@@ -28,8 +28,8 @@
  * all owning objects/accessor pointers/free functions: "A function that returns
  * an object transfers ownership to the caller, released with the matching
  * *_free"; "Accessor-returned pointers are valid until the owning object is
- * freed". Estimate/coverage semantics are staged explicitly by PLAN milestone 2;
- * their exports are checked below for loud refusal and matching null-safe frees.
+ * freed". Missing producer coverage / unresolved estimates fail explicitly;
+ * successful coverage ownership is tested by reports.rs.
  */
 _Static_assert(BENNETT_OK==0 && BENNETT_E_VERSION==1 && BENNETT_E_PTR_WIDTH==2 &&
  BENNETT_E_DEVICE_MISSING==3 && BENNETT_E_GATE_UNSUPPORTED==4 && BENNETT_E_TARGET==5 &&
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
     EQ(bennett_run_close(p,rb),BENNETT_OK);EQ(bennett_run(p,"readq",a,NULL,0,&rb),BENNETT_OK);
     EQ(bennett_wait(p,rb,&result,&request),BENNETT_OK);EQ(bennett_result_get(result,0,&kind,&width,out,8),BENNETT_OK);assert(out[0]==1);
     EQ(bennett_run_close(p,rb),BENNETT_OK);bennett_result_free(result);bennett_args_free(a);
-    /* §10 stubs permitted by PLAN milestone 2: loud failure, no fake estimate. */
+    /* §8.2/§10: no target/resolved request means no estimate; §13 needs producer coverage. */
     bennett_estimate_t* estimate=(void*)1;EQ(bennett_estimate_run(p,"inc8",token,&estimate),BENNETT_E_TARGET);assert(!estimate&&strstr(bennett_last_error(),"unimplemented:"));
     EQ(bennett_estimate_nresources(NULL),0);EQ(bennett_estimate_get(NULL,0,NULL,NULL),BENNETT_E_ARG);assert(!bennett_estimate_certificate(NULL,&len)&&len==0);bennett_estimate_free(NULL);
     bennett_coverage_t* coverage=(void*)1;EQ(bennett_coverage_get(p,&coverage),BENNETT_E_TARGET);assert(!coverage&&strstr(bennett_last_error(),"unimplemented:"));assert(!bennett_coverage_jcs(NULL,&len)&&len==0);bennett_coverage_free(NULL);

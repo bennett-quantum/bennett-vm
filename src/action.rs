@@ -1341,7 +1341,7 @@ impl<'o> Exec<'o> {
         let x_name = base_name(&ins.operands[3]);
         let x = self.bundle(&x_name)?;
         let n = x.len();
-        let _ = budget;
+        crate::certificate::verify_inverse_pair(self.obj, &g, &ginv, &budget)?;
         let t = self.state.alloc_wires(n);
         let fsig = crate::validate::oracle_sig(self.obj, &g)?;
         let f = self.state.alloc_wires(fsig.fault);
@@ -1541,6 +1541,23 @@ pub fn execute_action_with_idle(
     ) {
         return Err(diag("5.3", format!("@{name} is not an action")));
     }
+    let certificate_budget = args
+        .iter()
+        .find_map(|v| {
+            if let Value::Token(b) = v {
+                Some(*b)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    crate::certificate::verify_embedded(
+        obj,
+        name,
+        args,
+        &certificate_budget,
+        state.target.as_deref(),
+    )?;
     // §9.4: an idle designation excludes the entire active interface and
     // effective control context, even when no instruction happens to borrow.
     let active = muts

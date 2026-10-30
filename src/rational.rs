@@ -26,8 +26,8 @@ impl Rational {
     }
     /// Round to p significant binary digits, outward in the requested direction.
     pub(crate) fn binary_round(&self, p: usize, upper: bool) -> Result<Self, String> {
-        if p < 2 {
-            return Err("§12.1: precision_bits must be at least 2".into());
+        if p == 0 {
+            return Err("§12.1: precision_bits must be positive".into());
         }
         if self.n.is_zero() {
             return Ok(Self::zero());

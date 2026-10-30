@@ -1579,3 +1579,60 @@ fn jit_transformation_boundaries_differential() {
         );
     }
 }
+
+#[test]
+fn certificate_replay_requests_differential() {
+    // §12.1 has no CLI verdict surface in the reference. Its run-oracle and
+    // run-action surfaces do serve the underlying requests, including full
+    // target/fault tuples and inverse pairs. Compare those, never invented CLI.
+    let root = workspace().join("bennett-isa-spec/conformance/cases/objects");
+    let pair = root.join("qinplace.bisa").display().to_string();
+    for input in 0..4 {
+        for name in ["inc2", "dec2"] {
+            for budget in ["0", "2", "3"] {
+                assert_outcome(
+                    "§4.5 inverse pair F_B",
+                    &s(&[
+                        "run-oracle",
+                        &pair,
+                        name,
+                        "--input",
+                        &input.to_string(),
+                        "--budget",
+                        budget,
+                    ]),
+                );
+            }
+        }
+        assert_coherent(&s(&[
+            "run-action",
+            &pair,
+            "inc_inplace",
+            "--mut",
+            &input.to_string(),
+            "--arg",
+            "token:3,0,0,0",
+        ]));
+    }
+    // Preserve complete tuples in every case of the scheduled-claim scenario;
+    // the unscheduled semantic request is available even though the certificate
+    // needs an unpublished schedule realisation.
+    let tuple = root.join("t3_domains.bisa").display().to_string();
+    for x in 0..4 {
+        for t in 0..4 {
+            for f in 0..16 {
+                assert_coherent(&s(&[
+                    "run-action",
+                    &tuple,
+                    "oracle_tuple",
+                    "--mut",
+                    &format!("{t},{f}"),
+                    "--in",
+                    &x.to_string(),
+                    "--arg",
+                    "token:3,0,0,0",
+                ]));
+            }
+        }
+    }
+}

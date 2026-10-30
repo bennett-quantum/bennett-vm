@@ -1037,6 +1037,7 @@ pub fn run_oracle(
     args: &[Value],
     budget: Budget,
 ) -> Result<Outcome, String> {
+    crate::certificate::verify_embedded(obj, name, args, &budget, None)?;
     cliargs::validate_budget(obj, &budget)?;
     let func = obj.function(name).ok_or_else(|| {
         diag(

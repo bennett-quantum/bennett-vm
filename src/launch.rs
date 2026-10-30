@@ -893,7 +893,7 @@ pub unsafe extern "C" fn bennett_estimate_run(
         }
         Err(error(
             5,
-            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding (ISA gap); no simulator run is substituted for an estimate",
+            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding (bennett-vm-hsd, isa-0.9); no simulator run is substituted for an estimate",
         ))
     })
 }
@@ -954,7 +954,7 @@ pub unsafe extern "C" fn bennett_coverage_get(
         let p = get(p)?;
         let doc=crate::certificate::object_document(&p.obj,"coverage").map_err(|e|error(ARG,e))?
             .ok_or_else(||error(5,"§10/§13: unimplemented: source coverage must be supplied by bennett-driver in the object's coverage section"))?;
-        crate::certificate::validate_coverage(&doc).map_err(|e| error(ARG, e))?;
+        crate::certificate::validate_coverage_object(&p.obj, &doc).map_err(|e| error(ARG, e))?;
         output(
             out,
             bennett_coverage_t {

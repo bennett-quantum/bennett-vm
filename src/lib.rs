@@ -41,7 +41,7 @@ pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Id
     let obj = object::parse(text)?;
     validate::validate(&obj)?;
     if let Some(coverage) = certificate::object_document(&obj, "coverage")? {
-        certificate::validate_coverage(&coverage)?;
+        certificate::validate_coverage_object(&obj, &coverage)?;
     }
     let ids = identity::compute(&obj)?;
     if !hash_only {

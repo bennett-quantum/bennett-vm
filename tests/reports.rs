@@ -22,7 +22,10 @@ fn coverage_is_owned_canonical_and_outlives_program() {
     unsafe {
         // §13: entries report dialect source classifications; §10: accessor pointers
         // are valid until owning object freed. No execution-derived counts invented.
-        let raw = r#"{"entries":[{"classification":"trapped","count":2,"fault_code":8,"point":"entry:0","reason":"unsupported source operation","source":"dialect.test"}]}"#;
+        let hash = bennett_vm::load(&object(), false).unwrap().1.interface["toggle"].clone();
+        let raw = format!(
+            r#"{{"entries":[{{"classification":"trapped","count":2,"fault_code":8,"point":["{hash}","entry",0],"reason":"unsupported source operation","source":"dialect.test"}}]}}"#
+        );
         let text = format!("{}\nsection coverage\n{raw}\n", object());
         let mut p = ptr::null_mut();
         assert_eq!(
@@ -87,4 +90,57 @@ fn malformed_coverage_is_rejected() {
     let bad=json::parse(r#"{"entries":[{"point":"entry:0","source":"d","classification":"ignored","reason":"bad","count":1}]}"#).unwrap();
     let text = format!("{}\nsection coverage\n{}\n", object(), bad.to_jcs());
     assert!(bennett_vm::load(&text, false).unwrap_err().contains("§13"));
+}
+
+#[test]
+fn target_estimate_refusal_and_empty_coverage_have_exact_contracts() {
+    unsafe {
+        // §8.2 demands per-class occupancy/peak; §10 estimate_get exposes only one
+        // decimal per resource, no class encoding. Do not sum classes or add quantities.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let target = std::fs::read_to_string(
+            root.join("bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json"),
+        )
+        .unwrap();
+        let raw = format!("{}\nsection coverage\n{{\"entries\":[]}}\n", object());
+        let mut p = ptr::null_mut();
+        assert_eq!(
+            bennett_load(
+                raw.as_ptr(),
+                raw.len(),
+                target.as_ptr(),
+                target.len(),
+                &mut p
+            ),
+            0
+        );
+        let mut tk = 0;
+        assert_eq!(
+            bennett_budget(p, c("toggle").as_ptr(), 3, 0, 0, 0, &mut tk),
+            0
+        );
+        let mut estimate = ptr::dangling_mut();
+        assert_eq!(
+            bennett_estimate_run(p, c("toggle").as_ptr(), tk, &mut estimate),
+            5
+        );
+        assert!(estimate.is_null());
+        assert!(
+            CStr::from_ptr(bennett_last_error())
+                .to_str()
+                .unwrap()
+                .contains("bennett-estimate")
+        );
+        assert_eq!(
+            bennett_estimate_run(p, c("bell").as_ptr(), tk, &mut estimate),
+            11
+        ); // different region's token
+        let mut coverage = ptr::null_mut();
+        assert_eq!(bennett_coverage_get(p, &mut coverage), 0);
+        let mut len = 0;
+        let bytes = bennett_coverage_jcs(coverage, &mut len);
+        assert_eq!(std::slice::from_raw_parts(bytes, len), br#"{"entries":[]}"#);
+        bennett_coverage_free(coverage);
+        assert_eq!(bennett_unload(p), 0);
+    }
 }

@@ -248,3 +248,48 @@ fn data_symbol_is_not_an_instruction_path() {
             .contains("not a function")
     );
 }
+
+#[test]
+fn every_published_h_scenario_is_retained_with_loud_library_refusal() {
+    // §11: consumer validates paths and executes verbatim or rejects; it must
+    // never invent the unpublished ref operation ordinals to make H go green.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("bennett-isa-spec/conformance/cases");
+    let (obj, ids) = bennett_vm::load(
+        &std::fs::read_to_string(root.join("objects/sched_inc8.bisa")).unwrap(),
+        false,
+    )
+    .unwrap();
+    let mut checked = 0;
+    for dir in std::fs::read_dir(root.join("H")).unwrap() {
+        let dir = dir.unwrap().path();
+        let case = j(&std::fs::read_to_string(dir.join("case.json")).unwrap());
+        let sentence = case.get("spec").unwrap().as_str().unwrap();
+        if let Some(file) = case
+            .get("scenario")
+            .and_then(|s| s.get("schedule_file"))
+            .and_then(Json::as_str)
+        {
+            let doc = j(&std::fs::read_to_string(dir.join(file)).unwrap());
+            let refusal = sched::validate_entries(&doc, &obj, &ids)
+                .and_then(|()| {
+                    sched::require_library(doc.get("bindings").and_then(|b| b.get("expansion")))
+                })
+                .unwrap_err();
+            assert!(
+                refusal.contains("§11") && refusal.contains("E_SCHEDULE_INFEASIBLE"),
+                "{sentence}: {refusal}"
+            );
+        } else {
+            let refusal = sched::require_library(None).unwrap_err();
+            assert!(refusal.contains("b-isa-spec-8r4"), "{sentence}: {refusal}");
+        }
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 10,
+        "all published H scenarios, including request-only cases"
+    );
+}

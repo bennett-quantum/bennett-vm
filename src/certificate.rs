@@ -75,16 +75,20 @@ fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
         .filter(|i| i.op == "qborrow")
         .map(|i| (i.lhs[0].clone(), i.operands[1].parse::<usize>().unwrap()))
         .collect();
+    // Wire binding follows actual qborrow allocation order; the domain is
+    // free to enumerate components in any order without changing that binding.
+    for i in flat.iter().filter(|i| i.op == "qborrow") {
+        names.push(i.lhs[0].clone());
+        widths.push(declared[&i.lhs[0]]);
+    }
     for b in array(borrowed_defs)? {
         let n = string(b, "name")?;
         let w = field(b, "width")?.as_usize().ok_or_else(|| err("width"))?;
-        if declared.get(n) != Some(&w) || names.iter().any(|s| s == n) {
+        if declared.get(n) != Some(&w) {
             return Err(err(
                 "borrowed domain must name actual qborrow bundles with their widths",
             ));
         }
-        names.push(n.into());
-        widths.push(w);
     }
     let borrowed = widths.len() - bundles;
     let mut regions = vec![];
@@ -139,14 +143,14 @@ fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
         let (start, count) = regions[k];
         let cells = field(r, "cells")?;
         if cells.as_str() == Some("all") {
-            for slot in start..start + count {
+            for (slot, width) in widths.iter().enumerate().skip(start).take(count) {
                 add(
                     slot,
                     &Json::obj(vec![
                         ("lo", Json::u64(0)),
                         (
                             "hi",
-                            Json::u(&U::from_u64(1).shl(widths[slot]).sub(&U::from_u64(1))),
+                            Json::u(&U::from_u64(1).shl(*width).sub(&U::from_u64(1))),
                         ),
                     ]),
                 )?;
@@ -166,9 +170,18 @@ fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
     for c in &components {
         count = count.mul(&c.hi.sub(&c.lo).add(&one));
     }
-    let total = one.shl(widths.iter().sum());
+    let missing_dirty = if oracle {
+        0
+    } else {
+        crate::qcli::borrow_capacity(obj, name)?
+            .saturating_sub(widths[bundles..bundles + borrowed].iter().sum())
+    };
+    let total = one.shl(widths.iter().sum::<usize>() + missing_dirty);
     // An omitted dirty pool can never turn a partial-domain replay into proof.
-    let full = components.len() == widths.len() && count == total && borrowed == declared.len();
+    let full = components.len() == widths.len()
+        && count == total
+        && borrowed == declared.len()
+        && missing_dirty == 0;
     Ok(Domain {
         widths,
         components,
@@ -334,7 +347,7 @@ fn resolve<'a>(
     libs: &'a [Object],
     hash: &str,
 ) -> Result<(&'a Object, String), String> {
-    for o in std::iter::once(obj).chain(libs) {
+    for o in libs.iter().chain(std::iter::once(obj)) {
         let ids = crate::identity::compute(o)?;
         for (name, h) in ids.closure {
             if h.as_deref() == Some(hash) {
@@ -379,6 +392,7 @@ pub fn verify_claim(
     budget: &Budget,
     libraries: &[Object],
 ) -> Result<Verdict, String> {
+    let _guard = ReplayGuard::new(obj, name, claim)?;
     match string(claim, "kind")? {
         "numerical" | "channel" => {
             executable(obj, name, claim)?;
@@ -387,7 +401,7 @@ pub fn verify_claim(
         "structural" => structural(obj, name, claim, args, budget, libraries),
         "exhaustive" | "sampled" => {
             let kind = string(claim, "kind")?;
-            let expected = field(claim, "expected")?;
+            let expected = claim.get("expected").ok_or_else(||err("unimplemented: §12.1 sampled payload does not define an expected relation/default (bennett-vm-clw, isa-0.9); replay request from bennett-driver must bind the comparison"))?;
             if expected.as_str() == Some("oracle") {
                 executable(obj, name, claim)?;
                 unreachable!()
@@ -425,18 +439,22 @@ pub fn verify_claim(
             if program.is_some() == table.is_some() {
                 return Err(err("expected must contain exactly one table or program"));
             }
-            if let Some(table) = table {
-                if U::from_u64(table.len() as u64) != d.count {
-                    return Err(err("expected table must contain every domain element"));
-                }
+            if let Some(table) = table
+                && U::from_u64(table.len() as u64) != d.count
+            {
+                return Err(err("expected table must contain every domain element"));
             }
             let mut case = U::zero();
+            let mut sampled_indices = BTreeSet::new();
             while case < count {
                 let mut vals = d.values(&case);
                 if let Some(r) = &mut rng {
                     for c in &d.components {
                         vals[c.slot] = r.range(&c.lo, &c.hi)?;
                     }
+                }
+                if kind == "sampled" {
+                    sampled_indices.insert(d.index(&vals));
                 }
                 let actual = execute(obj, name, &d, &vals, args, budget)?;
                 let wanted = if let Some((o, n)) = &program {
@@ -478,7 +496,11 @@ pub fn verify_claim(
             } else {
                 Verdict::Evidence {
                     checked: count,
-                    covered: d.count,
+                    covered: if kind == "sampled" {
+                        U::from_u64(sampled_indices.len() as u64)
+                    } else {
+                        d.count
+                    },
                     domain: d.total,
                 }
             })
@@ -501,34 +523,53 @@ fn structural(
             crate::qvalidate::translation_witness(obj, name, field(c, "witness")?)?
         }
         "adjoint_table" => {
-            let f = obj.function(name).ok_or_else(|| err("unknown region"))?;
+            if field(c, "witness")?.as_obj().is_none_or(|m| !m.is_empty()) {
+                return Err(err("adjoint_table witness must be {}"));
+            }
+            let f = obj
+                .function(name)
+                .filter(|f| matches!(f.kind, FnKind::Action | FnKind::PermAction))
+                .ok_or_else(|| err("adjoint_table requires a Q action"))?;
             let mut flat = vec![];
             f.flat_instrs(&mut flat);
+            // §5.3 gives an adjoint for every admitted action instruction.
+            // Validation has already proved typed bindings, finite bounds,
+            // matched predicate/lifetime pairs and per-frame dirty restoration.
+            // This proves the table's transformation, not equality to an
+            // expected oracle nor any target approximation bound.
             for i in flat {
-                if !matches!(
-                    i.op.as_str(),
-                    "x" | "cx"
-                        | "ccx"
-                        | "mcx"
-                        | "h"
-                        | "s"
-                        | "sdg"
-                        | "t"
-                        | "tdg"
-                        | "z"
-                        | "cz"
-                        | "swap"
-                        | "rx"
-                        | "ry"
-                        | "rz"
-                ) {
-                    return Err(err(format!(
-                        "adjoint_table requires subclaims for non-gate {}",
-                        i.op
-                    )));
+                if !action::is_gate_name(&i.op)
+                    && !matches!(
+                        i.op.as_str(),
+                        "qalloc"
+                            | "qfree"
+                            | "qborrow"
+                            | "qreturn"
+                            | "qregion"
+                            | "qcopy"
+                            | "quncopy"
+                            | "qxor"
+                            | "qexch"
+                            | "qinplace"
+                            | "qload"
+                            | "qunload"
+                            | "qstore"
+                            | "qexchm"
+                            | "oracle_call"
+                            | "action_call"
+                            | "adj"
+                            | "ctl"
+                            | "qpred"
+                            | "qunpred"
+                            | "qif"
+                            | "qloop"
+                    )
+                {
+                    return Err(err(format!("§5.3: no adjoint table row for {}", i.op)));
                 }
             }
         }
+
         "inverse_pair_library" => {
             let w = field(c, "witness")?;
             let (o, n) = resolve(obj, libs, string(w, "library_closure_hash")?)?;
@@ -539,16 +580,9 @@ fn structural(
                 .ok_or_else(|| err("library has no certificate"))?;
             let hash = crate::identity::compute(o)?.closure[&n].clone().unwrap();
             let claims = array(field(field(field(&cert, "regions")?, &hash)?, "claims")?)?;
-            // Recursion is deliberately rejected before replay, not trusted or
-            // allowed to overflow the host stack.
             let claim = claims
                 .get(index)
                 .ok_or_else(|| err("library claim index out of range"))?;
-            if string(claim, "kind")? == "structural" {
-                return Err(err(
-                    "unimplemented: recursive structural library chain requires cycle-checked certificate graph",
-                ));
-            }
             if verify_claim(o, &n, claim, args, budget, libs)? != Verdict::Proof {
                 return Err(err("library claim is evidence, not proof"));
             }
@@ -577,6 +611,11 @@ pub fn verify_inverse_pair(
     ginv: &str,
     budget: &Budget,
 ) -> Result<Verdict, String> {
+    let guard_claim = Json::obj(vec![(
+        "inverse_pair",
+        Json::Str(format!("{g}:{ginv}:{}", budget.to_json().to_jcs())),
+    )]);
+    let _guard = ReplayGuard::new(obj, g, &guard_claim)?;
     let a = crate::validate::oracle_sig(obj, g)?;
     let b = crate::validate::oracle_sig(obj, ginv)?;
     if a.ins != vec![a.tgt]
@@ -646,9 +685,10 @@ pub fn validate_coverage(j: &Json) -> Result<(), String> {
         }) {
             return Err(e("unknown coverage entry field"));
         }
-        for key in ["point", "source", "reason"] {
+        program_point(field(entry, "point")?)?;
+        for key in ["source", "reason"] {
             if entry.get(key).and_then(Json::as_str).is_none() {
-                return Err(e("point, source and reason must be strings"));
+                return Err(e("source and reason must be strings"));
             }
         }
         if !matches!(
@@ -660,21 +700,316 @@ pub fn validate_coverage(j: &Json) -> Result<(), String> {
         if entry.get("count").and_then(Json::as_big).is_none() {
             return Err(e("count must be an unsigned integer"));
         }
-        if let Some(code) = entry.get("fault_code") {
-            if code.as_big().is_none() {
-                return Err(e("fault_code must be an unsigned integer"));
-            }
+        if let Some(code) = entry.get("fault_code")
+            && code.as_big().is_none()
+        {
+            return Err(e("fault_code must be an unsigned integer"));
         }
-        if let Some(hash) = entry.get("shim_hash") {
-            if hash.as_str().is_none_or(|s| {
+        if let Some(hash) = entry.get("shim_hash")
+            && hash.as_str().is_none_or(|s| {
                 s.len() != 64
                     || !s
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            }) {
-                return Err(e("shim_hash must be a lowercase SHA-256 hash"));
-            }
+            })
+        {
+            return Err(e("shim_hash must be a lowercase SHA-256 hash"));
         }
     }
     Ok(())
+}
+
+thread_local! {static REPLAY:std::cell::RefCell<Vec<String>>=const {std::cell::RefCell::new(Vec::new())};}
+struct ReplayGuard;
+impl ReplayGuard {
+    fn new(obj: &Object, name: &str, claim: &Json) -> Result<Self, String> {
+        let key = format!(
+            "{}:{name}:{}",
+            crate::identity::object_hash(&obj.text),
+            claim.to_jcs()
+        );
+        REPLAY.with(|r| {
+            let mut r = r.borrow_mut();
+            if r.contains(&key) {
+                return Err(err("cyclic library certificate/subclaim graph"));
+            }
+            r.push(key);
+            Ok(Self)
+        })
+    }
+}
+impl Drop for ReplayGuard {
+    fn drop(&mut self) {
+        REPLAY.with(|r| {
+            r.borrow_mut().pop();
+        });
+    }
+}
+/// Verify every claim and every §12.3 index of one resolved invocation region.
+/// Library references are replayed with cycle detection, never trusted labels.
+pub fn verify_region_claims(
+    obj: &Object,
+    name: &str,
+    region: &Json,
+    args: &[Value],
+    budget: &Budget,
+    libraries: &[Object],
+) -> Result<Vec<Verdict>, String> {
+    let claims = array(field(region, "claims")?)?;
+    let mut verdicts = vec![];
+    for c in claims {
+        verdicts.push(verify_claim(obj, name, c, args, budget, libraries)?);
+    }
+    let proof = |i: &Json| -> Result<usize, String> {
+        let n = i
+            .as_usize()
+            .filter(|n| *n < verdicts.len())
+            .ok_or_else(|| err("§12.3: claim index out of range"))?;
+        if verdicts[n] != Verdict::Proof {
+            return Err(err("§12.3: evidence cannot discharge a proof obligation"));
+        }
+        Ok(n)
+    };
+    // Structural rules may only depend on successful proof subclaims, never
+    // circular index graphs, even when their own side conditions also hold.
+    fn visit(
+        n: usize,
+        claims: &[Json],
+        visiting: &mut BTreeSet<usize>,
+        done: &mut BTreeSet<usize>,
+        verdicts: &[Verdict],
+    ) -> Result<(), String> {
+        if done.contains(&n) {
+            return Ok(());
+        }
+        if !visiting.insert(n) {
+            return Err(err("cyclic subclaims"));
+        }
+        if let Some(xs) = claims[n].get("subclaims") {
+            for i in array(xs)? {
+                let k = i
+                    .as_usize()
+                    .filter(|k| *k < claims.len())
+                    .ok_or_else(|| err("subclaim index out of range"))?;
+                if verdicts[k] != Verdict::Proof {
+                    return Err(err("structural subclaim is evidence"));
+                }
+                visit(k, claims, visiting, done, verdicts)?;
+            }
+        }
+        visiting.remove(&n);
+        done.insert(n);
+        Ok(())
+    }
+    let mut done = BTreeSet::new();
+    for n in 0..claims.len() {
+        visit(n, claims, &mut BTreeSet::new(), &mut done, &verdicts)?;
+    }
+    let v = field(region, "verification")?;
+    for (key, value) in v
+        .as_obj()
+        .ok_or_else(|| err("verification must be object"))?
+    {
+        match key.as_str() {
+            "oracle" => {
+                let n = proof(value)?;
+                if !t3_claim(obj, &claims[n], libraries, &mut BTreeSet::new())? {
+                    return Err(err(
+                        "§12.3: oracle verification requires a full-tuple T3 claim; adjoint/translation proves a different obligation",
+                    ));
+                }
+            }
+            "borrow_frames" => {
+                for i in array(value)? {
+                    let n = proof(i)?;
+                    let translation = string(&claims[n], "kind")? == "structural"
+                        && string(&claims[n], "rule")? == "translation_lemma";
+                    if !translation && !t3_claim(obj, &claims[n], libraries, &mut BTreeSet::new())?
+                    {
+                        return Err(err(
+                            "§5.6: borrow_frames requires T3 or translation lemma proof",
+                        ));
+                    }
+                }
+            }
+            "inverse_pairs" => {
+                for pair in array(value)? {
+                    proof(field(pair, "claim")?)?;
+                    verify_inverse_pair(obj, string(pair, "g")?, string(pair, "ginv")?, budget)?;
+                }
+            }
+            "unitary" | "channel" => {
+                for i in array(value)? {
+                    let n = proof(i)?;
+                    let kind = string(&claims[n], "kind")?;
+                    if kind
+                        != if key == "unitary" {
+                            "numerical"
+                        } else {
+                            "channel"
+                        }
+                    {
+                        return Err(err(
+                            "§12.3: error bound requires the corresponding numerical/channel claim",
+                        ));
+                    }
+                }
+            }
+            "fault_rate" => {
+                return Err(err(
+                    "unimplemented: native/undefined/layout-dependent fault-rate comparison belongs to bennett-driver and bennett-estimate",
+                ));
+            }
+            _ => return Err(err(format!("§12.3: unknown verification field {key}"))),
+        }
+    }
+    Ok(verdicts)
+}
+/// Executor gate: validate embedded bindings before changing the machine. The
+/// replay engine deliberately bypasses this gate while independently executing
+/// claims, so a certificate cannot recursively validate itself by execution.
+pub(crate) fn verify_embedded(
+    obj: &Object,
+    name: &str,
+    args: &[Value],
+    budget: &Budget,
+    target: Option<&crate::target::Target>,
+) -> Result<(), String> {
+    if !obj.has_certificate || REPLAY.with(|r| !r.borrow().is_empty()) {
+        return Ok(());
+    }
+    let doc = object_document(obj, "certificate")?.ok_or_else(|| err("certificate missing"))?;
+    let bindings = field(&doc, "bindings")?;
+    let ids = crate::identity::compute(obj)?;
+    if string(bindings, "object_hash")? != ids.object_hash {
+        return Err(err("§12.3: certificate object_hash differs from object"));
+    }
+    let hash = string(bindings, "closure_hash")?;
+    let root = ids
+        .closure
+        .iter()
+        .find(|(_, h)| h.as_deref() == Some(hash))
+        .map(|(n, _)| n)
+        .ok_or_else(|| err("certificate closure_hash is not in object"))?;
+    if string(bindings, "interface_hash")? != ids.interface[root] {
+        return Err(err(
+            "certificate interface_hash differs from root signature",
+        ));
+    }
+    let expected_target = string(bindings, "target_hash")?;
+    if target.is_none_or(|t| t.hash != expected_target) {
+        return Err(err(
+            "certificate target_hash requires matching loaded target",
+        ));
+    }
+    if let Some(schedule) = bindings.get("schedule_hash") {
+        let actual = crate::sched::object_schedule(obj)?
+            .ok_or_else(|| err("certificate schedule_hash requires root schedule"))?;
+        if schedule.as_str() != Some(&crate::sha256::sha256_hex(actual.to_jcs().as_bytes())) {
+            return Err(err("certificate schedule_hash mismatch"));
+        }
+    }
+    let regions = field(&doc, "regions")?;
+    let region_hash = ids
+        .closure
+        .get(name)
+        .and_then(|h| h.as_deref())
+        .ok_or_else(|| err("unresolved invocation closure"))?;
+    if let Some(region) = regions.get(region_hash) {
+        verify_region_claims(obj, name, region, args, budget, &[])?;
+    }
+    // Other certificate sections require cross-repository request context;
+    // claiming they were verified from this single invocation would be false.
+    if doc.get("composition").is_some() {
+        return Err(err(
+            "unimplemented: §12.3 multiplicities/error composition requires bound schedule ref@0.8 (b-isa-spec-8r4); bennett-estimate request",
+        ));
+    }
+    Ok(())
+}
+
+/// §9.2 program-point tuple: (symbol interface hash, block, nested-line ordinal).
+pub fn program_point(j: &Json) -> Result<(&str, &str, usize), String> {
+    let fail = || "§9.2/§13: program-point id must be [interface_hash, block, ordinal]".to_string();
+    let a = j.as_arr().filter(|a| a.len() == 3).ok_or_else(fail)?;
+    let hash = a[0]
+        .as_str()
+        .filter(|s| {
+            s.len() == 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+        .ok_or_else(fail)?;
+    let block = a[1].as_str().filter(|s| !s.is_empty()).ok_or_else(fail)?;
+    let ordinal = a[2].as_usize().ok_or_else(fail)?;
+    Ok((hash, block, ordinal))
+}
+
+/// Validate coverage point identities against the actual object (§9.2, §13).
+pub fn validate_coverage_object(obj: &Object, j: &Json) -> Result<(), String> {
+    validate_coverage(j)?;
+    let ids = crate::identity::compute(obj)?;
+    for entry in array(field(j, "entries")?)? {
+        let (hash, block, ordinal) = program_point(field(entry, "point")?)?;
+        let name = ids
+            .interface
+            .iter()
+            .find(|(_, h)| h.as_str() == hash)
+            .map(|(n, _)| n)
+            .ok_or("§13: coverage point symbol is not in object")?;
+        let f = obj
+            .function(name)
+            .ok_or("§13: coverage point is not an instruction symbol")?;
+        let b = f
+            .blocks
+            .iter()
+            .find(|b| b.name == block)
+            .ok_or("§13: coverage point block is not in object")?;
+        fn count(xs: &[crate::object::Instr]) -> usize {
+            xs.iter()
+                .map(|i| 1 + i.nested.iter().map(|b| count(b)).sum::<usize>())
+                .sum()
+        }
+        if ordinal >= count(&b.instrs) {
+            return Err("§13: coverage point ordinal is not in object".into());
+        }
+    }
+    Ok(())
+}
+
+fn t3_claim(
+    obj: &Object,
+    c: &Json,
+    libs: &[Object],
+    seen: &mut BTreeSet<String>,
+) -> Result<bool, String> {
+    if string(c, "kind")? == "exhaustive" {
+        return Ok(true);
+    }
+    if string(c, "kind")? != "structural" || string(c, "rule")? != "inverse_pair_library" {
+        return Ok(false);
+    }
+    let w = field(c, "witness")?;
+    let hash = string(w, "library_closure_hash")?;
+    let index = field(w, "claim_index")?
+        .as_usize()
+        .ok_or_else(|| err("claim_index"))?;
+    if !seen.insert(format!("{hash}:{index}")) {
+        return Err(err("cyclic library claim"));
+    }
+    let (o, n) = resolve(obj, libs, hash)?;
+    let cert =
+        object_document(o, "certificate")?.ok_or_else(|| err("library has no certificate"))?;
+    let hash = crate::identity::compute(o)?.closure[&n]
+        .clone()
+        .ok_or_else(|| err("unresolved library"))?;
+    let claims = array(field(field(field(&cert, "regions")?, &hash)?, "claims")?)?;
+    t3_claim(
+        o,
+        claims
+            .get(index)
+            .ok_or_else(|| err("library claim index"))?,
+        libs,
+        seen,
+    )
 }

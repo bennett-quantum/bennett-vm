@@ -578,12 +578,59 @@ pub(crate) fn translation_witness(
             points.push((format!("{}:{ordinal}", b.name), i));
         }
     }
+    fn contexts(
+        xs: &[Instr],
+        env: &BTreeMap<String, usize>,
+        pred: &mut Vec<Wire>,
+        out: &mut BTreeMap<usize, Vec<Wire>>,
+    ) -> Result<(), String> {
+        for i in xs {
+            out.insert(i.line, pred.clone());
+            if i.op == "qpred" {
+                pred.extend(wires(env, &i.operands[0])?);
+            } else if i.op == "qunpred" {
+                let n = wires(env, &i.operands[0])?.len();
+                pred.truncate(pred.len() - n);
+            } else if i.op == "qif" {
+                for body in &i.nested {
+                    let mut p = pred.clone();
+                    p.extend(wires(env, &i.operands[0])?);
+                    contexts(body, env, &mut p, out)?;
+                }
+            } else {
+                for body in &i.nested {
+                    let mut p = pred.clone();
+                    if i.op == "qloop" && i.operands.len() == 3 {
+                        p.extend(wires(env, &i.operands[2])?);
+                    }
+                    contexts(body, env, &mut p, out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut predicates = BTreeMap::new();
+    for b in &f.blocks {
+        contexts(&b.instrs, &env, &mut vec![], &mut predicates)?;
+    }
+    let effective_flip = |i: &Instr| -> Result<(Vec<Wire>, Wire), String> {
+        let (mut cs, t) = flip(i, &env)?;
+        cs.extend(predicates.get(&i.line).cloned().unwrap_or_default());
+        Ok((cs, t))
+    };
+    let interface = crate::identity::compute(obj)?.interface[name].clone();
     let point_list = |key: &str| -> Result<Vec<String>, String> {
         w.get(key)
             .and_then(Json::as_arr)
             .ok_or_else(fail)?
             .iter()
-            .map(|p| p.as_str().map(str::to_string).ok_or_else(fail))
+            .map(|p| {
+                let (hash, block, ordinal) = crate::certificate::program_point(p)?;
+                if hash != interface {
+                    return Err(fail());
+                }
+                Ok(format!("{block}:{ordinal}"))
+            })
             .collect()
     };
     let frame = point_list("frame")?;
@@ -633,15 +680,18 @@ pub(crate) fn translation_witness(
     }
     let want = vg.iter().chain(&wg).chain(vg.iter().rev()).chain(&wg);
     for ((_, actual), wanted) in frame_seq.iter().zip(want) {
-        if actual.op != wanted.op || actual.operands != wanted.operands || !actual.nested.is_empty()
+        if actual.op != wanted.op
+            || actual.operands != wanted.operands
+            || !actual.nested.is_empty()
+            || effective_flip(actual)? != effective_flip(wanted)?
         {
             return Err(fail());
         }
     }
     let wire_set = |key: &str| -> Result<BTreeSet<Wire>, String> {
         let mut out = BTreeSet::new();
-        for p in point_list(key)? {
-            out.extend(wires(&env, &p)?);
+        for p in w.get(key).and_then(Json::as_arr).ok_or_else(fail)? {
+            out.extend(wires(&env, p.as_str().ok_or_else(fail)?)?);
         }
         Ok(out)
     };
@@ -653,13 +703,13 @@ pub(crate) fn translation_witness(
     let mut targets = BTreeSet::new();
     let mut controls = BTreeSet::new();
     for g in vg {
-        let (cs, t) = flip(g, &env)?;
+        let (cs, t) = effective_flip(g)?;
         if !b.contains(&t) || !cs.iter().all(|c| x.contains(c)) {
             return Err(fail());
         }
     }
     for g in wg {
-        let (cs, t) = flip(g, &env)?;
+        let (cs, t) = effective_flip(g)?;
         if b.contains(&t) || x.contains(&t) || cs.iter().filter(|c| b.contains(*c)).count() > 1 {
             return Err(fail());
         }
@@ -669,18 +719,35 @@ pub(crate) fn translation_witness(
     if !targets.is_disjoint(&controls) {
         return Err(fail());
     }
-    // Do not certify a producer-selected interior of a larger frame. Adjacent
-    // permutation gates must also belong to this maximal contiguous frame.
+    // §5.6: first through last touch of B within a contiguous permutation
+    // segment. Adjacent gates that never touch B do not extend that span.
     let permutation = |i: &Instr| {
         matches!(
             i.op.as_str(),
             "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch"
         )
     };
-    if first > 0 && permutation(points[first - 1].1)
-        || last + 1 < points.len() && permutation(points[last + 1].1)
-    {
+    let touches = |i: &Instr| {
+        i.operands
+            .iter()
+            .any(|s| wires(&env, s).is_ok_and(|ws| ws.iter().any(|w| b.contains(w))))
+    };
+    if !touches(points[first].1) || !touches(points[last].1) {
         return Err(fail());
+    }
+    for (_, i) in points[..first]
+        .iter()
+        .rev()
+        .take_while(|(_, i)| permutation(i))
+        .chain(
+            points[last + 1..]
+                .iter()
+                .take_while(|(_, i)| permutation(i)),
+        )
+    {
+        if touches(i) {
+            return Err(fail());
+        }
     }
     Ok(())
 }

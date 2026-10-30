@@ -363,6 +363,7 @@ impl Machine {
         let next_activation = self.next_activation;
         self.definitions.clear();
         self.stack.last_mut().unwrap().index += 1;
+        self.quantum.classical_event()?;
         let fault = self.exec(&ins)?;
         if let Some(code) = fault {
             self.data = before.clone();

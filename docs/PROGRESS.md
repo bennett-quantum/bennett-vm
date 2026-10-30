@@ -1,3 +1,17 @@
+# Milestone 4 resumed — 2026-10-30 (verification in progress)
+
+Resumed uncommitted structured-gate, dirty-scheme and event-accounting work
+under child v23.4 after infrastructure interruption. Six target execution
+witnesses pass: bundle/branch/loop expansion, while flags and adjoint order,
+unconditional local images, designated entangled dirty scratch, achieved-error
+charging and invalid idle designations. Initial run: four passed/two failed.
+The idle failure was an entry validation bug, fixed before any allocation;
+the while expected order contradicted §5.3's explicit adjoint table and was
+corrected to its deciding sentence. No reference code consumed.
+
+The remaining milestone and full gate are not yet claimed complete. See the
+previous verified baseline below; subsequent session results supersede it.
+
 # Milestone 4 partial implementation — 2026-10-29
 
 Milestone `bennett-vm-v23` is **not complete**. Gate-only target launch execution,

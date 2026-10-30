@@ -107,8 +107,9 @@ pub fn eval(
     tables: &BTreeMap<String, Vec<R>>,
 ) -> Result<R, String> {
     let bound: Vec<_> = vars.keys().map(String::as_str).collect();
-    check_expr(j, &bound)?;
-    if let Some(e) = vars.get("eps")
+    let referenced = check_expr(j, &bound)?;
+    if referenced.contains("eps")
+        && let Some(e) = vars.get("eps")
         && (e <= &R::zero() || e > &R::from(1))
     {
         return Err("§8.1: eps outside (0,1]".into());
@@ -1084,6 +1085,14 @@ impl Target {
                         "ctl",
                         "qpred",
                         "qunpred",
+                        "qcopy",
+                        "quncopy",
+                        "qxor",
+                        "qexch",
+                        "qif",
+                        "qloop",
+                        "qregion",
+                        "qregion_release",
                     ]
                     .contains(&ins.op.as_str())
                 {

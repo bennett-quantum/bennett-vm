@@ -25,6 +25,9 @@ pub struct QuantumState {
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
     pub(crate) wire_classes: BTreeMap<usize, String>,
     pub emitted: Vec<crate::target::Leaf>,
+    events: Vec<crate::target::Event>,
+    live: Vec<crate::target::LiveInterval>,
+    time: crate::target::Rational,
 }
 
 impl QuantumState {
@@ -38,6 +41,9 @@ impl QuantumState {
             target: None,
             wire_classes: BTreeMap::new(),
             emitted: vec![],
+            events: vec![],
+            live: vec![],
+            time: crate::target::Rational::zero(),
         }
     }
     pub fn wire_count(&self) -> usize {
@@ -391,14 +397,19 @@ impl<'o> Exec<'o> {
                         .ok_or("§8.3: target gate wire has no allocated class".into())
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            return self.state.emit_target_gate(crate::target::Gate {
-                op: op.clone(),
-                controls,
-                own_controls: own,
-                targets,
-                classes,
-                theta,
-            });
+            return self.state.emit_target_gate_with(
+                crate::target::Gate {
+                    op: op.clone(),
+                    controls,
+                    own_controls: own,
+                    targets,
+                    classes,
+                    theta,
+                },
+                &crate::target::Rational::zero(),
+                None,
+                &self.idle,
+            );
         }
         let pred = self.pred.clone();
         match ins.op.as_str() {
@@ -494,6 +505,62 @@ impl<'o> Exec<'o> {
         Ok(())
     }
 
+    fn implicit_gate(
+        &mut self,
+        op: &str,
+        own: &[usize],
+        targets: &[usize],
+        pred: &[usize],
+    ) -> Result<(), String> {
+        if self.state.target.is_none() {
+            match op {
+                "x" | "cx" | "ccx" => {
+                    let mut controls = own.to_vec();
+                    controls.extend(pred);
+                    self.state.flip(targets[0], &controls);
+                }
+                "swap" => {
+                    self.state.map_basis(|k| {
+                        let mut n = k.clone();
+                        if pred.iter().all(|w| k.bit(*w)) {
+                            n.set_bit(targets[0], k.bit(targets[1]));
+                            n.set_bit(targets[1], k.bit(targets[0]));
+                        }
+                        n
+                    });
+                }
+                _ => return Err(format!("unimplemented: implicit gate {op} (milestone 4)")),
+            }
+            return Ok(());
+        }
+        let mut controls = own.to_vec();
+        controls.extend(pred);
+        let classes = controls
+            .iter()
+            .chain(targets)
+            .map(|w| {
+                self.state
+                    .wire_classes
+                    .get(w)
+                    .cloned()
+                    .ok_or_else(|| "§8.3: implicit gate wire has no class".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.state.emit_target_gate_with(
+            crate::target::Gate {
+                op: op.into(),
+                controls,
+                own_controls: own.len(),
+                targets: targets.to_vec(),
+                classes,
+                theta: None,
+            },
+            &crate::target::Rational::zero(),
+            None,
+            &self.idle,
+        )
+    }
+
     fn xor_bundle(&mut self, src: &[usize], dst: &[usize]) -> Result<(), String> {
         if src.len() != dst.len() {
             return Err(diag(
@@ -503,9 +570,7 @@ impl<'o> Exec<'o> {
         }
         let pred = self.pred.clone();
         for (s, d) in src.iter().zip(dst.iter()) {
-            let ctrls = self.controls_plus(&[*s]);
-            let _ = pred;
-            self.state.flip(*d, &ctrls);
+            self.implicit_gate("cx", &[*s], &[*d], &pred)?;
         }
         Ok(())
     }
@@ -648,10 +713,14 @@ impl<'o> Exec<'o> {
         }
         let mut cells = Vec::new();
         for cell in image.iter().take(ncells) {
-            let wires = self.state.alloc_wires(w);
+            let wires = self.state.target_alloc(w, "any")?;
             if !cell.is_zero() {
                 // Image gates are unconditional (§3.5).
-                self.state.prepare(&wires, cell);
+                for (i, w) in wires.iter().enumerate() {
+                    if cell.bit(i) {
+                        self.implicit_gate("x", &[], &[*w], &[])?;
+                    }
+                }
             }
             cells.push(wires);
         }
@@ -678,13 +747,12 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
-                self.state.map_basis(|k| {
-                    let mut nk = k.clone();
-                    for w in cell {
-                        nk.set_bit(*w, false);
+                for (i, w) in cell.iter().enumerate() {
+                    if want.bit(i) {
+                        self.implicit_gate("x", &[], &[*w], &[])?;
                     }
-                    nk
-                });
+                }
+                self.state.target_release(cell);
             }
             self.regions.remove(&name);
         }
@@ -752,7 +820,7 @@ impl<'o> Exec<'o> {
             }
             "qcopy" => {
                 let src = self.bundle(&base_name(&ins.operands[0]))?;
-                let dst = self.state.alloc_wires(src.len());
+                let dst = self.state.target_alloc(src.len(), "any")?;
                 self.bundles.insert(ins.lhs[0].clone(), dst.clone());
                 self.xor_bundle(&src, &dst)
             }
@@ -770,6 +838,7 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
+                self.state.target_release(&dst);
                 self.bundles.remove(&dst_name);
                 Ok(())
             }
@@ -788,17 +857,9 @@ impl<'o> Exec<'o> {
                     ));
                 }
                 let pred = self.pred.clone();
-                self.state.map_basis(|k| {
-                    let mut nk = k.clone();
-                    if pred.iter().all(|p| k.bit(*p)) {
-                        for (x, y) in a.iter().zip(b.iter()) {
-                            let (bx, by) = (k.bit(*x), k.bit(*y));
-                            nk.set_bit(*x, by);
-                            nk.set_bit(*y, bx);
-                        }
-                    }
-                    nk
-                });
+                for (x, y) in a.iter().zip(&b) {
+                    self.implicit_gate("swap", &[], &[*x, *y], &pred)?;
+                }
                 Ok(())
             }
             "qregion" => Ok(()),
@@ -865,12 +926,12 @@ impl<'o> Exec<'o> {
                 self.exec_list(&ins.nested[0].clone())?;
                 self.pred.pop();
                 let pred = self.pred.clone();
-                self.state.flip(w, &pred);
+                self.implicit_gate("x", &[], &[w], &pred)?;
                 self.pred.push(w);
                 self.exec_list(&ins.nested[1].clone())?;
                 self.pred.pop();
                 let pred = self.pred.clone();
-                self.state.flip(w, &pred);
+                self.implicit_gate("x", &[], &[w], &pred)?;
                 Ok(())
             }
             "qloop" => self.exec_qloop(ins, false),
@@ -910,46 +971,38 @@ impl<'o> Exec<'o> {
                 ),
             ));
         }
-        let flags = self.state.alloc_wires(n);
+        let flags = self.state.target_alloc(n, "any")?;
         let pred = self.pred.clone();
-        let compute_flags = |st: &mut QuantumState| {
-            // cx cond[0] c1; ccx c_i cond[i] c_{i+1} (gates, so predicated)
-            if n > 0 {
-                let mut ctrls = pred.clone();
-                ctrls.push(cond[0]);
-                st.flip(flags[0], &ctrls);
-                for i in 1..n {
-                    let mut c2 = pred.clone();
-                    c2.push(flags[i - 1]);
-                    c2.push(cond[i]);
-                    c2.sort_unstable();
-                    c2.dedup();
-                    st.flip(flags[i], &c2);
+        if n > 0 {
+            self.implicit_gate("cx", &[cond[0]], &[flags[0]], &pred)?;
+        }
+        if adjoint {
+            // Reverse body order needs the same forward flags first.
+            for i in 1..n {
+                self.implicit_gate("ccx", &[flags[i - 1], cond[i]], &[flags[i]], &pred)?;
+            }
+            for i in (0..n).rev() {
+                self.pred.push(flags[i]);
+                let result = self.exec_list(&body);
+                self.pred.pop();
+                result?;
+            }
+        } else {
+            for i in 0..n {
+                self.pred.push(flags[i]);
+                let result = self.exec_list(&body);
+                self.pred.pop();
+                result?;
+                if i + 1 < n {
+                    self.implicit_gate("ccx", &[flags[i], cond[i + 1]], &[flags[i + 1]], &pred)?;
                 }
             }
-        };
-        compute_flags(self.state);
-        let order: Vec<usize> = if adjoint {
-            (0..n).rev().collect()
-        } else {
-            (0..n).collect()
-        };
-        for i in order {
-            self.pred.push(flags[i]);
-            let r = self.exec_list(&body);
-            self.pred.pop();
-            r?;
         }
-        // Invert the dependency chain from its last flag to its first.
         for i in (1..n).rev() {
-            let mut ctrls = pred.clone();
-            ctrls.extend([flags[i - 1], cond[i]]);
-            self.state.flip(flags[i], &ctrls);
+            self.implicit_gate("ccx", &[flags[i - 1], cond[i]], &[flags[i]], &pred)?;
         }
         if n > 0 {
-            let mut ctrls = pred.clone();
-            ctrls.push(cond[0]);
-            self.state.flip(flags[0], &ctrls);
+            self.implicit_gate("cx", &[cond[0]], &[flags[0]], &pred)?;
         }
         if !self.state.is_clean(&flags) {
             return Err(diag(
@@ -960,6 +1013,7 @@ impl<'o> Exec<'o> {
                 ),
             ));
         }
+        self.state.target_release(&flags);
         Ok(())
     }
 }
@@ -1356,6 +1410,28 @@ pub fn execute_action_with_idle(
     ) {
         return Err(diag("5.3", format!("@{name} is not an action")));
     }
+    // §9.4: an idle designation excludes the entire active interface and
+    // effective control context, even when no instruction happens to borrow.
+    let active = muts
+        .iter()
+        .chain(ins_b)
+        .flatten()
+        .copied()
+        .chain(mems.iter().flat_map(|r| r.cells.iter().flatten().copied()))
+        .chain(inherited_pred.iter().copied())
+        .collect::<BTreeSet<_>>();
+    let unique = idle.iter().copied().collect::<BTreeSet<_>>();
+    if unique.len() != idle.len()
+        || idle.iter().any(|w| {
+            *w >= state.next_wire
+                || active.contains(w)
+                || (state.target.is_some() && !state.wire_classes.contains_key(w))
+        })
+    {
+        return Err(
+            "§9.4: invalid designated idle set (duplicates, nonlive or active interface)".into(),
+        );
+    }
     let mut bundles: HashMap<String, Vec<usize>> = HashMap::new();
     for (p, wires) in f.lists[0].iter().zip(muts.iter()) {
         bundles.insert(p.name.clone(), wires.clone());
@@ -1725,7 +1801,7 @@ pub fn execute_perm_basis(
 }
 
 impl QuantumState {
-    pub(crate) fn target_alloc(&mut self, n: usize, requested: &str) -> Result<Vec<usize>, String> {
+    pub fn target_alloc(&mut self, n: usize, requested: &str) -> Result<Vec<usize>, String> {
         let class = if let Some(t) = &self.target {
             let mut used = BTreeMap::new();
             for c in self.wire_classes.values() {
@@ -1751,39 +1827,150 @@ impl QuantumState {
             self.wire_classes.remove(w);
         }
     }
-    pub fn emit_target_gate(&mut self, g: crate::target::Gate) -> Result<(), String> {
-        let target = self.target.clone().ok_or("§8: no target installed")?;
-        let lowered = target.lower(&g, &crate::target::Rational::zero(), None)?;
-        if lowered.dirty && lowered.ancillae > 0 {
-            return Err("unimplemented: designated dirty target-scheme pool (milestone 4); §9.4 requires caller designation".into());
+    /// Install a target before allocating any live simulator wires.
+    pub fn set_target(&mut self, target: crate::target::Target) -> Result<(), String> {
+        if self.next_wire != 0 || self.target.is_some() {
+            return Err("§8: target must be installed before wire allocation".into());
         }
-        let base = g
+        self.target = Some(std::sync::Arc::new(target));
+        Ok(())
+    }
+    /// Actual execution accounting, separate from the milestone-5 estimate ABI.
+    pub fn target_accounting(&self) -> Result<crate::json::Json, String> {
+        self.target
+            .as_ref()
+            .ok_or("§8: no target installed")?
+            .account(&self.events, &self.live)
+    }
+    pub fn target_error(&self) -> crate::target::Rational {
+        self.emitted
+            .iter()
+            .fold(crate::target::Rational::zero(), |a, l| a.add(&l.epsilon))
+    }
+    fn record_event(
+        &mut self,
+        duration: crate::target::Rational,
+        wires: Vec<usize>,
+        cost: BTreeMap<String, crate::target::Rational>,
+        dirty: &[usize],
+    ) {
+        let end = self.time.add(&duration);
+        // Slice each live wire at event boundaries. Borrowing replaces its
+        // owner's rate in this slice; it never allocates a second physical wire.
+        for (w, class) in &self.wire_classes {
+            self.live.push(crate::target::LiveInterval {
+                wire: *w,
+                class: class.clone(),
+                start: self.time.clone(),
+                end: end.clone(),
+                dirty: dirty.contains(w),
+            });
+        }
+        self.events.push(crate::target::Event {
+            start: self.time.clone(),
+            duration,
+            wires,
+            cost,
+        });
+        self.time = end;
+    }
+    pub(crate) fn classical_event(&mut self) -> Result<(), String> {
+        if let Some(t) = &self.target {
+            let duration = crate::target::number(crate::target::field(
+                crate::target::field(&t.document, "capabilities")?,
+                "classical_step_time",
+            )?)?;
+            self.record_event(duration, vec![], BTreeMap::new(), &[]);
+        }
+        Ok(())
+    }
+    pub fn emit_target_gate(&mut self, g: crate::target::Gate) -> Result<(), String> {
+        self.emit_target_gate_with(g, &crate::target::Rational::zero(), None, &[])
+    }
+    /// Execute a resolved gate request. Only the explicit caller idle pool may
+    /// supply dirty scheme scratch (§9.4). The choice/share are not a schedule.
+    pub fn emit_target_gate_with(
+        &mut self,
+        g: crate::target::Gate,
+        eps: &crate::target::Rational,
+        choice: Option<&str>,
+        idle: &[usize],
+    ) -> Result<(), String> {
+        let target = self.target.clone().ok_or("§8: no target installed")?;
+        for (w, c) in g.controls.iter().chain(&g.targets).zip(&g.classes) {
+            if self.wire_classes.get(w) != Some(c) {
+                return Err("§8.3: gate class differs from allocated wire class".into());
+            }
+        }
+        let lowered = target.lower(&g, eps, choice)?;
+        let operands = g
             .controls
             .iter()
             .chain(&g.targets)
-            .max()
             .copied()
-            .unwrap_or(0)
-            + 1;
-        let anc = if lowered.ancillae > 0 {
+            .collect::<BTreeSet<_>>();
+        let base = operands.iter().max().copied().unwrap_or(0) + 1;
+        let anc = if lowered.dirty && lowered.ancillae > 0 {
+            let unique = idle.iter().copied().collect::<BTreeSet<_>>();
+            if unique.len() != idle.len()
+                || idle
+                    .iter()
+                    .any(|w| !self.wire_classes.contains_key(w) || operands.contains(w))
+            {
+                return Err(
+                    "§9.4: invalid designated idle set (duplicates, nonlive or active operand)"
+                        .into(),
+                );
+            }
+            let anc = idle
+                .iter()
+                .copied()
+                .filter(|w| self.wire_classes.get(w) == lowered.ancilla_class.as_ref())
+                .take(lowered.ancillae)
+                .collect::<Vec<_>>();
+            if anc.len() != lowered.ancillae {
+                return Err(
+                    "§9.4: designated idle set lacks target-scheme wires of requested class".into(),
+                );
+            }
+            anc
+        } else if lowered.ancillae > 0 {
             self.target_alloc(lowered.ancillae, lowered.ancilla_class.as_deref().unwrap())?
         } else {
             vec![]
         };
-        for mut leaf in lowered.leaves {
-            // Scheme scratch IDs are relative to the logical operation, not global simulator IDs.
+        // Validate the fully remapped leaves before the first quantum change.
+        let mut leaves = lowered.leaves;
+        for leaf in &mut leaves {
             for w in leaf.gate.controls.iter_mut().chain(&mut leaf.gate.targets) {
                 if *w >= base {
                     *w = anc[*w - base];
                 }
             }
+        }
+        for leaf in leaves {
             self.apply_leaf(&leaf.gate)?;
+            let wires = leaf
+                .gate
+                .controls
+                .iter()
+                .chain(&leaf.gate.targets)
+                .copied()
+                .collect();
+            self.record_event(
+                leaf.cost["time"].clone(),
+                wires,
+                leaf.cost.clone(),
+                if lowered.dirty { &anc } else { &[] },
+            );
             self.emitted.push(leaf);
         }
-        if !self.is_clean(&anc) {
-            return Err("§8.3: target scheme left clean ancillae nonzero".into());
+        if !lowered.dirty {
+            if !self.is_clean(&anc) {
+                return Err("§8.3: target scheme left clean ancillae nonzero".into());
+            }
+            self.target_release(&anc);
         }
-        self.target_release(&anc);
         Ok(())
     }
     fn apply_leaf(&mut self, g: &crate::target::Gate) -> Result<(), String> {

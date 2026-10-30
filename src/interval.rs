@@ -252,3 +252,138 @@ pub fn channel(
     }
     positive_definite(&trace, d, p)
 }
+
+fn threshold(p: usize) -> Result<R, String> {
+    let bits = p.checked_add(2).ok_or("host limit: interval precision")?;
+    // Exact binary rational, never a floating-point epsilon.
+    let mut d = R::from(1);
+    for _ in 0..bits {
+        d = d.mul(&R::from(2));
+    }
+    R::from(1).div(&d)
+}
+/// Outward π enclosure from Machin's formula. The alternating arctan tail is
+/// bounded by its next term; each arithmetic result rounds outward at p bits.
+pub fn pi(p: usize) -> Result<Interval, String> {
+    Interval::new(R::zero(), R::zero(), p)?;
+    fn atan_inverse(q: u64, p: usize) -> Result<Interval, String> {
+        let x = R::from(1).div(&R::from(q))?;
+        let xx = x.mul(&x);
+        let mut power = x;
+        let eps = threshold(p)?.div(&R::from(32))?;
+        let mut sum = Interval::exact(0, p);
+        let mut n = 0u64;
+        loop {
+            let term = power.div(&R::from(2 * n + 1))?;
+            let term = Interval::new(term.clone(), term, p)?;
+            sum = if n.is_multiple_of(2) {
+                sum.add(&term)
+            } else {
+                sum.sub(&term)
+            };
+            power = power.mul(&xx);
+            n = n.checked_add(1).ok_or("host limit: pi series")?;
+            let next = power.div(&R::from(2 * n + 1))?;
+            if next < eps {
+                return Ok(sum.add(&Interval::new(R::zero().sub(&next), next, p)?));
+            }
+        }
+    }
+    Ok(atan_inverse(5, p)?
+        .mul(&Interval::exact(16, p))
+        .sub(&atan_inverse(239, p)?.mul(&Interval::exact(4, p))))
+}
+/// Enclose sin and cos of an exact rational angle by reduced-angle Taylor
+/// series. The first omitted nonzero term's Lagrange bound must be <2^-(p+2).
+/// Reduction uses a rigorously enclosed π; any chosen integral turn is valid.
+pub fn sin_cos(theta: &R, p: usize) -> Result<(Interval, Interval), String> {
+    let pi = pi(p)?;
+    let tau = pi.mul(&Interval::exact(2, p));
+    let midpoint = tau.lo.add(&tau.hi).div(&R::from(2))?;
+    let turns = theta
+        .div(&midpoint)?
+        .sub(&R::from(1).div(&R::from(2))?)
+        .ceil();
+    let x = Interval::new(theta.clone(), theta.clone(), p)?.sub(&tau.mul(&Interval::new(
+        turns.clone(),
+        turns,
+        p,
+    )?));
+    let x2 = x.square();
+    let radius =
+        x.lo.clone()
+            .max(R::zero().sub(&x.lo))
+            .max(x.hi.clone())
+            .max(R::zero().sub(&x.hi));
+    let radius2 = radius.mul(&radius);
+    let eps = threshold(p)?;
+    fn series(
+        x: &Interval,
+        x2: &Interval,
+        radius: &R,
+        radius2: &R,
+        eps: &R,
+        sine: bool,
+        p: usize,
+    ) -> Result<Interval, String> {
+        let mut term = if sine {
+            x.clone()
+        } else {
+            Interval::exact(1, p)
+        };
+        let mut sum = term.clone();
+        let mut remainder = if sine { radius.clone() } else { R::from(1) };
+        let mut degree = if sine { 1u64 } else { 0 };
+        loop {
+            let a = degree.checked_add(1).ok_or("host limit: Taylor degree")?;
+            let b = degree.checked_add(2).ok_or("host limit: Taylor degree")?;
+            let divisor = R::from(a).mul(&R::from(b));
+            remainder = remainder.mul(radius2).div(&divisor)?;
+            // The bound uses the first nonzero omitted term: intervening zero
+            // coefficients are included in the Taylor polynomial (§17 item 8).
+            if remainder < *eps {
+                return Ok(sum.add(&Interval::new(R::zero().sub(&remainder), remainder, p)?));
+            }
+            term = term
+                .mul(x2)
+                .div(&Interval::new(divisor.clone(), divisor, p)?)?
+                .neg();
+            sum = sum.add(&term);
+            degree = b;
+        }
+    }
+    Ok((
+        series(&x, &x2, &radius, &radius2, &eps, true, p)?,
+        series(&x, &x2, &radius, &radius2, &eps, false, p)?,
+    ))
+}
+/// §4.4 rx/ry/rz entries from checker-computed sin/cos enclosures of θ/2.
+pub fn rotation(axis: &str, theta: &R, p: usize) -> Result<Vec<Complex>, String> {
+    let (s, c) = sin_cos(&theta.div(&R::from(2))?, p)?;
+    let zero = Interval::exact(0, p);
+    let real = |v: Interval| Complex {
+        re: v,
+        im: zero.clone(),
+    };
+    let imaginary = |v: Interval| Complex {
+        re: zero.clone(),
+        im: v,
+    };
+    let cplx = |a: Interval, b: Interval| Complex { re: a, im: b };
+    Ok(match axis {
+        "rx" => vec![
+            real(c.clone()),
+            imaginary(s.neg()),
+            imaginary(s.neg()),
+            real(c),
+        ],
+        "ry" => vec![real(c.clone()), real(s.neg()), real(s), real(c)],
+        "rz" => vec![
+            cplx(c.clone(), s.neg()),
+            Complex::integer(0, p),
+            Complex::integer(0, p),
+            cplx(c, s),
+        ],
+        _ => return Err("§4.4: rotation must be rx, ry or rz".into()),
+    })
+}

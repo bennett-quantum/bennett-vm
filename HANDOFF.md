@@ -1,50 +1,42 @@
-Certificate/report follow-up active (bennett-vm-abx). Read PROGRESS.md top.
-Coverage now owns and returns the producer report; missing coverage names
-bennett-driver. Claims have independent replay and interval algebra, but
-executable schedule contexts still reject b-isa-spec-8r4. Full estimate request
-semantics blocked additionally by bennett-vm-hsd (isa-0.9); errors name
-bennett-estimate. Focused gates green; final integration/gates follow.
+Certificate/report follow-up — 2026-10-30. Read docs/PROGRESS.md top.
 
-Milestone 5 JIT VERIFIED 2026-10-30; epic bennett-vm-npe completed.
-Read docs/PROGRESS.md top section for full evidence, counting limits and JIT modes.
+Completed available paths (child bennett-vm-abx.1); parent abx remains BLOCKED
+on 47t / hsd / clw. Commits ea640cf and 8925d45, then enclosure/final evidence
+follow-up. No push or Dolt remote sync; sole implementer, std-only.
 
-Implemented ISA 0.8 §5.7 inlining, structure/CFG continuation recovery, private
-dispatch re-indexing and block-local integer folding. Logical rows/call records,
-canonical lift.label values, budget/fault boundaries and source history survive.
-Native codegen for x86-64 Linux emits direct-threaded CC/R and oracle segments
-and nine integer kernels. Runtime helpers retain arbitrary-width data, complex
-rows, Q simulation and history. No dependency, reference code or scheduler policy.
+Implemented independent exhaustive full-tuple table/program replay (including
+oracle input/target/fault, all region cells and dirty bundles); full D gives
+proof, partial D and sampled replay give evidence with exact counts/fractions.
+Sampling uses xoshiro256** rejection with least-significant word first.
+Structural translation checks actual points, full frame, effective predicates,
+V/W/reverse sequences and side conditions. Adjoint table is checked against
+§5.3, not promoted to an oracle proof. Library claims replay with cycle checks;
+verification indices and obligation kinds are checked. qinplace proves both
+compositions and FAULT_NONE on every input under tk before allocating workspace.
 
-BENNETT_VM_ENGINE=jit opts in (CLI and C library); interpreter is default.
-Individual pass modes inline/structure/reindex/simplify and combined optimised
-are available. BENNETT_JIT_AUDIT=1 reports native entries/callbacks/kernels.
-Code mappings are RW then RX; native ABI errors/panics propagate safely.
-Other hosts and unknown engines fail explicitly. No speed claim was measured.
+Interval algebra: exact-rational outward significant-binary rounding, phase-
+sensitive Frobenius bounds, complex Hermitian LDL† strictly positive pivots,
+unnormalised Choi dual/partial trace, enclosed pi and reduced-angle Taylor
+sin/cos with Lagrange remainder, rx/ry/rz matrices. These helpers do NOT
+constitute acceptance of a producer-supplied matrix or executable certificate.
+Executable contexts/realised matrices/composition require ref@0.8 and reject
+explicitly naming b-isa-spec-8r4 / bennett-vm-47t (§11/§12.1).
 
-Final gates:80 Rust tests,160 launch C checks,15 sched exports,21,888 row inverses;
-fmt/strict Clippy/diff clean. All tests run in interpreter-default and JIT modes.
-1,235/1,235 comparisons agree per individual pass, composition and JIT; zero
-divergences. 75 distinct object images,1,209 JSON/26 diagnostics. Of those,
-718 invocations/68 images actually enter native segments (718 agree/0 diverge);
-517 are identity/validation,pure-Q,literal-debug or pre-execution diagnostics.
-All12 fixtures and both spec examples remain included; six new object witnesses
-exercise canonical labels,indirect faults,parallel moves,loops,folds and prefixes.
-Raw logs .tmp/m5-final-tests.log,.tmp/m5-final-all-jit.log,.tmp/m5-final-clippy.log.
+Coverage returns validated producer §13 JCS in a separate owner; pointers
+survive program unload. Missing coverage names bennett-driver. Estimate_run
+validates region/token/target, issues no fake estimate/certificate, and names
+bennett-estimate. New isa-0.9 blockers: hsd (parameters, per-class decimal
+encoding, rational rounding) and clw (sampled relation/default, standalone
+claim parameter/table binding). Interpreter default and BENNETT_VM_ENGINE=jit
+retain prior semantics. No capability is removed from NorthStar scope.
 
-Published JIT conformance (unchanged runner,exit2):445 PASS/0 FAIL/46 UNAVAILABLE.
-Per-suite pass/fail/unavailable:A21/0/0 B35/0/0 C339/0/0 D7/0/5 E0/0/16
-F33/0/2 G10/0/13 H0/0/10. Interpreter mode has the identical verdict.
-No published fixture or expected value changed,no new ISA gap found.
+Final evidence: see PROGRESS for the completed test logs, differential counts
+and unchanged raw conformance. H remains 0 PASS/0 FAIL/10 UNAVAILABLE because
+the read-only runner has no scenario/API adapter. Direct tests retain all ten
+H scenarios and assert rule-citing refusal; no unavailable case is called pass.
 
-M4 parent v23 remains BLOCKED on47t(unpublished §11 ref library) and cxg(undefined
-eps_decade). Full lifted/oracle target decomposition,non-native memory comparators,
-verbatim schedules,scheduled accounting/reproducibility still fail explicitly as
-milestone4. Estimates,rigorous certificates and coverage remain explicit errors;
-native codegen does not implement them. No North-Star scope reduction.
-
-Next:finish M4 after the expansion/index contracts publish; preserve the new JIT
-obligations when implementing those paths. Stay on accepted ISA0.8 until a
-maintainer-authorized version migration. Headless/offline,TMPDIR under .tmp,
-absolute paths,path-scoped commits,BEADS_HOOK_TIMEOUT=20; no push,Dolt sync or
-foreign edits. Current session begins with c6d826c; final follow-up commit adds
-the expanded boundary corpus and final records.
+Continue by publishing the expansion library and resolving hsd/clw, then wire
+all invocation contexts into interval acceptance and bennett-estimate requests.
+Existing M4 eps_decade blocker cxg also remains. Headless/offline, TMPDIR under
+.tmp, absolute paths, path-scoped commits, BEADS_HOOK_TIMEOUT=20; no foreign
+source edits, no push or Dolt sync.

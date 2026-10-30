@@ -69,3 +69,28 @@ fn every_endpoint_rounds_outward_at_declared_precision() {
     assert_eq!(x.hi, "-0.3125".parse().unwrap());
     assert!(Interval::new(R::from(1), R::zero(), 64).is_err());
 }
+
+#[test]
+fn rigorous_transcendentals_and_rotation_matrices() {
+    // §12.1 / §17(8): outward pi enclosure, reduced-angle Taylor series with
+    // Lagrange remainder below 2^-(p+2). Check independent rational brackets.
+    let pi = interval::pi(64).unwrap();
+    assert!(pi.lo > "3.14159265358979323".parse().unwrap());
+    assert!(pi.hi < "3.14159265358979324".parse().unwrap());
+    let (s, c) = interval::sin_cos(&R::zero(), 64).unwrap();
+    assert_eq!(s.lo, R::zero());
+    assert_eq!(s.hi, R::zero());
+    assert_eq!(c.lo, R::from(1));
+    assert_eq!(c.hi, R::from(1));
+    let (s, c) = interval::sin_cos(&R::from(1), 64).unwrap();
+    assert!(s.lo > "0.8414709848078964".parse().unwrap());
+    assert!(s.hi < "0.8414709848078966".parse().unwrap());
+    assert!(c.lo > "0.5403023058681396".parse().unwrap());
+    assert!(c.hi < "0.5403023058681399".parse().unwrap());
+    // rx(0), ry(0), rz(0) give exactly I, including signs of imaginary parts.
+    for axis in ["rx", "ry", "rz"] {
+        let m = interval::rotation(axis, &R::zero(), 64).unwrap();
+        let identity = vec![z("1", "0"), z("0", "0"), z("0", "0"), z("1", "0")];
+        interval::numerical(&m, &identity, 2, 64, &R::zero()).unwrap();
+    }
+}

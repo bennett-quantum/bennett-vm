@@ -1,26 +1,182 @@
-# Certificate/report implementation in progress — 2026-10-30
+# Certificate and launch-report follow-up — 2026-10-30
 
-Bead bennett-vm-abx claimed. Initial red logs .tmp/cert-red.log,
-.tmp/reports-red.log, .tmp/oracle-cert-red.log, .tmp/interval-red.log.
-Focused green: four certificate, four interval algebra and three launch report
-checks. Full gates and verification-reference integration follow in this session.
-No other repository changed; no push or Dolt sync; no dependencies.
+Available implementation: **bennett-vm-abx.1**. Parent **bennett-vm-abx** remains
+**BLOCKED** on 47t (b-isa-spec-8r4), hsd and clw. This is not a claim that full
+scheduled certificates or resource estimates are implemented. No source outside
+this repository was edited, no reference implementation source was read/copied/
+linked, no dependency was added, no push or Dolt remote synchronization occurred.
+Commits `ea640cf` (replay/algebra/coverage), `8925d45` (executor/reference checks),
+then the enclosure and final-evidence follow-up.
 
-Implemented full-tuple table/program replay, exact phase/workspace checks,
-partial-domain/evidence labels, xoshiro256** rejection sampling, literal oracle
-compute/commit/inverse replay, translation witnesses and inverse pair totality.
-Interval algebra uses outward-rounded significant binary rational endpoints,
-complex Hermitian LDL† strictly positive pivots, Frobenius comparisons and the
-SDP dual with unnormalised Choi/partial trace. These algebraic checks alone do
-not establish an executable claim: schedule contexts require ref@0.8, still
-unpublished (b-isa-spec-8r4 / bennett-vm-47t). No realised matrix is trusted.
+## Implemented claims and exact obligations
 
-Coverage copies validated producer entries, preserves canonical bytes and owns
-its accessors independently of the program. Missing source coverage names
-bennett-driver. Estimate request validates region/token/target and rejects
-missing contracts explicitly; bennett-vm-hsd (isa-0.9) records absent resolved
-classical arguments, per-class scalar encoding and rational-decimal rounding.
-No basis simulator result is presented as a padded resource estimate.
+- `certificate::verify_claim` independently replays exhaustive table/program
+  comparisons. Full ABI tuples include inputs, arbitrary initial targets/faults,
+  dirty bundles and every interface cell; zero workspace and exact phase are
+  checked, not merely displayed binary64 basis values. Oracle replay uses the
+  literal bounded machine, commits XOR payload/code, then reverses all B frames.
+  §12.1: “re-execute every domain element … compare full tuples”.
+- Only exhaustive D gives `Proof`; partial domains and sampled replay give
+  `Evidence`, with exact integer counts/fractions. xoshiro256** uses §12.1's
+  rejection sampling, least-significant word first, declared component order,
+  inclusive bounds and zero words for singleton ranges. Sampled coverage counts
+  distinct sampled elements; sampling never becomes proof even if it covers D.
+  §12.2: “A proof label requires the domain to equal D”.
+- Structural translation witnesses name actual §9.2 point tuples. The checker
+  resolves the complete frame, V/W lists, reverse V/repeated W, dirty wires,
+  effective predicates and every §5.6 side condition. The existing independent
+  per-lifetime full-domain fallback remains; no later cancellation can repair an
+  earlier bad borrow frame. §5.6: “P_F = P′ ⊗ I_B”.
+- `adjoint_table` checks the admitted §5.3 instructions and already-validated
+  type/bound/lifetime/control conditions. It proves the adjoint transformation,
+  not an expected oracle permutation. `inverse_pair_library` resolves actual
+  closure hashes and replays the library claim, with cycle detection; no producer
+  proof label is trusted. Verification indices, subclaim cycles and obligation
+  kinds are checked: an adjoint proof cannot discharge `verification.oracle`,
+  and evidence cannot discharge a proof obligation.
+- `inverse_pair` and `borrow_frames` are §12.3 verification references, **not**
+  invented claim kinds. Before qinplace allocates workspace, independently
+  enumerate both oracle compositions and require FAULT_NONE on every input under
+  tk. §4.5: “g∘ginv = ginv∘g = id”, fault-free “on every input”.
+- Embedded certificates are no longer ignored at Q/oracle execution: bindings
+  and claims are checked before mutation. Executable numerical/channel and
+  expected-oracle claims require an actual matching root schedule hash and
+  refuse unpublished ref@0.8, naming **b-isa-spec-8r4 / bennett-vm-47t**.
+  §12.1: “the claim holds iff it holds for every context”; §11: a consumer not
+  implementing the bound library rejects E_SCHEDULE_INFEASIBLE. No template
+  fixture matrix or unscheduled simulator run is substituted for a realisation.
+
+## Rigorous algebra, distinct from executable-claim acceptance
+
+`interval` implements exact-rational endpoints rounded outward to the requested
+significant binary precision after interval operations. It computes V†U−I and
+compares the Frobenius upper bound (squared, equivalently, against bound²),
+preserving global phase. The channel dual uses unnormalised input-first Choi
+ordering, partial trace over output, and complex Hermitian LDL†; every pivot's
+lower bound must be strictly positive, including the mu-I partial-trace check.
+Zero/inconclusive pivots reject; diag(0,−1) rejects, as §12.1 explicitly requires.
+
+π is enclosed using Machin's formula and an alternating-series tail bound;
+argument reduction uses that outward enclosure and an integral turn. Taylor
+sin/cos stops at the first omitted-term Lagrange bound below 2^−(p+2), per §17(8).
+rx/ry/rz matrices use the enclosed θ/2 values. Tests derive exact zero matrices,
+the Y=I4/16, mu=3/16 dual, zero pivots, complex pivots, four-bit rounding and
+independent rational sin/cos brackets. These helpers accept **checker-built**
+matrices as Rust inputs; they are not a certificate interchange accepting producer
+matrices. Building realised/reference matrices at **all scheduled contexts** and
+multiplicity composition remain blocked on the expansion library. No numerical
+or channel executable certificate is currently accepted.
+
+## Launch estimate and coverage behavior
+
+`bennett_coverage_get/jcs/free` returns an owned, canonical copy of the object's
+§13 report. Entry classifications/schema/counts and actual §9.2 point identities
+are validated; data symbols and nonexistent blocks/ordinals reject. Accessor
+bytes survive program unload until coverage_free (§10 ownership sentence).
+Missing source coverage explicitly names **bennett-driver**, instead of inventing
+an empty/lowered report. Empty producer coverage is supported and tested.
+
+Estimate request checks program, region, program-scoped token and matching
+region, then target. Accessor/null ownership behavior is implemented. **No
+successful estimate or estimate certificate is issued** while required request
+contracts are absent. The error names **bennett-estimate**; padded oracle paths
+also name **b-isa-spec-8r4**. No T-count/depth, summed class peak, timing or other
+quantity absent from the target is fabricated. Existing §8 exact target-table /
+leaf-event accounting remains separately tested, not mislabeled an estimate.
+
+New gaps filed here with label **isa-0.9**:
+
+- **bennett-vm-hsd:** §10 declares estimate_run(program, region, token, out),
+  without classical arguments; estimate_get exposes name/value_decimal while
+  §8.2 requires occupancy/peak **per class**. No class encoding or rounding of
+  a permitted rational such as 1/3 is specified. Needs argument/default binding,
+  resource-vector encoding and decimal precision/rounding in the contract.
+- **bennett-vm-clw:** §12.1's sampled payload lists domain/sampler but no expected
+  relation/default; non-scheduled claim argument/budget binding and table tuple
+  encoding are also absent. The independent Rust replay adapter requires an
+  explicit comparison and resolved args/budget, rather than claiming a new
+  canonical interchange. Missing sampled comparison explicitly names clw and
+  bennett-driver. Scheduled requests additionally require ref@0.8.
+
+NorthStar §5 certificates and @cost, and §8 padded SQLite/kernel estimates, remain
+in scope. These are blockers to mechanics, not reductions of the north star.
+
+## Verification and corpus
+
+**101 Rust tests, zero failures/ignored**, headless/offline in interpreter and
+JIT-selected modes. Includes 10 certificate, five interval, four report tests,
+the added differential group and all-ten-H refusal group. Retains **160 launch C
+checks**, all **15 scheduler exports**, and **21,888 row inverse checks**.
+Formatting, strict all-target Clippy and diff checks pass. Final logs:
+`.tmp/cert-release-interpreter.log`, `.tmp/cert-release-jit.log`; focused final
+obligations in `.tmp/cert-focused-{interpreter,jit}.log` and enclosure logs.
+
+**1,519 / 1,519 reference comparisons agree per mode, zero divergences**:
+1,493 JSON and 26 diagnostics; **77 distinct object byte images**, including all
+12 fixtures and both independently extracted spec examples. Every request also
+compares four individual passes, composition and JIT against the interpreter:
+**9,114** transformation comparisons. **1,002** JIT invocations on **70** images
+actually enter native segments (1,002 agree, zero diverge); the remaining 517
+are identity/debug/pure/pre-execution paths. Existing opaque memory fingerprint
+exclusion and phase-sensitive binary64 display tolerance remain unchanged.
+
+| Command | Comparisons |
+|---|---:|
+| check | 72 |
+| hash | 16 |
+| run-oracle | 383 |
+| run-cc | 120 |
+| reverse | 415 |
+| run-action | 357 |
+| step-check | 64 |
+| run-program | 92 |
+
+The new 284 requests are 24 inverse-pair/budget oracle calls, four in-place
+permutations and every one of 256 input/target/fault tuples for oracle_tuple.
+The reference serves these requests through existing CLI commands; it serves
+**no certificate verdict, estimate or coverage request CLI**, so no invented
+command/differential verdict is counted. Direct API tests carry those obligations.
+
+Published harness runs unchanged, in both engine modes, exit **2**:
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A | 21 | 0 | 0 | 21 |
+| B | 35 | 0 | 0 | 35 |
+| C | 339 | 0 | 0 | 339 |
+| D | 7 | 0 | 5 | 12 |
+| E | 0 | 0 | 16 | 16 |
+| F | 33 | 0 | 2 | 35 |
+| G | 10 | 0 | 13 | 23 |
+| H | 0 | 0 | 10 | 10 |
+| **all** | **445** | **0** | **46** | **491** |
+
+Raw reports: `.tmp/conformance-interpreter.log`, `.tmp/conformance-jit.log`.
+The read-only runner returns UNAVAILABLE for no-command scenarios and retains
+that classification even when a probe's precise refusal succeeds. Direct H tests
+retain all ten cases; available selectors/defaults/paths/capacity/timing are
+covered by existing independent witnesses, and unsupported requests/schedules
+fail with §11 and E_SCHEDULE_INFEASIBLE. They are not ten promoted H passes.
+D scenario JSON are templates (missing bound subject hashes, and a symbolic Y
+string), not executable claims to accept verbatim. Local matrix witnesses check
+their mathematical derivations; actual schedule-dependent claims fail loudly.
+
+**Remaining reference divergences: none.** New blockers above cite the deciding
+sentences rather than changing expected values. Initial red logs:
+`.tmp/cert-red.log`, `.tmp/reports-red.log`, `.tmp/oracle-cert-red.log`,
+`.tmp/cert-references-red.log`, `.tmp/adjoint-red.log`, `.tmp/transcendental-red.log`.
+The interval module-export red was reproduced after the first algebra draft;
+that is not claimed as a pristine pre-implementation failure. A new differential
+initially used comma-splitting --args for a token and both binaries refused;
+the harness correctly rejected agreement-on-refusal, and --arg now reaches
+actual execution. No published fixture, case or expected value was edited.
+
+Observed ISA checkout HEAD `738b233d17f4d19351fde6fcb6e454f900d5b450`.
+Separate observed executable SHA-256 fingerprints (external binaries are never
+claimed rebuilt from checkout HEAD): reference
+`17ec0463391db3503ad61e334d71066a6457d59bec80becb2d2fd002b9651e90`;
+conformance `267079641cfae28432a82a0deddf2b03b2f09372fd3215ff1aa3704464e41189`;
+VM `f0e6320f2cd7fdd6b36567938f5372c2e5dcbaa13487208d0c1443fa4d066427`.
 
 # Milestone 5 JIT verified — 2026-10-30
 

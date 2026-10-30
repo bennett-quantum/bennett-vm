@@ -22,6 +22,7 @@ in `docs/PROGRESS.md` first.
 | `action` | small state-vector simulator for Q actions reached from CC/R region calls; basis/branch execution of permutation actions for `lift.perm_call` | §4.3–§4.7, §5.3, §14.2 |
 | `cc` | classical-control + reversible executor: dynamic SSA, §7.1 memory, §7.3 devices/tapes, §7.4 history/`uncall`/reversal, `qreg` handles, `hostcall`, `measure` | §3.4, §4.1, §7 |
 | `launch` | one-shot §10 launch behind `run-program`; later the full opaque-object C ABI | §10 |
+| `certificate` / `interval` | Independent claim replay, typed verification indices, structural/library graph checks, inverse pair totality; rigorous interval/Taylor/matrix algebra; executable scheduled claims explicitly blocked on ref@0.8 | §4.5, §5.6, §12 |
 | `main` | CLI with the reference interpreter's command names and JSON shapes for implemented commands | §10, ref README |
 
 Milestone 3 adds `step`/`stepcli` (literal §3.6/§3.7 machine), `exact`
@@ -110,3 +111,25 @@ unset, `TMPDIR` = this repo's `.tmp/`). The differential harness is
 the gate: a fixture counts as agreeing only when the compared fields
 match the reference binary exactly, and divergences are reported in
 `docs/PROGRESS.md` with the spec sentence that decides who is right.
+
+## Certificate and report follow-up (2026-10-30)
+
+`bennett-vm-abx` remains blocked on 47t, hsd and clw. Available work is
+tracked separately by abx.1. No prior milestone is silently redefined to claim
+full scheduled certificates or estimates.
+
+Independent Rust replay accepts caller-resolved arguments/budget; table tuples
+use ABI bundle order, dirty bundles in allocation order, then region cells.
+Domains enumerate in their declared order, last component fastest. These API
+conventions do not invent missing interchange/default contracts (clw).
+`inverse_pair` and `borrow_frames` are verification references, not extra claim
+kinds. Structural adjoints prove the table transformation, never an expected
+oracle relation. Matrix algebra is separate from executable-claim acceptance.
+
+Executable numerical/channel/expected-oracle claims, root-schedule contexts,
+realisation construction and multiplicity composition require b-isa-spec-8r4.
+Complete estimates additionally require hsd: resolved parameters, per-class
+scalar-accessor encoding and nonterminating-rational decimal policy.
+Source coverage belongs to bennett-driver; the VM returns the supplied §13
+report as an independently owned JCS object, and rejects absent coverage.
+NorthStar §5/§8 @cost, padded SQLite estimates and certificates remain in scope.

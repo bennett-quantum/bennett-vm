@@ -1,3 +1,124 @@
+# Published unavailable metadata re-baseline — 2026-10-30
+
+Initial published ISA checkout `0b913da`; final observed checkout `5663477`;
+VM starting HEAD `16caaca`. Only published
+spec/fixture data and black-box binaries were used across repository boundaries.
+No ISA files were changed, no dependency added, no push or Dolt sync performed.
+
+Removed exact unavailable-count pins. Exact per-suite PASS pins and FAIL=0
+remain, including all=445; reported totals and unavailable lines must agree.
+Every UNAVAILABLE id resolves to its published case.json with a non-empty
+unavailable.reason and a bead or staged deliverable (8–11). Duplicate outcomes
+fail. The test prints every unavailable id. Exit 2 remains required while any
+case is unavailable; the unchanged harness still fails silently accepted probes.
+No previously runnable case was demoted.
+
+Observed rows in both interpreter and JIT (PASS / FAIL / UNAVAILABLE / TOTAL):
+
+| Suite | Before (recorded baseline) | After (actual published run) |
+|---|---|---|
+| A | 21 / 0 / 0 / 21 | 21 / 0 / 1 / 22 |
+| B | 35 / 0 / 0 / 35 | 35 / 0 / 0 / 35 |
+| C | 339 / 0 / 0 / 339 | 339 / 0 / 1 / 340 |
+| D | 7 / 0 / 6 / 13 | 7 / 0 / 6 / 13 |
+| E | 0 / 0 / 16 / 16 | 0 / 0 / 19 / 19 |
+| F | 33 / 0 / 2 / 35 | 33 / 0 / 4 / 37 |
+| G | 10 / 0 / 14 / 24 | 10 / 0 / 14 / 24 |
+| H | 0 / 0 / 10 / 10 | 0 / 0 / 10 / 10 |
+| all | 445 / 0 / 48 / 493 | 445 / 0 / 55 / 500 |
+
+Initially `0b913da` yielded 445/0/54/499 (E 0/0/18/18). During the gate,
+upstream advanced to `5663477`, adding `E-ref-09-copy-native` with a published
+reason naming b-isa-spec-8r4 / b-isa-spec-cbk / b-isa-spec-8sc. Both engine
+reports accepted the addition without any code/count-pin change and now show
+445/0/55/500. This draft catalog checkpoint is not the complete ref library.
+
+The six originally added pending-0.9 ids are `A-measure-draw-order-09`,
+`C-multiblock-09`, `E-ref-09-qxor-witness`, `E-topology-grid-09`,
+`F-frame-records-09`, `F-ratified-confirmations-09`. Their published reasons
+name b-isa-spec-2c9, b-isa-spec-8r4, b-isa-spec-wr7 and the specific ratifications;
+no 0.9 executor support is claimed by an ISA 0.8 pass.
+
+RED: the original count-pinned test fails on the published suite
+(`.tmp/rebaseline-red.log`). A new scratch-suite regression initially failed
+because the consumer accepted an emptied E-topology-grid-09 unavailable.reason
+(`.tmp/rebaseline-reason-red.log`). GREEN: the completed consumer check rejects
+that whitespace-only reason in a full scratch copy via harness --cases in both
+engine modes, while the unchanged published binary itself still exits 2.
+The published suite passes in both modes (`.tmp/rebaseline-focused.log`);
+the corruption regression remains part of the gate. All scratch copies live
+under this repo's .tmp and successful regression runs clean them up.
+
+## Full gate
+
+All pass: fmt --check, cargo clippy --offline --all-targets -- -D warnings,
+cargo test --offline in interpreter and BENNETT_VM_ENGINE=jit modes, and
+scripts/pre-push. **108 tests pass per full run, zero failures/ignored.**
+All commands run headless/offline with project-local TMPDIR. Logs:
+.tmp/rebaseline-{fmt,clippy,interpreter,jit,pre-push}.log and the gate exit
+summary .tmp/rebaseline-gates.json (all five exits 0). Latest raw reports
+.tmp/conformance-{interpreter,jit}.log both show 445/0/55/500, exit 2.
+The first strict Clippy run flagged nested pattern matching in the scratch
+fixture setup; explicit destructuring fixed it before all final gates passed.
+
+## Unavailable ids (55 observed; no total pin)
+
+- `A-measure-draw-order-09`
+- `C-multiblock-09`
+- `D-channel-diamond-witness`
+- `D-channel-nonpositive-rejected`
+- `D-eps-scheme-realisation`
+- `D-expected-oracle-claim`
+- `D-numerical-operator-norm`
+- `D-sampled-relation-invocation`
+- `E-aggregation`
+- `E-ast-division-by-zero`
+- `E-ast-eps-out-of-range`
+- `E-ast-log2inv`
+- `E-ast-unbound-variable`
+- `E-epsilon-zero-entry`
+- `E-epsilon-zero-exact`
+- `E-imports`
+- `E-jcs-target-hash`
+- `E-matching-first-entry`
+- `E-mbu-must-be-false`
+- `E-ref-09-copy-native`
+- `E-ref-09-qxor-witness`
+- `E-scheme-correctness-negative`
+- `E-scheme-expansion`
+- `E-table-index`
+- `E-target-staged-probe`
+- `E-timing-overlap`
+- `E-topology-grid-09`
+- `F-frame-live-ranges`
+- `F-frame-records-09`
+- `F-link-conflict`
+- `F-ratified-confirmations-09`
+- `G-accessor-lifetimes`
+- `G-argument-kinds`
+- `G-copied-arguments`
+- `G-estimate-and-coverage`
+- `G-estimate-resolved-class-decimal`
+- `G-invocation-tree-postorder`
+- `G-qreg-prepare-unclean`
+- `G-register-exclusive`
+- `G-result-encodings`
+- `G-result-get-small-cap`
+- `G-suspend-resume`
+- `G-tape-64bit-fields`
+- `G-unload-unclosed-run`
+- `G-wait-on-suspended`
+- `H-capacity-peak`
+- `H-defaults-uncovered`
+- `H-mbu-realisation-invalid`
+- `H-path-not-in-object`
+- `H-reproducibility`
+- `H-schedule-staged-probe`
+- `H-specificity-incomparable`
+- `H-timing-violation`
+- `H-unknown-expansion-library`
+- `H-unsupported`
+
 # JCS binary64 number canonicalisation — 2026-10-30 (bennett-vm-ciz)
 
 Implemented RFC 8785 §3.2.2.3 / ES2019 §7.1.12.1 without dependencies.

@@ -1,35 +1,169 @@
-# Milestone 5 JIT implementation — 2026-10-30 (verification in progress)
+# Milestone 5 JIT verified — 2026-10-30
 
-Bead `bennett-vm-npe` claimed. Private source-row graph implements ISA §5.7
-inlining (one level per call site, including recursive callees), CFG continuation
-recovery, private dispatch re-indexing and block-local integer constant folding.
-Reference bodies, canonical label values, row budget units, activation/history
-boundaries and source trace fields remain intact. CC/R and sequential F_B run
-through the graph; x86-64 Linux codegen emits real executable direct-threaded
-control and nine integer arithmetic kernels. Complex rows and arbitrary-width
-integers use the VM runtime helpers; no reference source/dependency is consumed.
-Code mappings transition RW to immutable RX, never RWX. Errors/panics return
-across native frames before propagation. Other hosts fail explicitly as milestone 5.
+Milestone `bennett-vm-npe`: ISA **0.8** §5.7 private executor passes and
+native codegen for the current **x86-64 Linux** host. All previous North-Star
+capabilities remain in scope. M4's 47t/cxg blockers are unchanged; this JIT does
+not invent a target expansion library or implement scheduler/pebbling policy.
+No other repository edited, no reference implementation source read/copied/linked,
+no dependencies added, no push or Dolt remote synchronization.
 
-Selection: `BENNETT_VM_ENGINE=interpreter|inline|structure|reindex|simplify|optimised|jit`;
-interpreter remains default. Optional `BENNETT_JIT_AUDIT=1` reports native runs,
-row callbacks and integer operations to stderr. Pure Q action gates and the
-literal reversible step checker retain their dedicated runtime semantics;
-JIT selection compiles the CC/R and oracle segments they invoke. The audit
-records which invocations actually execute native segments; identity/validation
-commands are compared too, without claiming they execute native code.
+## Passes and their differential obligations
 
-Red: missing JIT module and later missing native integer kernels, logs
-`.tmp/m5-red.log`, `.tmp/m5-arithmetic-red.log`. Green: six focused JIT tests.
-Existing harness is extended at its common invocation point: every invocation
-compares each individual pass, all passes, and native execution byte-for-byte
-with the untransformed VM, then retains its original reference comparison.
-Initial full gate `.tmp/m5-differential.log`: 1,076/1,076 per mode agree,
-zero divergences. Published conformance runs unchanged in both interpreter and
-JIT modes: **445 pass / 0 fail / 46 unavailable**, 491 cases (exit 2).
-Logs `.tmp/conformance-interpreter.log` and `.tmp/conformance-jit.log`.
-Formatting/strict Clippy passed; full Rust and C/JIT stateful gates still pending.
-M4 blockers 47t/cxg stay explicit and unchanged. No push or foreign repository edits.
+- **Inlining:** finite one-level call-site clones of CC/R/lproc bodies, including
+  recursive callees. Calls inside clones continue by ordinary dispatch, not
+  recursive code expansion. Logical call/return rows and their runtime helpers
+  retain §3.7 depth/monotonic-stack limits, argument capture, activation effects,
+  §7.4 dynamic instances and uncall eligibility. A cloned return is linked to
+  its call-site continuation only if the runtime successor matches it.
+- **Structure recovery:** recover straight-line continuations, both explicit
+  branch edges and cyclic CFG continuations as guarded direct-threaded regions.
+  Generated forward/back edges bypass generic dispatch. Indirect jumps, dynamic
+  returns and other unmatched successors use the canonical dispatch map. No
+  assumption of reducibility, input values or a static trip count is needed;
+  the runtime row helper still enforces each reference-row budget boundary.
+- **Dispatch re-indexing:** reverse private node layout and relocate every edge.
+  Dispatch retains an independent canonical-source-to-private-node map. Neither
+  the object nor §3.6 label/index computation changes: §3.6 requires “every label
+  value observable through `lift.label` keeps its canonical numeric value”.
+- **Simplification:** block-local constant propagation/folding of the nine
+  wrapping integer operations, with exact widths and kills for every destination
+  and call boundary. Dataflow resets at every block entry; parallel moves read
+  old sources and invalidate written facts. Folded rows remain individual rows,
+  with original source op/operands/line, step charging and history frames.
+
+Deciding §5.7 sentence: “Inlining, structure recovery, dispatch re-indexing and
+simplification MUST produce on every x ∈ D the same final interface tuple as
+§5.2's construction on the reference body (T6).” §14.1: “the step counter counts
+executed rows”. The private graph never removes a logical row or call boundary.
+For unchanged instructions the proof obligation reduces to guarded continuation
+relocation and identical runtime helpers; folded values follow block-local
+constant facts. Differential/exhaustive tests below check those obligations on
+the recorded domains; they are not a mechanized universal proof for all objects.
+
+## Host codegen and execution boundaries
+
+`src/jit.rs` emits native System V x86-64 direct-threaded row code, calls the
+runtime row helper with its compiled source row, tests the canonical successor
+and branches to private continuations or dispatch. CC/R CLI runs and sequential
+oracle F_B evaluations execute whole segments through this code. Stateful C ABI
+single stepping enters the compiled row and yields at the ordinary instruction
+boundary, preserving HOST_REQUEST, suspension, transactional failures and saved
+snapshots. The nine 1–64-bit integer kernels emit actual host arithmetic/shifts;
+**7,434** independent exhaustive-small-width and boundary pairs compare them
+with interpreter arithmetic, including shift >= width and negative ashr.
+Arbitrary-width values (including 257-bit fixtures), division, comparisons,
+memory, effects, Q simulation and history use the VM's runtime helpers. These
+are deliberate generated calls, not an automatic failed-compilation fallback.
+Other hosts and unknown engine names fail explicitly as milestone 5.
+
+Mappings are RW while emitting, then immutable RX, never RWX; callee-saved
+registers and stack alignment follow the host ABI. Errors and caught panics
+return through generated frames before propagation. Code is shared immutably;
+each invocation owns its callback context. The bounded per-thread cache keys
+all parsed object content, including programmatically extended functions.
+Object hashes, reference bodies and stored identities are untouched.
+
+Select `BENNETT_VM_ENGINE=interpreter|inline|structure|reindex|simplify|optimised|jit`.
+Interpreter remains default; each individual pass and their composition can be
+run without codegen. `BENNETT_JIT_AUDIT=1` writes native-entry, callback and kernel
+counts to stderr. Literal §3.6 diagnostic forward/inverse stepping and pure Q
+gates retain their independent runtime implementations; JIT mode compiles their
+CC/oracle segments. Identity/validation and pure/debug-only commands are not
+claimed to execute a native segment. Kernel counts can include compile-time
+constant folding; callbacks can include a budget-boundary check, so neither is
+reported as a reference-row count. No performance claim is made by these gates.
+
+## Red-green evidence and final gates
+
+Initial red: absent JIT module (`.tmp/m5-red.log`); then absent native integer
+kernels (`.tmp/m5-arithmetic-red.log`). Green: seven focused JIT integration
+checks, covering graph changes, unchanged hashes, folding with retained source
+boundaries, call/block fact barriers, native errors/panics/invalid dispatch,
+integer kernels and explicit unknown-engine rejection. The initial inlining
+witness exposed an unnecessary leaf-only restriction; finite one-level cloning
+now also exercises the recursive sum fixture without unrolling recursion.
+
+The common invocation in `tests/differential.rs` runs every original case in
+interpreter mode, four individual pass modes, combined-pass mode, and JIT mode.
+Each transformed mode must match interpreter stdout, exit status and diagnostic
+text exactly (only the audit line is excluded). The original comparison against
+the CLI reference oracle remains, with its established opaque-memory-digest
+exception and phase-sensitive display tolerance. No reference expected value or
+published fixture was changed. Successful CC/oracle/launch/step-check comparisons
+also require evidence that native entry actually ran.
+
+**80 Rust tests pass, zero failed/ignored**; **160 launch C checks**, all **15
+scheduler exports**, and **21,888 one-row inverse checks** retained. Full test
+suites are run headlessly/offline in interpreter-default and JIT-selected modes.
+Formatting, strict all-target Clippy and `git diff --check` pass.
+Logs: `.tmp/m5-final-tests.log`, `.tmp/m5-final-all-jit.log`,
+`.tmp/m5-final-clippy.log`; machine-readable counts `.tmp/m5-counts.json`.
+
+**1,235 / 1,235 comparisons agree per mode, zero diverge**, across **75 distinct
+object byte images**, including all 12 fixtures and both spec examples.
+1,209 successful JSON comparisons and 26 diagnostics. Six modes give **7,410**
+transformation/interpreter obligations, plus **1,235** reference comparisons.
+Of the JIT-selected invocations, **718** on **68** object images actually enter
+native segments (**718 agree / 0 diverge**); the other 517 compare identity,
+validation, pure actions, literal debug stepping or pre-execution diagnostics.
+Audit totals in this corpus: 2,255 native entries, 10,632 callbacks and 4,698
+integer kernel calls, with the counting limits described above.
+
+| Command | Comparisons |
+|---|---:|
+| check | 72 |
+| hash | 16 |
+| run-oracle | 359 |
+| run-cc | 120 |
+| reverse | 415 |
+| run-action | 97 |
+| step-check | 64 |
+| run-program | 92 |
+
+New reference witnesses exercise wrapping folds, canonical label observations,
+indirect-jump faults, a branch diamond, loop joins, simultaneous parallel moves,
+all listed step-budget cutoffs and every prefix of folded CC history. Five new
+oracle bodies also run exhaustive 8-bit step-check domains. Existing recursive
+activation, heap/stack/depth failures, memory, nested oracle XORs, arbitrary
+initial target/fault registers, predication, exact phase/borrow and device tests
+remain in the same unfiltered harness.
+
+Published conformance is invoked unchanged for **both interpreter and JIT modes**:
+
+| Suite | Pass | Fail | Unavailable | Total |
+|---|---:|---:|---:|---:|
+| A | 21 | 0 | 0 | 21 |
+| B | 35 | 0 | 0 | 35 |
+| C | 339 | 0 | 0 | 339 |
+| D | 7 | 0 | 5 | 12 |
+| E | 0 | 0 | 16 | 16 |
+| F | 33 | 0 | 2 | 35 |
+| G | 10 | 0 | 13 | 23 |
+| H | 0 | 0 | 10 | 10 |
+| **all** | **445** | **0** | **46** | **491** |
+
+Both exit **2**, retaining every unavailable classification. Raw logs:
+`.tmp/conformance-interpreter.log`, `.tmp/conformance-jit.log`.
+**Every remaining divergence: none.** No new ISA gap was found. Existing gaps
+remain filed with label isa-0.9 and their deciding sentences in the M4 evidence.
+
+Observed ISA checkout: `92c26af045b816f5ef1e283a7b734aa244d8f320`.
+Executable SHA-256 fingerprints (external binaries are observed, not rebuilt):
+VM `1f01e2c04901a5bc89a51bb7bb0ba478c1f580b66101760d1dfa4e5a865bfbfe`;
+reference `ceec144ccb47c05ed9c8f2d9372f2bfa690736a73b423c4f7b8727092667f744`;
+conformance `267079641cfae28432a82a0deddf2b03b2f09372fd3215ff1aa3704464e41189`.
+
+## Remaining scope
+
+M5 as PLAN defines it is implemented. M4 remains blocked on the unpublished §11
+reference expansion library (`47t`) and undefined `eps_decade` indexing (`cxg`):
+full lifted/oracle target decomposition, non-native QRAM comparator expansion,
+verbatim scheduled execution, scheduled accounting and reproducibility retain
+explicit `unimplemented: <item> (milestone 4)` errors. Estimates, rigorous
+certificate and coverage APIs retain their explicit milestone-5 errors; they
+are not a claim delivered by native codegen. No North-Star capability is removed.
+
+# Historical milestone-4 evidence
 
 # Milestone 4 independent target work verified — 2026-10-30
 

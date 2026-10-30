@@ -65,6 +65,9 @@ fn raw_run(bin: &Path, args: &[String], mode: &str) -> Output {
 fn run(bin: &Path, args: &[String]) -> Output {
     let baseline = raw_run(bin, args, "interpreter");
     if bin == Path::new(vm()) {
+        let object_hash = std::fs::read(&args[1])
+            .map(|b| bennett_vm::sha256::sha256_hex(&b))
+            .unwrap_or_else(|_| "absent".into());
         for mode in [
             "inline",
             "structure",
@@ -81,11 +84,39 @@ fn run(bin: &Path, args: &[String]) -> Output {
                 show(&baseline),
                 show(&transformed)
             );
+            let without_audit = |output: &Output| {
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .filter(|line| !line.starts_with("JIT_AUDIT "))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            assert_eq!(
+                without_audit(&baseline),
+                without_audit(&transformed),
+                "{mode}: diagnostic changed for {args:?}"
+            );
+            if mode == "jit"
+                && baseline.status.success()
+                && matches!(
+                    args[0].as_str(),
+                    "run-oracle" | "run-cc" | "run-program" | "step-check"
+                )
+            {
+                let stderr = String::from_utf8_lossy(&transformed.stderr);
+                assert!(
+                    stderr
+                        .lines()
+                        .any(|l| l.starts_with("JIT_AUDIT native_runs=")
+                            && !l.starts_with("JIT_AUDIT native_runs=0 ")),
+                    "{args:?}: native execution must actually occur: {stderr}"
+                );
+            }
             if std::env::var_os("BENNETT_HARNESS_COUNTS").is_some() {
                 let audit = String::from_utf8_lossy(&transformed.stderr);
                 let audit = audit.lines().find(|l| l.starts_with("JIT_AUDIT ")).unwrap();
                 eprintln!(
-                    "JIT_HARNESS {mode} {} {} {audit}",
+                    "JIT_HARNESS {mode} {} {} program={object_hash} {audit}",
                     args[0],
                     if transformed.status.success() {
                         "json"
@@ -1466,4 +1497,85 @@ fn block_image_boundaries_differential() {
         "reject incomplete sector before run",
         &s(&["run-cc", path, "effects"]),
     );
+}
+
+#[test]
+fn jit_transformation_boundaries_differential() {
+    // §5.7 T6; §3.6 observable canonical labels; §14.1 every row is a
+    // budget step. These witnesses supplement, never replace, all fixtures.
+    let base = std::fs::read_to_string(fixtures().join("inc8.bisa")).unwrap();
+    let prefix = base.split("regs {").next().unwrap();
+    let bodies = [
+        (
+            "fold-wrap",
+            "regs { one:reg[8], r:reg[8] }\n^entry():\none = lift.const.i8 255\nr = lift.add one one\nlift.retval r\n",
+        ),
+        (
+            "label-diamond",
+            "regs { one:reg[8], r:reg[8], dest:reg[8], p:reg[1] }\n^entry():\ndest = lift.label ^left\nr = lift.mov dest\nqjumpr dest\n^left():\none = lift.const.i8 1\np = lift.icmp.eq x one\nqbranch p ^right ^exit\n^right():\nr = lift.add r one\nqjump ^exit\n^exit():\nlift.retval r\n",
+        ),
+        (
+            "indirect-fault",
+            "regs { dest:reg[8] }\n^entry():\ndest = lift.const.i8 255\nqjumpr dest\n",
+        ),
+        (
+            "parallel-old-values",
+            "regs { one:reg[8], r:reg[8] }\n^entry():\none = lift.const.i8 3\nr = lift.const.i8 5\n(one, r) = lift.parmov (r, one)\nr = lift.sub one r\nlift.retval r\n",
+        ),
+        (
+            "loop-join",
+            "regs { one:reg[8], r:reg[8], p:reg[1] }\n^entry():\none = lift.const.i8 1\nr = lift.const.i8 0\nqjump ^loop\n^loop():\nr = lift.add r one\np = lift.icmp.ult r x\nqbranch p ^loop ^exit\n^exit():\nlift.retval r\n",
+        ),
+    ];
+    for (name, body) in bodies {
+        let path = temp_object(&format!("jit-{name}"), &format!("{prefix}{body}"));
+        for input in ["0", "1", "3", "255"] {
+            for budget in ["0", "1", "2", "3", "5", "8", "18"] {
+                assert_bytes(
+                    name,
+                    &s(&[
+                        "run-oracle",
+                        &path,
+                        "inc8",
+                        "--input",
+                        input,
+                        "--budget",
+                        budget,
+                    ]),
+                );
+            }
+        }
+        assert_coherent(&s(&[
+            "step-check",
+            &path,
+            "inc8",
+            "--exhaustive",
+            "--max-bits",
+            "8",
+            "--budget",
+            "8",
+        ]));
+    }
+    let text = add_cc(
+        &base,
+        "fold",
+        "",
+        vec![],
+        "r:i8",
+        vec!["i8"],
+        "a = const.i8 255\nb = const.i8 2\nr = add a b\nret r",
+    );
+    let path = temp_object("jit-cc-fold", &text);
+    for command in ["run-cc", "run-program", "reverse"] {
+        assert_outcome(
+            "CC fold retains trace and history",
+            &s(&[command, &path, "fold"]),
+        );
+    }
+    for k in 0..=4 {
+        assert_outcome(
+            "CC folded history prefix",
+            &s(&["reverse", &path, "fold", "--steps", &k.to_string()]),
+        );
+    }
 }

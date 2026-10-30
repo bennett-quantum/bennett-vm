@@ -76,10 +76,18 @@ frames, never re-execution.
    No schedule is accepted/emitted while that library is absent. eps_decade
    indexing also lacks a definition (cxg). No capability is removed from scope.
    Current raw conformance: zero failures, unavailable cases retained; see PROGRESS.
-5. **JIT tier.** §5.7 transformations (inlining, structure
+5. **JIT tier (implemented; evidence in PROGRESS.md).** §5.7 transformations (inlining, structure
    recovery, dispatch re-indexing) proven extensional by the
    milestone-1 harness, then native codegen for CC and oracle
    segments; scheduling/pebbling policy stays in `bennett-sched`.
+   Implemented: private row-preserving call-site clones, guarded CFG continuation
+   recovery, independent canonical/private dispatch maps and block-local integer
+   folding; native x86-64 Linux direct-threaded CC/R and F_B code with runtime
+   helpers plus nine host integer kernels. Every individual pass, composition
+   and JIT is gated by the original harness (1,235 comparisons per mode).
+   Logical budgets, activation/history boundaries, object identities and
+   observable label values remain reference-defined. Other hosts fail explicitly;
+   native execution is opt-in via `BENNETT_VM_ENGINE=jit`.
 
 ## ISA 0.9 watch list (draft, not accepted; build stays on 0.8)
 

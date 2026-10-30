@@ -76,7 +76,13 @@ pub struct Program {
 /// Explicit opt-in selection, inherited by CLI and C ABI. Invalid selections
 /// fail before execution; there is no automatic interpreter fallback.
 pub fn selection() -> Result<Option<(Passes, bool)>, String> {
-    let mode = std::env::var("BENNETT_VM_ENGINE").unwrap_or_else(|_| "interpreter".into());
+    let mode = match std::env::var("BENNETT_VM_ENGINE") {
+        Ok(mode) => mode,
+        Err(std::env::VarError::NotPresent) => "interpreter".into(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("§5.7: execution engine must be Unicode".into());
+        }
+    };
     Ok(match mode.as_str() {
         "interpreter" => None,
         "baseline" => Some((Passes::default(), false)),

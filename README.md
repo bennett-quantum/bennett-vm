@@ -41,9 +41,9 @@ synchronization; execution advances at `wait` or `run_step`. VM extensions add
 immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
 [tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
 
-The current gate has **72 passing Rust tests**, **160 launch C checks**, a
-scheduler C consumer calling all **15** published exports, **1,076 agreeing CLI
-comparisons** and **21,888 one-row inverse checks**. Published conformance is
+The current gate has **80 passing Rust tests**, **160 launch C checks**, a
+scheduler C consumer calling all **15** published exports, **1,235 agreeing CLI
+comparisons per pass and JIT mode** and **21,888 one-row inverse checks**. Published conformance is
 **445 pass / 0 fail / 46 unavailable**, 491 cases (exit 2). See PROGRESS for the
 per-suite report, comparison limits and unchanged unavailable classifications.
 
@@ -58,5 +58,22 @@ These are not estimates or certificates. Target schema remains exactly ISA §8.
 No schedule/library hash/ordinals are fabricated. Lifted/oracle row decomposition,
 non-native memory comparators, verbatim scheduled execution/accounting and
 reproducibility wait on the published expansion contract. Scheduler requests
-return explicit UNSUPPORTED. Finish milestone 4 after publication, then milestone
-5 JIT. No future North-Star capability is removed from scope.
+return explicit UNSUPPORTED. Finish milestone 4 after publication. Milestone 5
+JIT is implemented independently of that missing target library. No future
+North-Star capability is removed from scope.
+
+Select native execution of CC/R and oracle segments with `BENNETT_VM_ENGINE=jit`
+(current host backend: x86-64 Linux). Interpreter remains default. Individual
+optimisation modes are `inline`, `structure`, `reindex`, `simplify`; `optimised`
+combines them without codegen. The four ISA §5.7 passes preserve reference-row
+budgets, canonical labels, faults, history and identities. Native code threads
+runtime row helpers and emits nine host integer arithmetic kernels; arbitrary
+widths and complex rows use runtime helpers. Unsupported hosts fail explicitly.
+`BENNETT_JIT_AUDIT=1` prints native execution counters to stderr.
+
+The differential gate compares all 75 object images in the recorded corpus
+through each pass, their composition, and JIT mode against the interpreter and
+the CLI reference: **1,235 agree / 0 diverge per mode**. Of these, **718
+invocations on 68 images enter native segments**; identity, validation, pure Q
+and literal debug commands are also compared. Published JIT conformance is
+**445/0/46**. See PROGRESS for precise comparison and counting limits.

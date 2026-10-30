@@ -161,3 +161,18 @@ fn native_boundary_transports_panics_and_rejects_invalid_dispatch() {
             .contains("successor outside")
     );
 }
+
+#[test]
+fn unknown_engine_fails_explicitly_before_any_command() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
+        .env("BENNETT_VM_ENGINE", "unknown")
+        .arg("help")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap().trim(),
+        "unimplemented: execution engine unknown (milestone 5)"
+    );
+}

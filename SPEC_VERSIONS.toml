@@ -1,5 +1,5 @@
 # Spec versions this repo implements. Contract = the published specs, nothing else.
-status = "milestone-4-in-progress"
+status = "milestone-5-jit-implemented-milestone-4-blocked"
 isa = "0.8"
 object = "0.8"
 launch = "0.8"

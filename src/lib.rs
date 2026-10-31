@@ -20,6 +20,7 @@ pub mod oracle;
 pub mod qcli;
 mod qvalidate;
 mod rational;
+pub mod ref_library;
 pub mod sched;
 mod sched_abi;
 pub mod sha256;

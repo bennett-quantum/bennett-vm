@@ -1,3 +1,14 @@
+# ISA 0.9 consumer — 2026-10-31
+Resume: entered at eb7ca3a (108 tests/engine recorded baseline); accepted 0.9
+catalog consumed independently; object execution remains 0.8. Obligations live
+only in bd. Headless/offline logs under .tmp; one final full gate after five passes.
+
+47t — authenticated 219 recipes and exact envelope; separate 0.8/0.9 defaults.
+RED — .tmp/47t-red.log (missing API), .tmp/47t-k62-red.log (template binding).
+GREEN — four focused witnesses, including full two-bit qxor domain and signed zero.
+K62 — source-swapped qinplace templates preserve t/f lifetime order; raw inverse retains ordinals.
+Disposition — remainder recorded in bennett-vm-47t; no realised-schedule support claimed.
+
 # Published unavailable metadata re-baseline — 2026-10-30
 
 Initial published ISA checkout `0b913da`; final tested checkout `e332108`;

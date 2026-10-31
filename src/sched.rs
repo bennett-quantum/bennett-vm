@@ -141,6 +141,26 @@ pub fn require_library(expansion: Option<&Json>) -> Result<(), String> {
         "unimplemented: expansion library {name}@{version} (milestone 4); no published operation/ordinal/scratch/removability document is available (b-isa-spec-8r4; bennett-vm-47t)"
     )))
 }
+/// K57 binds an omitted expansion to the object's own ISA version.
+/// This authenticates availability only; it does not admit a realised schedule.
+pub fn require_library_version(expansion: Option<&Json>, isa: &str) -> Result<(), String> {
+    if isa != "0.9" {
+        return require_library(expansion);
+    }
+    if let Some(e) = expansion {
+        keys(e, &["name", "version", "hash"])?;
+        for (k, expected) in [
+            ("name", "ref"),
+            ("version", "0.9"),
+            ("hash", crate::ref_library::HASH),
+        ] {
+            if field(e, k)?.as_str() != Some(expected) {
+                return Err(error(format!("expansion {k} mismatch")));
+            }
+        }
+    }
+    crate::ref_library::Catalog::published().map(|_| ())
+}
 pub fn object_schedule(obj: &Object) -> Result<Option<Json>, String> {
     if !obj.has_schedule {
         return Ok(None);

@@ -116,6 +116,46 @@ impl Rational {
             .to_usize()
             .ok_or("§8.1: index/count exceeds host address space".into())
     }
+    /// K12: least upward decimal enclosure with at most 34 significant digits.
+    pub fn upper_decimal34(&self) -> Result<String, String> {
+        if self.negative() {
+            return Err("§10.1: negative resource".into());
+        }
+        if self.is_zero() {
+            return Ok("0".into());
+        }
+        let ten = Self::from(10);
+        let mut normal = self.clone();
+        let mut e = 0isize;
+        while normal >= ten {
+            normal = normal.div(&ten)?;
+            e += 1;
+        }
+        while normal < Self::from(1) {
+            normal = normal.mul(&ten);
+            e -= 1;
+        }
+        let mut mantissa = normal;
+        for _ in 0..33 {
+            mantissa = mantissa.mul(&ten);
+        }
+        let mut rounded = mantissa.ceil();
+        let shift = e.checked_sub(33).ok_or("host limit: decimal exponent")?;
+        for _ in 0..shift.unsigned_abs() {
+            rounded = if shift < 0 {
+                rounded.div(&ten)?
+            } else {
+                rounded.mul(&ten)
+            };
+        }
+        Ok(rounded.decimal())
+    }
+    pub fn fraction(&self) -> (String, String) {
+        (
+            format!("{}{}", if self.neg { "-" } else { "" }, self.n.to_decimal()),
+            self.d.to_decimal(),
+        )
+    }
     /// Exact decimal when finite; otherwise an explicit rational diagnostic.
     pub fn decimal(&self) -> String {
         let (q, mut rem) = self.n.divmod(&self.d);

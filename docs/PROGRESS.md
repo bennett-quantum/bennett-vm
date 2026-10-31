@@ -9,6 +9,12 @@ GREEN — four focused witnesses, including full two-bit qxor domain and signed 
 K62 — source-swapped qinplace templates preserve t/f lifetime order; raw inverse retains ordinals.
 Disposition — remainder recorded in bennett-vm-47t; no realised-schedule support claimed.
 
+hsd — exact per-class escaped resource rows and reduced fractions; canonical upward decimal34.
+RED — .tmp/hsd-red.log (absent APIs); aggregation fixture corrected to array-valued schemes.
+GREEN — three focused tests reproduce K12 1/3, 2/3 and idle-class witness rows.
+Binding — strict complete positional arguments, f64 bits, token tuples and K13 hash witness.
+Disposition — launch ABI/complete realisation/certificate remainder stays in bennett-vm-hsd.
+
 # Published unavailable metadata re-baseline — 2026-10-30
 
 Initial published ISA checkout `0b913da`; final tested checkout `e332108`;

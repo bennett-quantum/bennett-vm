@@ -1,9 +1,10 @@
 # ISA 0.9 remainder implementation — 2026-10-31
-Resume: 47t still in progress; oracle/source addresses and full schedule realisation precede hsd/clw; fat untouched.
-Passes 1–4 a5e3d90/151f1ba/dd60e57/eeee430: typed expansion, inverse identities, scratch LIFO, primitive source actions.
-Pass 5: authenticated source closure registry, closure-bound argument vectors, callee ordinal spaces/call occurrences, controlled source action calls.
-RED .tmp/47t-symbol-red.log; GREEN 9 library + 16 ref09 tests per engine; full-domain memory/image/loop/borrow witnesses; fmt/Clippy pass.
-Before interpreter 118/5; JIT 120/5 incl two added tests; differential 14/4 both. Full final gates pending.
+Resume: 47t in progress; oracle source/addressing and full schedule realisation precede hsd/clw; no bead closed; fat untouched.
+Passes 1–4 a5e3d90/151f1ba/dd60e57/eeee430: typed expansion, inverse identities, scratch LIFO, primitive source actions/stable controls.
+Pass 5 a3dcae1: authenticated source registry, exact call arguments, callee ordinals/occurrences, controlled/adjoint source calls.
+RED .tmp/47t-{remainder,typed,lifetime,scratch,source,controls,symbol}-red.log; GREEN 9 lib + 16 ref09 tests/engine; full-domain witnesses.
+Final interpreter/JIT each 131 PASS / 5 known FAIL / 0 ignored; differential each 14/4; all 13 added tests pass; fmt/Clippy pass.
+Before I 118/5, J 120/5 (includes two added tests); original scope 118/5, differential 14/4 both. HANDOFF.md has exact current remainders.
 
 # ISA 0.9 consumer — 2026-10-31
 Resume: entered at eb7ca3a (108 tests/engine recorded baseline); accepted 0.9

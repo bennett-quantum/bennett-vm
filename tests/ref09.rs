@@ -276,3 +276,185 @@ fn zero_width_allocations_still_have_checked_lifetimes() {
         assert!(c.expand("adj", &[j(r#""B""#)], &b).is_err());
     }
 }
+
+#[test]
+fn arithmetic_catalog_traces_preserve_full_interface_and_clean_scratch() {
+    use std::collections::BTreeMap;
+    let c = Catalog::published().unwrap();
+    for width in 1..=3 {
+        let mut b = Bindings::new();
+        b.wire("a", width);
+        b.wire("b", width);
+        b.wire("t", width);
+        for (recipe, compare) in [("bind.value.add", false), ("bind.value.icmp.eq", true)] {
+            let mut env = b.clone();
+            if compare {
+                env.wire("t", 1);
+            }
+            let args = vec![
+                Json::u64(width as u64),
+                j(r#""a""#),
+                j(r#""b""#),
+                j(r#""t""#),
+            ];
+            let leaves = c.expand(recipe, &args, &env).unwrap();
+            for a in 0..1usize << width {
+                for value_b in 0..1usize << width {
+                    for t in 0..if compare { 2 } else { 1usize << width } {
+                        let mut state = BTreeMap::<String, bool>::new();
+                        for (name, value) in [("a", a), ("b", value_b), ("t", t)] {
+                            for bit in 0..width {
+                                state.insert(format!("{name}[{bit}]"), value & (1 << bit) != 0);
+                            }
+                        }
+                        for l in &leaves {
+                            match l.operation.as_str() {
+                                "alloc" => {
+                                    for w in &l.wires {
+                                        assert!(state.insert(w.clone(), false).is_none());
+                                    }
+                                }
+                                "release" => {
+                                    for w in &l.wires {
+                                        assert_eq!(
+                                            state.remove(w),
+                                            Some(false),
+                                            "{recipe} scratch {w} at ordinal {}",
+                                            l.ordinal
+                                        );
+                                    }
+                                }
+                                "x" | "cx" | "ccx" | "mcx" => {
+                                    let (target, controls) = l.wires.split_last().unwrap();
+                                    if controls.iter().chain(&l.controls).all(|w| state[w]) {
+                                        *state.get_mut(target).unwrap() ^= true;
+                                    }
+                                }
+                                _ => panic!("unexpected arithmetic leaf {}", l.operation),
+                            }
+                        }
+                        let result = |name: &str| {
+                            (0..width).fold(0, |v, bit| {
+                                v | (usize::from(state[&format!("{name}[{bit}]")]) << bit)
+                            })
+                        };
+                        assert_eq!(result("a"), a);
+                        assert_eq!(result("b"), value_b);
+                        let expected = if compare {
+                            usize::from(a == value_b)
+                        } else {
+                            (a + value_b) & ((1 << width) - 1)
+                        };
+                        assert_eq!(
+                            result("t"),
+                            t ^ expected,
+                            "{recipe} width {width} a {a} b {value_b} t {t}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn source_actions_lower_to_the_bound_catalog() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(
+        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+    )
+    .unwrap();
+    let text = text.replace(
+        "h t[0]\ncx t[0] t[1]",
+        "d = qcopy t\nqxor d t\nqxor d t\nquncopy t d\nqif t[0] {\nx t[1]\n} {\nx t[1]\n}",
+    );
+    let (obj, _) = bennett_vm::load(&text, true).unwrap();
+    let c = Catalog::published().unwrap();
+    let leaves = c.lower_action(&obj, "bell", &j("[]"), false, 0).unwrap();
+    assert_eq!(leaves.iter().filter(|l| l.operation == "cx").count(), 8);
+    assert_eq!(leaves.iter().filter(|l| l.operation == "alloc").count(), 1);
+    assert_eq!(
+        leaves.iter().filter(|l| l.operation == "release").count(),
+        1
+    );
+    assert_eq!(leaves.iter().filter(|l| l.operation == "x").count(), 4);
+    let inverse = c.lower_action(&obj, "bell", &j("[]"), true, 0).unwrap();
+    assert_eq!(inverse.iter().filter(|l| l.operation == "alloc").count(), 1);
+    assert_eq!(
+        inverse.iter().filter(|l| l.operation == "release").count(),
+        1
+    );
+    use std::collections::BTreeMap;
+    for controls in 0..=1 {
+        let forward = c
+            .lower_action(&obj, "bell", &j("[]"), false, controls)
+            .unwrap();
+        let inverse = c
+            .lower_action(&obj, "bell", &j("[]"), true, controls)
+            .unwrap();
+        for bits in 0..4 {
+            for control in [false, true] {
+                let mut state = BTreeMap::from([
+                    ("t[0]".to_string(), bits & 1 != 0),
+                    ("t[1]".to_string(), bits & 2 != 0),
+                    ("$controls[0]".to_string(), control),
+                ]);
+                for (pass, leaves) in [&forward, &inverse].into_iter().enumerate() {
+                    for l in leaves {
+                        match l.operation.as_str() {
+                            "alloc" => {
+                                for w in &l.wires {
+                                    assert!(state.insert(w.clone(), false).is_none());
+                                }
+                            }
+                            "release" => {
+                                for w in &l.wires {
+                                    assert_eq!(state.remove(w), Some(false));
+                                }
+                            }
+                            "x" | "cx" => {
+                                let (target, own) = l.wires.split_last().unwrap();
+                                if own.iter().chain(&l.controls).all(|w| state[w]) {
+                                    *state.get_mut(target).unwrap() ^= true;
+                                }
+                            }
+                            _ => panic!("unexpected source leaf {}", l.operation),
+                        }
+                    }
+                    let expected = if pass == 0 && (controls == 0 || control) {
+                        bits ^ 2
+                    } else {
+                        bits
+                    };
+                    assert_eq!(state["t[0]"], expected & 1 != 0);
+                    assert_eq!(state["t[1]"], expected & 2 != 0);
+                    assert_eq!(state["$controls[0]"], control);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn source_control_order_is_stable_and_duplicates_are_unioned() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(
+        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+    )
+    .unwrap();
+    let text = text.replace(
+        "h t[0]\ncx t[0] t[1]",
+        "qpred t[0]\nqpred t[0]\nx t[1]\nqunpred t[0]\nqunpred t[0]",
+    );
+    let (obj, _) = bennett_vm::load(&text, true).unwrap();
+    let c = Catalog::published().unwrap();
+    let leaves = c.lower_action(&obj, "bell", &j("[]"), false, 12).unwrap();
+    let expected = (0..12)
+        .map(|i| format!("$controls[{i}]"))
+        .chain(std::iter::once("t[0]".into()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        leaves[0].controls.iter().cloned().collect::<Vec<_>>(),
+        expected
+    );
+}

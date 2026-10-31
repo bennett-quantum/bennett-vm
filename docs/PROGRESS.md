@@ -1,9 +1,9 @@
 # ISA 0.9 remainder implementation — 2026-10-31
-Resume: 47t in progress; full source/schedule realisation precedes hsd/clw; fat untouched.
-Passes 1–2 a5e3d90/151f1ba: image/events, allocation forwarding, typed records/regions/values/templates.
-Pass 3: zero-width identity checks; clean scratch LIFO marks survive aliases and raw inverses.
-RED .tmp/47t-{lifetime,scratch}-red.log; GREEN 9 library + 10 ref09 tests/engine; strict Clippy pass.
-Before: interpreter 118/5; JIT 120/5 incl pass-1 tests; differential 14/4 both. Full support unclaimed.
+Resume: 47t source formation in progress; full schedule realisation precedes hsd/clw; fat untouched.
+Passes 1–3 a5e3d90/151f1ba/dd60e57: typed bindings, image/events, inverse identities and scratch LIFO.
+Pass 4: structured action source to catalog; allocations/copies, predicates, branches, loops, local/interface memory.
+RED .tmp/47t-source-red.log; GREEN 9 library + 12 ref09 tests/engine; full-domain add/equality and controlled source roundtrips; Clippy pass.
+Before interpreter 118/5; JIT 120/5 incl pass-1 tests; differential 14/4 both. Symbols/oracle/schedule still open.
 
 # ISA 0.9 consumer — 2026-10-31
 Resume: entered at eb7ca3a (108 tests/engine recorded baseline); accepted 0.9

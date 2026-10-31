@@ -1,5 +1,6 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
+mod source;
 use crate::{
     json::{self, Json},
     target::{Rational as R, arr, field, keys, string},
@@ -50,12 +51,19 @@ struct Allocation {
 #[derive(Clone, Debug, Default)]
 pub struct Bindings {
     values: BTreeMap<String, Bound>,
-    controls: BTreeSet<String>,
+    controls: Vec<String>,
     locals: BTreeSet<String>,
     declarations: Rc<Cell<usize>>,
     scratch: BTreeSet<String>,
 }
 impl Bindings {
+    fn add_controls(&mut self, wires: impl IntoIterator<Item = String>) {
+        for wire in wires {
+            if !self.controls.contains(&wire) {
+                self.controls.push(wire);
+            }
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -77,7 +85,7 @@ pub struct Leaf {
     pub ordinal: usize,
     pub operation: String,
     pub wires: Vec<String>,
-    pub controls: BTreeSet<String>,
+    pub controls: Vec<String>,
     pub angle: Option<u64>,
     pub class: Option<String>,
     pub state: Option<String>,
@@ -307,7 +315,7 @@ impl Catalog {
                     ordinal: *next,
                     operation: "alloc".into(),
                     wires: ws,
-                    controls: BTreeSet::new(),
+                    controls: vec![],
                     angle: None,
                     class: Some(cls.into()),
                     state: Some(state.into()),
@@ -325,7 +333,7 @@ impl Catalog {
                     ordinal: *next,
                     operation: "release".into(),
                     wires: a.wires.clone(),
-                    controls: BTreeSet::new(),
+                    controls: vec![],
                     angle: None,
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
@@ -349,7 +357,7 @@ impl Catalog {
                                 ordinal: *next,
                                 operation: "x".into(),
                                 wires: vec![ws[byte * 8 + bit].clone()],
-                                controls: BTreeSet::new(),
+                                controls: vec![],
                                 angle: None,
                                 class: None,
                                 state: None,
@@ -394,7 +402,7 @@ impl Catalog {
                     ordinal: *next,
                     operation,
                     wires: vec![],
-                    controls: BTreeSet::new(),
+                    controls: vec![],
                     angle: None,
                     class: None,
                     state: None,
@@ -438,13 +446,13 @@ impl Catalog {
                 };
                 let b = b.clone();
                 let mut cap = *cap.clone();
-                cap.controls.extend(env.controls.clone());
+                cap.add_controls(env.controls.clone());
                 // Captured actual syntax is finite; repeating a higher-order
                 // recipe here is not a cycle in declared recipe dependencies.
                 self.walk(&b, &mut cap, out, next, &mut vec![])?;
             } else if let Some(u) = c.get("under") {
                 let mut local = env.clone();
-                local.controls.extend(wires(u, env)?);
+                local.add_controls(wires(u, env)?);
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
             } else if let Some(n) = c.get("declare") {
                 let name = string(n)?;
@@ -486,7 +494,7 @@ impl Catalog {
                     ordinal: *next,
                     operation: if acquire { "alloc" } else { "release" }.into(),
                     wires: a.wires.clone(),
-                    controls: BTreeSet::new(),
+                    controls: vec![],
                     angle: None,
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
@@ -515,7 +523,7 @@ impl Catalog {
                 let fs = arr(field(&t, "parameters")?)?;
                 let args = arr(field(c, "args")?)?;
                 let mut local = bind_formals(fs, args, env, cap)?;
-                local.controls.extend(env.controls.clone());
+                local.add_controls(env.controls.clone());
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
                 return Err(err(
@@ -671,7 +679,7 @@ fn bind_formals(
             }
             "environment" => {
                 let w = wires(a, outer)?;
-                env.controls.extend(w.iter().cloned());
+                env.add_controls(w.iter().cloned());
                 Bound::Wire(w)
             }
             "angle" => Bound::Angle(angle(a, outer)?),

@@ -1,12 +1,20 @@
 # ISA 0.9 consumer — 2026-10-31
 Resume: entered at eb7ca3a (108 tests/engine recorded baseline); accepted 0.9
 catalog consumed independently; object execution remains 0.8. Obligations live
-only in bd. Headless/offline logs under .tmp; one final full gate after five passes.
+only in bd. Final pin: ISA draft/editorial commit 22f2aac; ref envelope 5de4e499…5d197.
+Final gate: fmt/Clippy pass; interpreter and JIT each 118 PASS / 5 FAIL (123 tests),
+all 15 added tests pass; pre-push fails coherent. Differential 14 PASS / 4 FAIL;
+all five failures reproduce the baseline borrow-frame mismatch (bennett-vm-fat).
+ISA b-isa-spec-73y filed/committed as 9aad0f6; no spec text edited.
+Raw conformance in both engines: 445 PASS / 0 FAIL / 74 UNAVAILABLE / 519 total
+(recorded pause baseline: 445/0/56/501; only published pending additions).
+Evidence: .tmp/isa09-{interpreter,jit}-final.log, .tmp/isa09-{fmt,clippy,pre-push}.log,
+.tmp/isa09-baseline-compatibility.log, .tmp/isa09-gate-totals.json. No push/sync.
 
 47t — authenticated 219 recipes and exact envelope; separate 0.8/0.9 defaults.
-RED — .tmp/47t-red.log (missing API), .tmp/47t-k62-red.log (template binding).
-GREEN — four focused witnesses, including full two-bit qxor domain and signed zero.
-K62 — source-swapped qinplace templates preserve t/f lifetime order; raw inverse retains ordinals.
+RED — .tmp/47t-{red,k62-red,audit-red}.log (API, templates, repetition/lifetimes).
+GREEN — six tests per engine; full two-bit qxor, signed zero, finite nested bodies and fresh reacquisition.
+K62 — synthetic source-swapped qinplace preserves t/f lifetime order; gate-only raw inverse retains ordinals.
 Disposition — remainder recorded in bennett-vm-47t; no realised-schedule support claimed.
 
 hsd — exact per-class escaped resource rows and reduced fractions; canonical upward decimal34.
@@ -29,7 +37,7 @@ Disposition — bennett-vm-cxg closed; existing exact-entry eps prohibition incl
 
 47i — K10 decoder constructs complete sector map before device/global initialisation.
 RED — .tmp/47i-red.log (missing isolated decoder); existing runtime partial-sector test retained.
-GREEN — three device tests (.tmp/47i-green.log), including whole-sector read/reverse.
+GREEN — three device tests/engine and block differential; admission mismatch fixed (.tmp/47i-differential-green.log).
 Coverage — empty image, multiple sectors, textual byte order, present zero sector, absent sector, malformed hex.
 Disposition — bennett-vm-47i closed; block write undo still retains the sector presence bit.
 

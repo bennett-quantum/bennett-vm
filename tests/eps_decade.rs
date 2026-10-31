@@ -65,13 +65,13 @@ fn exact_entry_prohibits_eps_decade_even_in_nested_cost() {
     let mut t = j(&raw);
     if let Json::Obj(m) = &mut t {
         m.insert("tables".into(), j(r#"{"bucket":[1,2,3]}"#));
-        if let Json::Arr(g) = m.get_mut("gates").unwrap() {
-            if let Json::Obj(g) = &mut g[0] {
-                g.insert(
-                    "cost".into(),
-                    j(r#"{"time":{"op":"+","args":[1,{"table":"bucket","index":"eps_decade"}]}}"#),
-                );
-            }
+        if let Json::Arr(g) = m.get_mut("gates").unwrap()
+            && let Json::Obj(g) = &mut g[0]
+        {
+            g.insert(
+                "cost".into(),
+                j(r#"{"time":{"op":"+","args":[1,{"table":"bucket","index":"eps_decade"}]}}"#),
+            );
         }
     }
     assert!(
@@ -80,12 +80,11 @@ fn exact_entry_prohibits_eps_decade_even_in_nested_cost() {
             .contains("epsilon zero entry references eps")
     );
     // Achieved epsilon is nonzero; the cost reads requested eps, not achieved epsilon.
-    if let Json::Obj(m) = &mut t {
-        if let Json::Arr(g) = m.get_mut("gates").unwrap() {
-            if let Json::Obj(g) = &mut g[0] {
-                g.insert("epsilon".into(), j("0.001"));
-            }
-        }
+    if let Json::Obj(m) = &mut t
+        && let Json::Arr(g) = m.get_mut("gates").unwrap()
+        && let Json::Obj(g) = &mut g[0]
+    {
+        g.insert("epsilon".into(), j("0.001"));
     }
     Target::parse(&t.to_jcs()).unwrap();
 }

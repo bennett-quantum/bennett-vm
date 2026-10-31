@@ -1,48 +1,23 @@
-State (2026-10-30 ~14:30Z, maintainer pause): main pushed at 29d3bce. Today: RFC 8785 / ECMAScript number serializer
-(bead ciz closed; 132,238-value independent comparison), tests/conformance.rs validates published `unavailable.reason`
-instead of pinning totals (exact pass pins stay), targets grid witness runs in both engines; 108 tests per engine.
-At the 0.8 frontier: remaining work needs ISA 0.9 (ref library 47t, estimates hsd, replay clw, eps_decade cxg,
-block image 47i; all maintainer-ratified as drafted, see bd notes). Read ../bennett/HANDOFF.md first.
+State 2026-10-31: partial ISA 0.9 consumer; milestone NOT complete. Sole VM implementer;
+entered at eb7ca3a (pause 29d3bce plus handoff). ISA 0.8 object/launch execution retained;
+SPEC_VERSIONS.toml additionally pins accepted 0.9 draft/editorial 22f2aac and full 219-recipe
+ref envelope 5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197.
+Catalog authentication/typed expansion foundation, exact estimate resource rows and argument
+encoding, standalone bound replay, eps_decade and complete-sector decoding landed.
+Beads cxg/47i closed; 47t/hsd/clw OPEN with exact implementation remainders in bd.
+No complete realised-schedule/launch-estimate/0.9 object executor is claimed.
 
-Certificate/report follow-up — 2026-10-30. Read docs/PROGRESS.md top.
+Final local gate: fmt and strict Clippy pass; interpreter/JIT each 118 pass, 5 fail,
+0 ignored (123 tests), all 15 added tests pass. Differential 14/18 pass; pre-push fails
+coherent. The five failures all meet the pre-existing borrow-frame admission discrepancy
+on four r9 objects. An isolated eb7ca3a binary reproduces their rejection; the accepted
+read-only 0.8 reference accepts them. Tracked in bennett-vm-fat; ISA b-isa-spec-73y asks
+whether full frame domain includes all touched-wire values or incoming proven zero
+constraints. No cases removed and no borrow guarantee weakened. Published raw conformance
+in BOTH engines: 445 PASS / 0 FAIL / 74 UNAVAILABLE / 519. See docs/PROGRESS.md top and
+.tmp/isa09-{interpreter,jit}-final.log, .tmp/isa09-baseline-compatibility.log and gate totals.
 
-Completed available paths (child bennett-vm-abx.1); parent abx remains BLOCKED
-on 47t / hsd / clw. Commits ea640cf and 8925d45, then enclosure/final evidence
-follow-up. No push or Dolt remote sync; sole implementer, std-only.
-
-Implemented independent exhaustive full-tuple table/program replay (including
-oracle input/target/fault, all region cells and dirty bundles); full D gives
-proof, partial D and sampled replay give evidence with exact counts/fractions.
-Sampling uses xoshiro256** rejection with least-significant word first.
-Structural translation checks actual points, full frame, effective predicates,
-V/W/reverse sequences and side conditions. Adjoint table is checked against
-§5.3, not promoted to an oracle proof. Library claims replay with cycle checks;
-verification indices and obligation kinds are checked. qinplace proves both
-compositions and FAULT_NONE on every input under tk before allocating workspace.
-
-Interval algebra: exact-rational outward significant-binary rounding, phase-
-sensitive Frobenius bounds, complex Hermitian LDL† strictly positive pivots,
-unnormalised Choi dual/partial trace, enclosed pi and reduced-angle Taylor
-sin/cos with Lagrange remainder, rx/ry/rz matrices. These helpers do NOT
-constitute acceptance of a producer-supplied matrix or executable certificate.
-Executable contexts/realised matrices/composition require ref@0.8 and reject
-explicitly naming b-isa-spec-8r4 / bennett-vm-47t (§11/§12.1).
-
-Coverage returns validated producer §13 JCS in a separate owner; pointers
-survive program unload. Missing coverage names bennett-driver. Estimate_run
-validates region/token/target, issues no fake estimate/certificate, and names
-bennett-estimate. New isa-0.9 blockers: hsd (parameters, per-class decimal
-encoding, rational rounding) and clw (sampled relation/default, standalone
-claim parameter/table binding). Interpreter default and BENNETT_VM_ENGINE=jit
-retain prior semantics. No capability is removed from NorthStar scope.
-
-Final evidence: see PROGRESS for the completed test logs, differential counts
-and unchanged raw conformance. H remains 0 PASS/0 FAIL/10 UNAVAILABLE because
-the read-only runner has no scenario/API adapter. Direct tests retain all ten
-H scenarios and assert rule-citing refusal; no unavailable case is called pass.
-
-Continue by publishing the expansion library and resolving hsd/clw, then wire
-all invocation contexts into interval acceptance and bennett-estimate requests.
-Existing M4 eps_decade blocker cxg also remains. Headless/offline, TMPDIR under
-.tmp, absolute paths, path-scoped commits, BEADS_HOOK_TIMEOUT=20; no foreign
-source edits, no push or Dolt sync.
+Commits by bead: 47t 12394a0 + ffd84e1; hsd 952f733; clw 1632014;
+cxg 16990c6; 47i 94677a8 + 97f50ca. ISA bead export committed separately at 9aad0f6.
+Headless/offline, project-local .tmp, path-scoped commits only. No dependency added,
+no foreign implementation read/copied, no push or Dolt sync, no sibling spec text edited.

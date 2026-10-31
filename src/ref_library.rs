@@ -26,6 +26,15 @@ enum Bound {
     Image(String),
     Event(Json),
     Class(String),
+    Symbol {
+        hash: String,
+        registry: Rc<Registry>,
+        adjoint: bool,
+    },
+    Arguments {
+        hash: String,
+        values: Vec<Bound>,
+    },
     Region {
         address: usize,
         cell: usize,
@@ -39,6 +48,21 @@ enum Bound {
         order: Json,
         rows: Vec<BTreeMap<String, Bound>>,
     },
+}
+#[derive(Clone, Debug)]
+struct Registry {
+    object: crate::object::Object,
+    identities: crate::identity::Identities,
+}
+impl Registry {
+    fn name(&self, hash: &str) -> Result<&str, String> {
+        self.identities
+            .closure
+            .iter()
+            .find(|(_, h)| h.as_deref() == Some(hash))
+            .map(|(n, _)| n.as_str())
+            .ok_or_else(|| err(format!("unbound closure {hash}")))
+    }
 }
 #[derive(Clone, Debug)]
 struct Allocation {
@@ -55,8 +79,18 @@ pub struct Bindings {
     locals: BTreeSet<String>,
     declarations: Rc<Cell<usize>>,
     scratch: BTreeSet<String>,
+    registry: Option<Rc<Registry>>,
+    call_index: Rc<Cell<usize>>,
+    active_symbols: Rc<RefCell<Vec<String>>>,
 }
 impl Bindings {
+    /// Reparse the canonical source before constructing a linked registry;
+    /// caller-supplied Rust AST fields cannot retarget a closure hash.
+    pub fn link(&mut self, object: &crate::object::Object) -> Result<(), String> {
+        let (object, identities) = crate::load(&object.text, true)?;
+        self.registry = Some(Rc::new(Registry { object, identities }));
+        Ok(())
+    }
     fn add_controls(&mut self, wires: impl IntoIterator<Item = String>) {
         for wire in wires {
             if !self.controls.contains(&wire) {
@@ -92,6 +126,13 @@ pub struct Leaf {
     pub event: Option<Json>,
     pub allocation: Option<String>,
     pub scratch: bool,
+    pub invocation: Vec<SemanticCall>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticCall {
+    pub closure_hash: String,
+    pub call_index: usize,
+    pub adjoint: bool,
 }
 impl Leaf {
     fn adjoint(&mut self) {
@@ -116,12 +157,7 @@ pub struct Catalog {
 impl Catalog {
     pub fn published() -> Result<Self, String> {
         let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bennett-isa-spec/spec");
-        let bound = spec.join("ref-0.9.json");
-        let path = if bound.exists() {
-            bound
-        } else {
-            spec.join("ref-0.9-draft.json")
-        };
+        let path = spec.join("ref-0.9.json");
         Self::parse(&std::fs::read_to_string(path).map_err(err)?)
     }
     pub fn parse(raw: &str) -> Result<Self, String> {
@@ -261,6 +297,7 @@ impl Catalog {
                     angle: a,
                     class: None,
                     state: None,
+                    invocation: vec![],
                     event: None,
                     allocation: None,
                     scratch: false,
@@ -319,6 +356,7 @@ impl Catalog {
                     angle: None,
                     class: Some(cls.into()),
                     state: Some(state.into()),
+                    invocation: vec![],
                     event: None,
                     allocation: Some(identity),
                     scratch: env.scratch.contains(name),
@@ -337,6 +375,7 @@ impl Catalog {
                     angle: None,
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
+                    invocation: vec![],
                     event: None,
                     allocation: Some(a.identity.clone()),
                     scratch: false,
@@ -361,6 +400,7 @@ impl Catalog {
                                 angle: None,
                                 class: None,
                                 state: None,
+                                invocation: vec![],
                                 event: None,
                                 allocation: None,
                                 scratch: false,
@@ -406,6 +446,7 @@ impl Catalog {
                     angle: None,
                     class: None,
                     state: None,
+                    invocation: vec![],
                     event: Some(event),
                     allocation: None,
                     scratch: false,
@@ -447,6 +488,8 @@ impl Catalog {
                 let b = b.clone();
                 let mut cap = *cap.clone();
                 cap.add_controls(env.controls.clone());
+                cap.call_index = env.call_index.clone();
+                cap.active_symbols = env.active_symbols.clone();
                 // Captured actual syntax is finite; repeating a higher-order
                 // recipe here is not a cycle in declared recipe dependencies.
                 self.walk(&b, &mut cap, out, next, &mut vec![])?;
@@ -498,11 +541,72 @@ impl Catalog {
                     angle: None,
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
+                    invocation: vec![],
                     event: None,
                     allocation: Some(a.identity.clone()),
                     scratch: acquire && env.scratch.contains(string(n)?),
                 });
                 *next += 1;
+            } else if let Some(n) = c.get("call") {
+                let Some(Bound::Symbol {
+                    hash,
+                    registry,
+                    adjoint,
+                }) = env.values.get(string(n)?)
+                else {
+                    return Err(err("unbound call symbol"));
+                };
+                let hash = hash.clone();
+                let registry = registry.clone();
+                let adjoint = *adjoint;
+                let name = registry.name(&hash)?;
+                let formals = source::interface(&registry.object, name)?;
+                let args = field(c, "args")?;
+                let mut callee = if let Some(Bound::Arguments {
+                    hash: bound,
+                    values,
+                }) = args.as_str().and_then(|n| env.values.get(n))
+                {
+                    if bound != &hash {
+                        return Err(err("arguments closure mismatch"));
+                    }
+                    let mut bindings = Bindings::new();
+                    bindings.values = formals
+                        .iter()
+                        .zip(values)
+                        .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
+                        .collect::<Result<_, String>>()?;
+                    bindings
+                } else {
+                    bind_formals(&formals, arr(args)?, env, &Bindings::new())?
+                };
+                callee.registry = Some(registry.clone());
+                callee.declarations = env.declarations.clone();
+                callee.active_symbols = env.active_symbols.clone();
+                callee.add_controls(env.controls.clone());
+                if callee.active_symbols.borrow().contains(&hash) {
+                    return Err(err("cyclic symbol expansion"));
+                }
+                let call_index = env.call_index.get();
+                env.call_index.set(call_index + 1);
+                callee.active_symbols.borrow_mut().push(hash.clone());
+                let start = out.len();
+                let result = (|| {
+                    let body = source::action_body(&registry.object, name, adjoint, &mut callee)?;
+                    self.walk(&body, &mut callee, out, &mut 0, &mut vec![])
+                })();
+                callee.active_symbols.borrow_mut().pop();
+                result?;
+                for leaf in &mut out[start..] {
+                    leaf.invocation.insert(
+                        0,
+                        SemanticCall {
+                            closure_hash: hash.clone(),
+                            call_index,
+                            adjoint,
+                        },
+                    );
+                }
             } else if let Some(n) = c.get("visit") {
                 let Some(Bound::Records { rows, .. }) = env.values.get(string(n)?) else {
                     return Err(err("unbound records"));
@@ -524,6 +628,8 @@ impl Catalog {
                 let args = arr(field(c, "args")?)?;
                 let mut local = bind_formals(fs, args, env, cap)?;
                 local.add_controls(env.controls.clone());
+                local.call_index = env.call_index.clone();
+                local.active_symbols = env.active_symbols.clone();
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
                 return Err(err(
@@ -683,6 +789,62 @@ fn bind_formals(
                 Bound::Wire(w)
             }
             "angle" => Bound::Angle(angle(a, outer)?),
+            "symbol" => {
+                if let Some(symbol @ Bound::Symbol { .. }) =
+                    a.as_str().and_then(|n| outer.values.get(n))
+                {
+                    symbol.clone()
+                } else {
+                    let hash = string(a)?;
+                    if hash.len() != 64
+                        || !hash
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    {
+                        return Err(err("invalid closure hash"));
+                    }
+                    let registry = outer
+                        .registry
+                        .clone()
+                        .ok_or_else(|| err("linked closure registry missing"))?;
+                    registry.name(hash)?;
+                    Bound::Symbol {
+                        hash: hash.into(),
+                        registry,
+                        adjoint: false,
+                    }
+                }
+            }
+            "arguments" => {
+                let symbol = string(field(f, "symbol")?)?;
+                let Some(Bound::Symbol { hash, registry, .. }) = env.values.get(symbol) else {
+                    return Err(err("arguments symbol must be an earlier symbol formal"));
+                };
+                if let Some(Bound::Arguments {
+                    hash: bound,
+                    values,
+                }) = a.as_str().and_then(|n| outer.values.get(n))
+                {
+                    if bound != hash {
+                        return Err(err("arguments closure mismatch"));
+                    }
+                    Bound::Arguments {
+                        hash: hash.clone(),
+                        values: values.clone(),
+                    }
+                } else {
+                    let formals = source::interface(&registry.object, registry.name(hash)?)?;
+                    let bindings = bind_formals(&formals, arr(a)?, outer, &Bindings::new())?;
+                    let values = formals
+                        .iter()
+                        .map(|f| Ok(bindings.values[string(field(f, "name")?)?].clone()))
+                        .collect::<Result<_, String>>()?;
+                    Bound::Arguments {
+                        hash: hash.clone(),
+                        values,
+                    }
+                }
+            }
             "allocation" => match a.as_str().and_then(|n| outer.values.get(n)) {
                 Some(Bound::Allocation(a)) => Bound::Allocation(a.clone()),
                 _ => return Err(err("unbound allocation actual")),

@@ -453,8 +453,210 @@ fn source_control_order_is_stable_and_duplicates_are_unioned() {
         .map(|i| format!("$controls[{i}]"))
         .chain(std::iter::once("t[0]".into()))
         .collect::<Vec<_>>();
+    assert_eq!(leaves[0].controls, expected);
+}
+
+fn replay_permutation(
+    leaves: &[bennett_vm::ref_library::Leaf],
+    values: &mut std::collections::BTreeMap<String, bool>,
+    dirty: bool,
+) {
+    let mut initial = std::collections::BTreeMap::new();
+    for l in leaves {
+        match l.operation.as_str() {
+            "alloc" => {
+                for w in &l.wires {
+                    let bit = l.state.as_deref() == Some("borrowed") && dirty;
+                    assert!(values.insert(w.clone(), bit).is_none());
+                    initial.insert(w.clone(), bit);
+                }
+            }
+            "release" => {
+                for w in &l.wires {
+                    assert_eq!(
+                        values.remove(w),
+                        initial.remove(w),
+                        "unclean/unrestored {w} at {}",
+                        l.ordinal
+                    );
+                }
+            }
+            "x" | "cx" | "ccx" | "mcx" => {
+                let (target, own) = l.wires.split_last().unwrap();
+                if own.iter().chain(&l.controls).all(|w| values[w]) {
+                    *values.get_mut(target).unwrap() ^= true;
+                }
+            }
+            "swap" => {
+                if l.controls.iter().all(|w| values[w]) {
+                    let a = values[&l.wires[0]];
+                    let b = values[&l.wires[1]];
+                    values.insert(l.wires[0].clone(), b);
+                    values.insert(l.wires[1].clone(), a);
+                }
+            }
+            _ => panic!("non-permutation leaf {}", l.operation),
+        }
+    }
+    assert!(initial.is_empty());
+}
+
+#[test]
+fn source_memory_loops_images_and_borrows_are_full_domain_maps() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/conformance/cases/objects");
+    let c = Catalog::published().unwrap();
+    for (file, name, t_width, p_width) in [
+        ("actions", "flip", 2, 2),
+        ("actions", "memory", 2, 2),
+        ("actions", "loop", 2, 2),
+        ("control_flow", "while3", 1, 3),
+        ("control_flow", "image", 8, 1),
+        ("control_flow", "borrowed", 1, 1),
+    ] {
+        let (obj, _) = bennett_vm::load(
+            &std::fs::read_to_string(root.join(format!("{file}.bisa"))).unwrap(),
+            false,
+        )
+        .unwrap();
+        let forward = c.lower_action(&obj, name, &j("[]"), false, 1).unwrap();
+        let reverse = c.lower_action(&obj, name, &j("[]"), true, 1).unwrap();
+        for t in 0..1usize << t_width {
+            for p in 0..1usize << p_width {
+                for control in [false, true] {
+                    for dirty in [false, true] {
+                        let mut values = std::collections::BTreeMap::new();
+                        for bit in 0..t_width {
+                            values.insert(format!("t[{bit}]"), t & (1 << bit) != 0);
+                        }
+                        let input = if name == "borrowed" { "x" } else { "p" };
+                        for bit in 0..p_width {
+                            values.insert(format!("{input}[{bit}]"), p & (1 << bit) != 0);
+                        }
+                        values.insert("$controls[0]".into(), control);
+                        let original = values.clone();
+                        replay_permutation(&forward, &mut values, dirty);
+                        let delta = if !control {
+                            0
+                        } else {
+                            match name {
+                                "flip" | "borrowed" => p,
+                                "loop" => 1,
+                                "while3" => {
+                                    (0..3).take_while(|bit| p & (1 << bit) != 0).count() % 2
+                                }
+                                "image" => {
+                                    if p == 0 {
+                                        0xde
+                                    } else {
+                                        0xad
+                                    }
+                                }
+                                "memory" => 0,
+                                _ => unreachable!(),
+                            }
+                        };
+                        for bit in 0..t_width {
+                            assert_eq!(
+                                values[&format!("t[{bit}]")],
+                                (t ^ delta) & (1 << bit) != 0,
+                                "{name} t={t} p={p} ctrl={control} dirty={dirty}"
+                            );
+                        }
+                        for bit in 0..p_width {
+                            assert_eq!(values[&format!("{input}[{bit}]")], p & (1 << bit) != 0);
+                        }
+                        replay_permutation(&reverse, &mut values, dirty);
+                        assert_eq!(values, original, "{name} roundtrip");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn linked_symbols_bind_exact_interfaces_and_keep_callee_ordinals() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/conformance/cases/objects/actions.bisa");
+    let (obj, ids) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
+    let hash = ids.closure["flip"].clone().unwrap();
+    let mut b = Bindings::new();
+    b.link(&obj).unwrap();
+    b.wire("a", 2);
+    b.wire("b", 2);
+    b.body("B", j(&format!(r#"[{{"invoke":"action_call","args":["{hash}",["a","b"]]}},{{"invoke":"action_call","args":["{hash}",["a","b"]]}}]"#))).unwrap();
+    let c = Catalog::published().unwrap();
+    let leaves = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
+    assert_eq!(leaves.iter().filter(|l| l.ordinal == 0).count(), 2);
+    let occurrences = leaves
+        .iter()
+        .map(|l| l.invocation[0].call_index)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(occurrences, [0, 1].into_iter().collect());
+    assert!(leaves.iter().all(|l| l.invocation[0].closure_hash == hash));
+    b.wire("short", 1);
+    assert!(
+        c.expand(
+            "action_call",
+            &[Json::Str(hash.clone()), j(r#"["a","short"]"#)],
+            &b
+        )
+        .is_err()
+    );
+    assert!(
+        c.expand(
+            "action_call",
+            &[Json::Str("0".repeat(64)), j(r#"["a","b"]"#)],
+            &b
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn source_controlled_callees_and_resolved_angle_adjoint() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/conformance/cases/objects/control_flow.bisa");
+    let (obj, _) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
+    let c = Catalog::published().unwrap();
+    for adjoint in [false, true] {
+        let leaves = c
+            .lower_action(&obj, "controlled_phase", &j("[]"), adjoint, 1)
+            .unwrap();
+        assert_eq!(leaves.len(), 1);
+        assert_eq!(leaves[0].operation, "rz");
+        assert_eq!(leaves[0].controls, ["$controls[0]", "p[0]"]);
+        assert_eq!(
+            leaves[0].angle,
+            Some(std::f64::consts::TAU.to_bits() ^ if adjoint { 1 << 63 } else { 0 })
+        );
+        assert_eq!(leaves[0].invocation.len(), 1);
+        assert_eq!(leaves[0].invocation[0].adjoint, adjoint);
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let raw = std::fs::read_to_string(root)
+        .unwrap()
+        .replace(
+            r#""abi":"0.8","args":[],"bounds":[],"in":[],"kind":"action""#,
+            r#""abi":"0.8","args":["f64"],"bounds":[],"in":[],"kind":"action""#,
+        )
+        .replace(
+            "action @bell (t:wire[2] mut) () () () ()",
+            "action @bell (t:wire[2] mut) () () (theta:f64) ()",
+        )
+        .replace("h t[0]\ncx t[0] t[1]", "rx theta t[0]")
+        .replace("action_call @bell (q) () () ()", "unused = const.i8 0");
+    let (obj, _) = bennett_vm::load(&raw, true).unwrap();
     assert_eq!(
-        leaves[0].controls.iter().cloned().collect::<Vec<_>>(),
-        expected
+        c.lower_action(&obj, "bell", &j(r#"["0x8000000000000000"]"#), true, 0)
+            .unwrap()[0]
+            .angle,
+        Some(0)
+    );
+    assert!(
+        c.lower_action(&obj, "bell", &j(r#"["0x7ff8000000000001"]"#), false, 0)
+            .is_err()
     );
 }

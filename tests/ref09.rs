@@ -54,7 +54,6 @@ fn qxor_full_domain_and_inverse_ordinals() {
             assert_eq!(state, t);
         }
     }
-    let mut b = b;
     b.body(
         "B",
         j(r#"[{"inverse":true,"body":[{"invoke":"qxor","args":[2]}]}]"#),
@@ -137,4 +136,33 @@ fn k62_source_adjoint_keeps_instruction_lifetimes() {
     }
     assert_eq!(adj[2].wires[1], adj[1].wires[0]);
     assert_ne!(adj[2].wires, fwd[2].wires);
+}
+#[test]
+fn finite_higher_order_repetition_is_not_a_dependency_cycle() {
+    let c = Catalog::published().unwrap();
+    let mut b = Bindings::new();
+    b.wire("a", 1);
+    b.body("B",j(r#"[{"invoke":"qloop","args":[3,[{"invoke":"qloop","args":[2,[{"gate":"x","wires":["a"]}]]}]]}]"#)).unwrap();
+    assert_eq!(c.expand("adj", &[j(r#""B""#)], &b).unwrap().len(), 6);
+    assert!(
+        b.body("bad", j(r#"[{"inverse":false,"body":[]}]"#))
+            .is_err()
+    );
+}
+#[test]
+fn reacquisition_has_fresh_identity_and_allocation_inverse_is_staged() {
+    let c = Catalog::published().unwrap();
+    let mut b = Bindings::new();
+    b.body("B",j(r#"[{"declare":"t","width":1,"class":{"class":"any"},"state":"clean","body":[{"acquire":"t"},{"relinquish":"t"},{"acquire":"t"},{"relinquish":"t"}]}]"#)).unwrap();
+    let l = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
+    assert_eq!(l[0].wires, l[1].wires);
+    assert_eq!(l[2].wires, l[3].wires);
+    assert_ne!(l[0].wires, l[2].wires);
+    b.body("I", j(r#"[{"inverse":true,"body":[{"splice":"B"}]}]"#))
+        .unwrap();
+    assert!(
+        c.expand("adj", &[j(r#""I""#)], &b)
+            .unwrap_err()
+            .contains("unavailable.reason")
+    );
 }

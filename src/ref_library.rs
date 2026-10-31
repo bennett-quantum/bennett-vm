@@ -25,6 +25,8 @@ enum Bound {
 }
 #[derive(Clone, Debug)]
 struct Allocation {
+    name: String,
+    width: usize,
     wires: Vec<String>,
     class: String,
     state: String,
@@ -211,7 +213,19 @@ impl Catalog {
                         }
                         for t in ts {
                             keys(t, &["parameters", "body"])?;
-                            arr(field(t, "parameters")?)?;
+                            let mut names = BTreeSet::new();
+                            for p in arr(field(t, "parameters")?)? {
+                                keys(p, &["name", "type", "width"])?;
+                                if !names.insert(string(field(p, "name")?)?) {
+                                    return Err(err("duplicate template formal"));
+                                }
+                                if field(p, "type")?.as_str() != Some("wire") {
+                                    return Err(err(
+                                        "unavailable.reason: non-wire template formal staged in bennett-vm-47t",
+                                    ));
+                                }
+                                field(p, "width")?;
+                            }
                             syntax(field(t, "body")?)?;
                         }
                         Bound::Templates(a.clone(), Box::new(outer.clone()))
@@ -304,6 +318,14 @@ impl Catalog {
             } else if c.get("inverse").is_some() {
                 let start = out.len();
                 self.walk(field(c, "body")?, env, out, next, active)?;
+                if out[start..]
+                    .iter()
+                    .any(|l| ["alloc", "release"].contains(&l.operation.as_str()))
+                {
+                    return Err(err(
+                        "unavailable.reason: inverse allocation lifetime restoration staged in bennett-vm-47t",
+                    ));
+                }
                 out[start..].reverse();
                 for l in &mut out[start..] {
                     l.adjoint();
@@ -315,7 +337,9 @@ impl Catalog {
                 let b = b.clone();
                 let mut cap = *cap.clone();
                 cap.controls.extend(env.controls.clone());
-                self.walk(&b, &mut cap, out, next, active)?;
+                // Captured actual syntax is finite; repeating a higher-order
+                // recipe here is not a cycle in declared recipe dependencies.
+                self.walk(&b, &mut cap, out, next, &mut vec![])?;
             } else if let Some(u) = c.get("under") {
                 let mut local = env.clone();
                 local.controls.extend(wires(u, env)?);
@@ -334,11 +358,10 @@ impl Catalog {
                 if !["clean", "borrowed"].contains(&state.as_str()) {
                     return Err(err("invalid allocation state"));
                 }
-                let id = *next;
                 let a = Rc::new(RefCell::new(Allocation {
-                    wires: (0..width)
-                        .map(|i| format!("$alloc{id}.{name}[{i}]"))
-                        .collect(),
+                    name: name.into(),
+                    width,
+                    wires: vec![],
                     class,
                     state,
                     live: false,
@@ -361,6 +384,11 @@ impl Catalog {
                     return Err(err("invalid allocation lifetime"));
                 }
                 a.live = acquire;
+                if acquire {
+                    a.wires = (0..a.width)
+                        .map(|i| format!("$alloc{}.{}[{i}]", *next, a.name))
+                        .collect();
+                }
                 out.push(Leaf {
                     ordinal: *next,
                     operation: if acquire { "alloc" } else { "release" }.into(),
@@ -403,7 +431,7 @@ impl Catalog {
                     }
                     local.values.insert(name.into(), Bound::Wire(w));
                 }
-                self.walk(field(&t, "body")?, &mut local, out, next, active)?;
+                self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
                 return Err(err(
                     "unavailable.reason: allocation/descriptor/template/symbol/image/classical expansion staged in bennett-vm-47t; catalog identity alone is not executable support",
@@ -545,6 +573,11 @@ fn syntax(body: &Json) -> Result<(), String> {
             .ok_or_else(|| err("unknown constructor"))?
             .1;
         keys(c, allowed)?;
+        if let Some(v) = c.get("inverse")
+            && v != &Json::Bool(true)
+        {
+            return Err(err("inverse must be true"));
+        }
         if let Some(b) = c.get("body") {
             syntax(b)?;
         }

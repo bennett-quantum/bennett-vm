@@ -9,6 +9,7 @@ pub mod bigint;
 pub mod cc;
 pub mod certificate;
 pub mod cliargs;
+pub mod device;
 pub mod estimate;
 pub mod exact;
 pub mod identity;

@@ -145,6 +145,15 @@ fn pure(op: &str) -> bool {
 }
 impl Data {
     fn new(obj: &Object) -> Result<Self, String> {
+        let block = if let Some(name) = obj.layout.as_ref().and_then(|l| l.block_image.as_ref()) {
+            crate::device::block_image(
+                obj.data
+                    .get(name)
+                    .ok_or("§7.3: block image data symbol missing")?,
+            )?
+        } else {
+            BTreeMap::new()
+        };
         let mut d = Self {
             memory: BTreeMap::new(),
             table: vec![],
@@ -152,7 +161,7 @@ impl Data {
             console: vec![],
             clock: 0,
             entropy_pos: 0,
-            block: BTreeMap::new(),
+            block,
             tape: vec![],
             hosts: vec![],
             measurements: vec![],
@@ -169,14 +178,6 @@ impl Data {
                     pinned: true,
                 });
                 d.write(&g.base, &from_hex(&obj.data[name])?);
-            }
-            if let Some(name) = &l.block_image {
-                if !obj.data[name].len().is_multiple_of(1024) {
-                    return Err("§7.3: block image must have complete 512-byte sectors".into());
-                }
-                for (i, bytes) in from_hex(&obj.data[name])?.chunks(512).enumerate() {
-                    d.block.insert(i as u64, bytes.to_vec());
-                }
             }
         }
         Ok(d)

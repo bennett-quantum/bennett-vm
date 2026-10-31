@@ -54,3 +54,29 @@ fn incomplete_block_images_are_rejected_before_execution() {
             .contains("§7.3: block image must have complete 512-byte sectors")
     );
 }
+
+#[test]
+fn complete_sector_encoding_preserves_order_and_zero_presence() {
+    use bennett_vm::device::block_image;
+    assert!(block_image("").unwrap().is_empty());
+    let mut bytes = vec![0u8; 1024];
+    for (i, b) in bytes[..512].iter_mut().enumerate() {
+        *b = (i % 256) as u8;
+    }
+    let image = bennett_vm::sha256::to_hex(&bytes);
+    let sectors = block_image(&image).unwrap();
+    assert_eq!(sectors.len(), 2);
+    assert_eq!(sectors[&0], bytes[..512]);
+    assert_eq!(sectors[&1], vec![0; 512]);
+    assert!(!sectors.contains_key(&2)); // all-zero image sector is present; later sectors absent
+    for n in [1, 511, 513, 1023] {
+        assert!(
+            block_image(&"00".repeat(n))
+                .unwrap_err()
+                .contains("complete 512-byte sectors")
+        );
+    }
+    for bad in ["0".repeat(1023), "GG".repeat(512), "AA".repeat(512)] {
+        assert!(block_image(&bad).is_err());
+    }
+}

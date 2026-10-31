@@ -27,6 +27,12 @@ GREEN — two new boundary/prohibition tests plus ten target tests (.tmp/cxg-gre
 Coverage — zero/negative/>1/unbound eps, out-of-array, long-decimal neighbours, 10^-100.
 Disposition — bennett-vm-cxg closed; existing exact-entry eps prohibition includes nested table indices.
 
+47i — K10 decoder constructs complete sector map before device/global initialisation.
+RED — .tmp/47i-red.log (missing isolated decoder); existing runtime partial-sector test retained.
+GREEN — three device tests (.tmp/47i-green.log), including whole-sector read/reverse.
+Coverage — empty image, multiple sectors, textual byte order, present zero sector, absent sector, malformed hex.
+Disposition — bennett-vm-47i closed; block write undo still retains the sector presence bit.
+
 # Published unavailable metadata re-baseline — 2026-10-30
 
 Initial published ISA checkout `0b913da`; final tested checkout `e332108`;

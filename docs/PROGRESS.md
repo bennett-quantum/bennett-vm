@@ -15,6 +15,12 @@ GREEN — three focused tests reproduce K12 1/3, 2/3 and idle-class witness rows
 Binding — strict complete positional arguments, f64 bits, token tuples and K13 hash witness.
 Disposition — launch ABI/complete realisation/certificate remainder stays in bennett-vm-hsd.
 
+clw — standalone 0.9 subject/invocation replay and complete positional before/after tuples.
+RED — .tmp/clw-red.log (missing verify_claim09 API).
+GREEN — three new replay tests plus ten existing certificate tests (.tmp/clw-green.log).
+INV-6 — borrowed labels cannot cover interface slots; omitted-zero slice reports 2/4 evidence.
+Disposition — scheduled/controlled/universal replay and certificate dispatch remain in bennett-vm-clw.
+
 # Published unavailable metadata re-baseline — 2026-10-30
 
 Initial published ISA checkout `0b913da`; final tested checkout `e332108`;

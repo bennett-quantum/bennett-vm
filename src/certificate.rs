@@ -48,7 +48,7 @@ struct Domain {
     count: U,
     total: U,
 }
-fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
+fn domain_roles(obj: &Object, name: &str, j: &Json, positional: bool) -> Result<Domain, String> {
     let f = obj.function(name).ok_or_else(|| err("unknown region"))?;
     let oracle = f.kind == FnKind::Oracle;
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction | FnKind::Oracle) {
@@ -81,7 +81,14 @@ fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
         names.push(i.lhs[0].clone());
         widths.push(declared[&i.lhs[0]]);
     }
-    for b in array(borrowed_defs)? {
+    for (index, b) in array(borrowed_defs)?.iter().enumerate() {
+        if positional {
+            string(b, "name")?;
+            if widths.get(bundles + index).copied() != field(b, "width")?.as_usize() {
+                return Err(err("borrowed positional width mismatch"));
+            }
+            continue;
+        }
         let n = string(b, "name")?;
         let w = field(b, "width")?.as_usize().ok_or_else(|| err("width"))?;
         if declared.get(n) != Some(&w) {
@@ -116,16 +123,28 @@ fn domain(obj: &Object, name: &str, j: &Json) -> Result<Domain, String> {
         components.push(Component { slot, lo, hi });
         Ok(())
     };
-    for b in array(field(j, "bundles")?)?
-        .iter()
-        .chain(array(borrowed_defs)?)
-    {
+    for b in array(field(j, "bundles")?)? {
         let n = string(b, "name")?;
-        let slot = names
+        let slot = names[..bundles]
             .iter()
             .position(|x| x == n)
-            .ok_or_else(|| err("unknown domain bundle"))?;
+            .ok_or_else(|| err("unknown interface bundle"))?;
         if field(b, "width")?.as_usize() != Some(widths[slot]) {
+            return Err(err("domain width differs from signature"));
+        }
+        add(slot, b)?;
+    }
+    for (index, b) in array(borrowed_defs)?.iter().enumerate() {
+        let slot = if positional {
+            bundles + index
+        } else {
+            let n = string(b, "name")?;
+            names
+                .iter()
+                .position(|x| x == n)
+                .ok_or_else(|| err("unknown domain bundle"))?
+        };
+        if slot >= widths.len() || field(b, "width")?.as_usize() != Some(widths[slot]) {
             return Err(err("domain width differs from signature"));
         }
         add(slot, b)?;
@@ -392,6 +411,18 @@ pub fn verify_claim(
     budget: &Budget,
     libraries: &[Object],
 ) -> Result<Verdict, String> {
+    verify_claim_impl(obj, name, claim, args, budget, libraries, false)
+}
+#[allow(clippy::too_many_arguments)]
+fn verify_claim_impl(
+    obj: &Object,
+    name: &str,
+    claim: &Json,
+    args: &[Value],
+    budget: &Budget,
+    libraries: &[Object],
+    positional: bool,
+) -> Result<Verdict, String> {
     let _guard = ReplayGuard::new(obj, name, claim)?;
     match string(claim, "kind")? {
         "numerical" | "channel" => {
@@ -406,7 +437,7 @@ pub fn verify_claim(
                 executable(obj, name, claim)?;
                 unreachable!()
             }
-            let d = domain(obj, name, field(claim, "domain")?)?;
+            let d = domain_roles(obj, name, field(claim, "domain")?, positional)?;
             let mut rng = None;
             let count = if kind == "sampled" {
                 let sampler = field(claim, "sampler")?;
@@ -1012,4 +1043,111 @@ fn t3_claim(
         libs,
         seen,
     )
+}
+
+/// K13 standalone reference-relation replay. No external argument/budget can
+/// retarget this claim. Scheduled contexts stay gated on complete source lowering.
+pub fn verify_claim09(
+    obj: &Object,
+    name: &str,
+    claim: &Json,
+    libraries: &[Object],
+) -> Result<Verdict, String> {
+    let subject = field(claim, "subject")?;
+    crate::target::keys(
+        subject,
+        &[
+            "closure_hash",
+            "variant",
+            "inherited_controls",
+            "schedule_hash",
+        ],
+    )?;
+    let ids = crate::identity::compute(obj)?;
+    if ids.closure.get(name).and_then(|v| v.as_deref()) != Some(string(subject, "closure_hash")?) {
+        return Err(err("subject closure_hash mismatch"));
+    }
+    if string(subject, "variant")?.is_empty() {
+        return Err(err("variant must be nonempty"));
+    }
+    let controls = field(subject, "inherited_controls")?
+        .as_usize()
+        .ok_or_else(|| err("invalid inherited_controls"))?;
+    let (args, budget) = crate::invocation::resolve(obj, name, field(claim, "invocation")?)?;
+    if subject.get("schedule_hash").is_some() || controls != 0 {
+        return Err(err(
+            "unavailable.reason: scheduled/controlled 0.9 invocation replay requires full bound realisation (bennett-vm-47t, bennett-vm-clw)",
+        ));
+    }
+    let kind = string(claim, "kind")?;
+    if !["exhaustive", "sampled"].contains(&kind) {
+        return Err(err(
+            "unavailable.reason: standalone structural/universal 0.9 invocation checks staged in bennett-vm-clw",
+        ));
+    }
+    let expected = field(claim, "expected")?;
+    crate::target::keys(expected, &["program", "table"])?;
+    if expected.as_obj().is_none_or(|m| m.len() != 1) {
+        return Err(err("expected requires exactly one table or program"));
+    }
+    let d = domain_roles(obj, name, field(claim, "domain")?, true)?;
+    let mut normalized = claim.clone();
+    if let Some(table) = expected.get("table") {
+        let rows = array(table)?;
+        if U::from_u64(rows.len() as u64) != d.count {
+            return Err(err("table must contain every domain row"));
+        }
+        let mut out = vec![];
+        for (i, row) in rows.iter().enumerate() {
+            crate::target::keys(row, &["before", "after"])?;
+            let before = tuple09(field(row, "before")?, &d)?;
+            if before != d.values(&U::from_u64(i as u64)) {
+                return Err(err(
+                    "table before tuple differs from domain enumeration (duplicate/missing/order)",
+                ));
+            }
+            out.push(Json::Arr(
+                tuple09(field(row, "after")?, &d)?
+                    .iter()
+                    .map(|x| Json::Str(x.to_decimal()))
+                    .collect(),
+            ));
+        }
+        if let Json::Obj(m) = &mut normalized {
+            m.insert(
+                "expected".into(),
+                Json::obj(vec![("table", Json::Arr(out))]),
+            );
+        }
+    }
+    verify_claim_impl(obj, name, &normalized, &args, &budget, libraries, true)
+}
+fn tuple09(j: &Json, d: &Domain) -> Result<Vec<U>, String> {
+    crate::target::keys(j, &["bundles", "borrowed", "regions"])?;
+    let bundles = array(field(j, "bundles")?)?;
+    let borrowed = array(field(j, "borrowed")?)?;
+    let regions = array(field(j, "regions")?)?;
+    if bundles.len() != d.bundles
+        || borrowed.len() != d.borrowed
+        || regions.len() != d.regions.len()
+    {
+        return Err(err("incomplete full tuple shape"));
+    }
+    let mut vals = vec![];
+    for v in bundles.iter().chain(borrowed) {
+        vals.push(crate::invocation::unsigned(v)?);
+    }
+    for (r, (_, count)) in regions.iter().zip(&d.regions) {
+        let r = array(r)?;
+        if r.len() != *count {
+            return Err(err("incomplete tuple cells"));
+        }
+        for v in r {
+            vals.push(crate::invocation::unsigned(v)?);
+        }
+    }
+    if vals.iter().zip(&d.widths).any(|(v, w)| v.bits() > *w) {
+        return Err(err("tuple value outside width"));
+    }
+    Ok(vals)
 }

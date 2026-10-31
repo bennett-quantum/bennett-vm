@@ -22,6 +22,9 @@ enum Bound {
     Body(Json, Box<Bindings>),
     Templates(Json, Box<Bindings>),
     Allocation(Rc<RefCell<Allocation>>),
+    Image(String),
+    Event(Json),
+    Class(String),
 }
 #[derive(Clone, Debug)]
 struct Allocation {
@@ -54,7 +57,7 @@ impl Bindings {
         Ok(())
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Leaf {
     pub ordinal: usize,
     pub operation: String,
@@ -63,6 +66,7 @@ pub struct Leaf {
     pub angle: Option<u64>,
     pub class: Option<String>,
     pub state: Option<String>,
+    pub event: Option<Json>,
 }
 impl Leaf {
     fn adjoint(&mut self) {
@@ -201,10 +205,29 @@ impl Catalog {
                     Bound::Wire(w)
                 }
                 "angle" => Bound::Angle(angle(a, outer)?),
+                "allocation" => match a.as_str().and_then(|n| outer.values.get(n)) {
+                    Some(Bound::Allocation(a)) => Bound::Allocation(a.clone()),
+                    _ => return Err(err("unbound allocation actual")),
+                },
+                "class" => Bound::Class(class(a, outer)?),
+                "image" => Bound::Image(image(a, outer)?),
+                "event" => {
+                    let value = match a.as_str().and_then(|n| outer.values.get(n)) {
+                        Some(Bound::Event(e)) => e.clone(),
+                        _ => a.clone(),
+                    };
+                    keys(&value, &["instruction", "point"])?;
+                    string(field(&value, "instruction")?)?;
+                    string(field(&value, "point")?)?;
+                    Bound::Event(value)
+                }
                 "templates" => {
                     if let Some(Bound::Templates(t, e)) =
                         a.as_str().and_then(|n| outer.values.get(n))
                     {
+                        if arr(t)?.len() != scalar(field(f, "length")?, &env)?.usize()? {
+                            return Err(err("templates length mismatch"));
+                        }
                         Bound::Templates(t.clone(), e.clone())
                     } else {
                         let ts = arr(a)?;
@@ -213,19 +236,7 @@ impl Catalog {
                         }
                         for t in ts {
                             keys(t, &["parameters", "body"])?;
-                            let mut names = BTreeSet::new();
-                            for p in arr(field(t, "parameters")?)? {
-                                keys(p, &["name", "type", "width"])?;
-                                if !names.insert(string(field(p, "name")?)?) {
-                                    return Err(err("duplicate template formal"));
-                                }
-                                if field(p, "type")?.as_str() != Some("wire") {
-                                    return Err(err(
-                                        "unavailable.reason: non-wire template formal staged in bennett-vm-47t",
-                                    ));
-                                }
-                                field(p, "width")?;
-                            }
+                            validate_formals(arr(field(t, "parameters")?)?)?;
                             syntax(field(t, "body")?)?;
                         }
                         Bound::Templates(a.clone(), Box::new(outer.clone()))
@@ -294,6 +305,134 @@ impl Catalog {
                     angle: a,
                     class: None,
                     state: None,
+                    event: None,
+                });
+                *next += 1;
+            } else if let Some(n) = c.get("alloc") {
+                let name = string(n)?;
+                if let Some(value) = env.values.get(name)
+                    && !matches!(value, Bound::Allocation(a) if !a.borrow().live)
+                {
+                    return Err(err("allocation shadows live binding"));
+                }
+                let width = scalar(field(c, "width")?, env)?.usize()?;
+                let state = string(field(c, "state")?)?;
+                if state != "clean" && state != "borrowed" {
+                    return Err(err("invalid allocation state"));
+                }
+                // Legacy alloc.class is a literal spelling, unlike declare.class.
+                let cls = string(field(c, "class")?)?;
+                if cls.is_empty() {
+                    return Err(err("empty allocation class"));
+                }
+                let ws: Vec<_> = (0..width)
+                    .map(|i| format!("$alloc{}.{}[{i}]", *next, name))
+                    .collect();
+                env.values.insert(
+                    name.into(),
+                    Bound::Allocation(Rc::new(RefCell::new(Allocation {
+                        name: name.into(),
+                        width,
+                        wires: ws.clone(),
+                        class: cls.into(),
+                        state: state.into(),
+                        live: true,
+                    }))),
+                );
+                out.push(Leaf {
+                    ordinal: *next,
+                    operation: "alloc".into(),
+                    wires: ws,
+                    controls: BTreeSet::new(),
+                    angle: None,
+                    class: Some(cls.into()),
+                    state: Some(state.into()),
+                    event: None,
+                });
+                *next += 1;
+            } else if let Some(n) = c.get("release") {
+                let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
+                    return Err(err("unbound release"));
+                };
+                let mut a = a.borrow_mut();
+                if !a.live {
+                    return Err(err("invalid allocation lifetime"));
+                }
+                a.live = false;
+                out.push(Leaf {
+                    ordinal: *next,
+                    operation: "release".into(),
+                    wires: a.wires.clone(),
+                    controls: BTreeSet::new(),
+                    angle: None,
+                    class: Some(a.class.clone()),
+                    state: Some(a.state.clone()),
+                    event: None,
+                });
+                *next += 1;
+            } else if let Some(n) = c.get("image") {
+                let image = image(n, env)?;
+                let ws = wires(field(c, "wires")?, env)?;
+                if !image.is_empty() && ws.len() != image.len() * 4 {
+                    return Err(err("image width mismatch"));
+                }
+                for (byte, pair) in image.as_bytes().chunks_exact(2).enumerate() {
+                    let value = u8::from_str_radix(std::str::from_utf8(pair).map_err(err)?, 16)
+                        .map_err(err)?;
+                    for bit in 0..8 {
+                        if value & (1 << bit) != 0 {
+                            out.push(Leaf {
+                                ordinal: *next,
+                                operation: "x".into(),
+                                wires: vec![ws[byte * 8 + bit].clone()],
+                                controls: BTreeSet::new(),
+                                angle: None,
+                                class: None,
+                                state: None,
+                                event: None,
+                            });
+                            *next += 1;
+                        }
+                    }
+                }
+            } else if let Some(op) = c.get("classical") {
+                let opcode = string(op)?;
+                let point = string(field(c, "point")?)?;
+                let (operation, event) = if let Some(Bound::Event(event)) = env.values.get(point) {
+                    let instruction = string(field(event, "instruction")?)?;
+                    let tokens = crate::object::split_tokens(instruction)?;
+                    let offset = tokens.iter().position(|t| t == "=").map_or(0, |i| i + 1);
+                    let actual = tokens
+                        .get(offset)
+                        .ok_or_else(|| err("empty classical event"))?;
+                    if actual != opcode
+                        && !actual.strip_prefix(opcode).is_some_and(|s| {
+                            s.strip_prefix(".i").is_some_and(|s| {
+                                !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+                            })
+                        })
+                    {
+                        return Err(err("classical event opcode mismatch"));
+                    }
+                    (actual.clone(), event.clone())
+                } else {
+                    (
+                        opcode.into(),
+                        Json::obj(vec![
+                            ("instruction", Json::Str(opcode.into())),
+                            ("point", Json::Str(point.into())),
+                        ]),
+                    )
+                };
+                out.push(Leaf {
+                    ordinal: *next,
+                    operation,
+                    wires: vec![],
+                    controls: BTreeSet::new(),
+                    angle: None,
+                    class: None,
+                    state: None,
+                    event: Some(event),
                 });
                 *next += 1;
             } else if let Some(n) = c.get("for") {
@@ -318,13 +457,8 @@ impl Catalog {
             } else if c.get("inverse").is_some() {
                 let start = out.len();
                 self.walk(field(c, "body")?, env, out, next, active)?;
-                if out[start..]
-                    .iter()
-                    .any(|l| ["alloc", "release"].contains(&l.operation.as_str()))
-                {
-                    return Err(err(
-                        "unavailable.reason: inverse allocation lifetime restoration staged in bennett-vm-47t",
-                    ));
+                if out[start..].iter().any(|l| l.event.is_some()) {
+                    return Err(err("classical inverse requires retained §7.4 history"));
                 }
                 out[start..].reverse();
                 for l in &mut out[start..] {
@@ -350,7 +484,7 @@ impl Catalog {
                     return Err(err("declaration shadows binding"));
                 }
                 let width = scalar(field(c, "width")?, env)?.usize()?;
-                let class = string(field(field(c, "class")?, "class")?)?.to_string();
+                let class = class(field(c, "class")?, env)?;
                 if class.is_empty() {
                     return Err(err("empty class"));
                 }
@@ -397,6 +531,7 @@ impl Catalog {
                     angle: None,
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
+                    event: None,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("apply") {
@@ -440,6 +575,65 @@ impl Catalog {
         }
         Ok(())
     }
+}
+fn class(j: &Json, e: &Bindings) -> Result<String, String> {
+    if let Some(Bound::Class(c)) = j.as_str().and_then(|n| e.values.get(n)) {
+        return Ok(c.clone());
+    }
+    keys(j, &["class"])?;
+    let c = string(field(j, "class")?)?;
+    if c.is_empty() {
+        return Err(err("empty class"));
+    }
+    Ok(c.into())
+}
+fn image(j: &Json, e: &Bindings) -> Result<String, String> {
+    if let Some(Bound::Image(i)) = j.as_str().and_then(|n| e.values.get(n)) {
+        return Ok(i.clone());
+    }
+    let s = string(j)?;
+    if !s.len().is_multiple_of(2)
+        || !s
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(err("invalid image hex or unbound image"));
+    }
+    Ok(s.into())
+}
+fn validate_formals(fs: &[Json]) -> Result<(), String> {
+    let mut names = BTreeSet::new();
+    for f in fs {
+        let name = if let Some(n) = f.as_str() {
+            n
+        } else {
+            string(field(f, "name")?)?
+        };
+        if !names.insert(name) {
+            return Err(err("duplicate formal"));
+        }
+        if f.as_str().is_some() {
+            continue;
+        }
+        let extra: &[&str] = match string(field(f, "type")?)? {
+            "integer" | "angle" | "body" | "symbol" | "environment" | "event" | "image"
+            | "class" | "allocation" => &[],
+            "wire" => &["width"],
+            "templates" => &["length"],
+            "arguments" => &["symbol"],
+            "value" => &["isa_type"],
+            "records" => &["fields", "order"],
+            "region" => &["address", "cell", "role"],
+            _ => return Err(err("unknown formal type")),
+        };
+        let mut allowed = vec!["name", "type"];
+        allowed.extend(extra);
+        keys(f, &allowed)?;
+        for k in extra {
+            field(f, k)?;
+        }
+    }
+    Ok(())
 }
 fn angle(j: &Json, e: &Bindings) -> Result<u64, String> {
     let s = string(j)?;

@@ -150,7 +150,7 @@ fn finite_higher_order_repetition_is_not_a_dependency_cycle() {
     );
 }
 #[test]
-fn reacquisition_has_fresh_identity_and_allocation_inverse_is_staged() {
+fn reacquisition_has_fresh_identity_in_both_traversals() {
     let c = Catalog::published().unwrap();
     let mut b = Bindings::new();
     b.body("B",j(r#"[{"declare":"t","width":1,"class":{"class":"any"},"state":"clean","body":[{"acquire":"t"},{"relinquish":"t"},{"acquire":"t"},{"relinquish":"t"}]}]"#)).unwrap();
@@ -160,9 +160,79 @@ fn reacquisition_has_fresh_identity_and_allocation_inverse_is_staged() {
     assert_ne!(l[0].wires, l[2].wires);
     b.body("I", j(r#"[{"inverse":true,"body":[{"splice":"B"}]}]"#))
         .unwrap();
-    assert!(
-        c.expand("adj", &[j(r#""I""#)], &b)
-            .unwrap_err()
-            .contains("unavailable.reason")
+    let inverse = c.expand("adj", &[j(r#""I""#)], &b).unwrap();
+    assert_eq!(
+        inverse.iter().map(|l| l.ordinal).collect::<Vec<_>>(),
+        [3, 2, 1, 0]
     );
+    assert_eq!(inverse[0].operation, "alloc");
+    assert_eq!(inverse[0].wires, inverse[1].wires);
+    assert_eq!(inverse[2].wires, inverse[3].wires);
+    assert_ne!(inverse[0].wires, inverse[2].wires);
+}
+
+#[test]
+fn source_image_and_classical_event_bindings() {
+    let c = Catalog::published().unwrap();
+    let b = Bindings::new();
+    let template = j(r#"[{"parameters":[{"name":"r","type":"wire","width":16}],"body":[]}]"#);
+    let l = c
+        .expand(
+            "qregion",
+            &[j("2"), j("8"), j(r#""8102""#), template, j("[]")],
+            &b,
+        )
+        .unwrap();
+    assert_eq!(
+        l.iter().map(|x| x.operation.as_str()).collect::<Vec<_>>(),
+        ["alloc", "x", "x", "x", "x", "x", "x", "release"]
+    );
+    assert_eq!(l[1].wires, [l[0].wires[0].clone()]);
+    assert_eq!(l[2].wires, [l[0].wires[7].clone()]);
+    assert_eq!(l[3].wires, [l[0].wires[9].clone()]);
+    assert_eq!(l[4].wires, l[3].wires);
+    assert_eq!(l[7].wires, l[0].wires);
+    let event = j(r#"{"instruction":"a = const.i8 7","point":"entry:0"}"#);
+    let l = c.expand("cc.const", &[event], &b).unwrap();
+    assert_eq!(l[0].operation, "const.i8");
+    assert_eq!(
+        l[0].event.as_ref().unwrap().to_jcs(),
+        r#"{"instruction":"a = const.i8 7","point":"entry:0"}"#
+    );
+    assert!(
+        c.expand(
+            "cc.add",
+            &[j(r#"{"instruction":"a = const.i8 7","point":"entry:0"}"#)],
+            &b
+        )
+        .is_err()
+    );
+    assert!(
+        c.expand(
+            "qregion",
+            &[j("2"), j("8"), j(r#""810X""#), j("[]"), j("[]")],
+            &b
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn declaration_aliases_keep_class_state_and_inverse_lifetimes() {
+    let c = Catalog::published().unwrap();
+    let mut b = Bindings::new();
+    b.body("B",j(r#"[{"declare":"d","width":2,"class":{"class":"ancilla"},"state":"clean","body":[{"invoke":"qalloc","args":["d"]},{"gate":"x","wires":["d[1]"]},{"gate":"x","wires":["d[1]"]},{"invoke":"qfree","args":["d"]}]}]"#)).unwrap();
+    let f = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
+    assert_eq!(f[0].class.as_deref(), Some("ancilla"));
+    assert_eq!(f[0].wires, f[3].wires);
+    b.body("I", j(r#"[{"inverse":true,"body":[{"splice":"B"}]}]"#))
+        .unwrap();
+    let i = c.expand("adj", &[j(r#""I""#)], &b).unwrap();
+    assert_eq!(
+        i.iter().map(|l| l.ordinal).collect::<Vec<_>>(),
+        [3, 2, 1, 0]
+    );
+    assert_eq!(i[0].operation, "alloc");
+    assert_eq!(i[0].class.as_deref(), Some("ancilla"));
+    assert_eq!(i[0].wires, i[3].wires);
 }

@@ -41,6 +41,7 @@ enum Bound {
 }
 #[derive(Clone, Debug)]
 struct Allocation {
+    identity: String,
     width: usize,
     wires: Vec<String>,
     class: String,
@@ -52,6 +53,7 @@ pub struct Bindings {
     controls: BTreeSet<String>,
     locals: BTreeSet<String>,
     declarations: Rc<Cell<usize>>,
+    scratch: BTreeSet<String>,
 }
 impl Bindings {
     pub fn new() -> Self {
@@ -80,6 +82,8 @@ pub struct Leaf {
     pub class: Option<String>,
     pub state: Option<String>,
     pub event: Option<Json>,
+    pub allocation: Option<String>,
+    pub scratch: bool,
 }
 impl Leaf {
     fn adjoint(&mut self) {
@@ -138,6 +142,10 @@ impl Catalog {
                 return Err(err("recipe order/duplicate kind"));
             }
             last = kind;
+            validate_formals(arr(field(r, "parameters")?)?)?;
+            if !arr(field(r, "removable")?)?.is_empty() {
+                return Err(err("ref@0.9 removable must be empty"));
+            }
             syntax(field(r, "body")?)?;
         }
         Ok(Self { doc })
@@ -191,6 +199,10 @@ impl Catalog {
             return Err(err(format!("{kind}: arity mismatch")));
         }
         let mut env = bind_formals(formals, args, outer, outer)?;
+        env.scratch = arr(field(r, "scratch")?)?
+            .iter()
+            .map(|n| string(n).map(String::from))
+            .collect::<Result<_, _>>()?;
         active.push(kind.into());
         let result = self.walk(field(r, "body")?, &mut env, out, next, active);
         active.pop();
@@ -242,6 +254,8 @@ impl Catalog {
                     class: None,
                     state: None,
                     event: None,
+                    allocation: None,
+                    scratch: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("alloc") {
@@ -258,28 +272,31 @@ impl Catalog {
                 // A repeated alloc in a raw inverse refers to the declaration at
                 // that restored position. Validate actual lifetimes only after
                 // inverse traversal, never by executing its forward prefix.
-                let ws = if env.locals.contains(name) {
+                let (identity, ws) = if env.locals.contains(name) {
                     match env.values.get(name) {
                         Some(Bound::Allocation(a)) => {
                             let a = a.borrow();
                             if a.width != width || a.state != state || a.class != cls {
                                 return Err(err("allocation metadata changed"));
                             }
-                            a.wires.clone()
+                            (a.identity.clone(), a.wires.clone())
                         }
                         _ => return Err(err("allocation shadows binding")),
                     }
                 } else {
                     let id = env.declarations.get();
                     env.declarations.set(id + 1);
-                    (0..width)
-                        .map(|i| format!("$decl{id}.{name}[{i}]"))
-                        .collect::<Vec<_>>()
+                    let identity = format!("$decl{id}.{name}");
+                    let ws = (0..width)
+                        .map(|i| format!("{identity}[{i}]"))
+                        .collect::<Vec<_>>();
+                    (identity, ws)
                 };
                 env.locals.insert(name.into());
                 env.values.insert(
                     name.into(),
                     Bound::Allocation(Rc::new(RefCell::new(Allocation {
+                        identity: identity.clone(),
                         width,
                         wires: ws.clone(),
                         class: cls.into(),
@@ -295,6 +312,8 @@ impl Catalog {
                     class: Some(cls.into()),
                     state: Some(state.into()),
                     event: None,
+                    allocation: Some(identity),
+                    scratch: env.scratch.contains(name),
                 });
                 *next += 1;
             } else if let Some(n) = c.get("release") {
@@ -311,6 +330,8 @@ impl Catalog {
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
                     event: None,
+                    allocation: Some(a.identity.clone()),
+                    scratch: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("image") {
@@ -319,7 +340,7 @@ impl Catalog {
                 if !image.is_empty() && ws.len() != image.len() * 4 {
                     return Err(err("image width mismatch"));
                 }
-                for (byte, pair) in image.as_bytes().chunks_exact(2).enumerate() {
+                for (byte, pair) in image.as_bytes().as_chunks::<2>().0.iter().enumerate() {
                     let value = u8::from_str_radix(std::str::from_utf8(pair).map_err(err)?, 16)
                         .map_err(err)?;
                     for bit in 0..8 {
@@ -333,6 +354,8 @@ impl Catalog {
                                 class: None,
                                 state: None,
                                 event: None,
+                                allocation: None,
+                                scratch: false,
                             });
                             *next += 1;
                         }
@@ -376,6 +399,8 @@ impl Catalog {
                     class: None,
                     state: None,
                     event: Some(event),
+                    allocation: None,
+                    scratch: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("for") {
@@ -438,6 +463,7 @@ impl Catalog {
                 let id = env.declarations.get();
                 env.declarations.set(id + 1);
                 let a = Rc::new(RefCell::new(Allocation {
+                    identity: format!("$decl{id}.{name}"),
                     width,
                     wires: (0..width)
                         .map(|i| format!("$decl{id}.{name}[{i}]"))
@@ -465,6 +491,8 @@ impl Catalog {
                     class: Some(a.class.clone()),
                     state: Some(a.state.clone()),
                     event: None,
+                    allocation: Some(a.identity.clone()),
+                    scratch: acquire && env.scratch.contains(string(n)?),
                 });
                 *next += 1;
             } else if let Some(n) = c.get("visit") {
@@ -486,7 +514,7 @@ impl Catalog {
                     .clone();
                 let fs = arr(field(&t, "parameters")?)?;
                 let args = arr(field(c, "args")?)?;
-                let mut local = bind_formals(fs, args, env, &cap)?;
+                let mut local = bind_formals(fs, args, env, cap)?;
                 local.controls.extend(env.controls.clone());
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
@@ -499,24 +527,88 @@ impl Catalog {
     }
 }
 fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
-    let mut live = BTreeMap::<String, String>::new();
+    // Raw inverse puts the acquire-side scratch mark on the closing leaf.
+    // Pair by declaration identity before assigning physical occurrences.
+    let mut open = BTreeMap::new();
+    let mut marked = BTreeSet::new();
+    for (i, l) in leaves.iter().enumerate() {
+        if l.operation == "alloc" {
+            if open.insert(l.allocation.clone(), i).is_some() {
+                return Err(err("double acquisition"));
+            }
+        } else if l.operation == "release" {
+            let start = open
+                .remove(&l.allocation)
+                .ok_or_else(|| err("unmatched release"))?;
+            if l.scratch || leaves[start].scratch {
+                marked.insert(start);
+            }
+        }
+    }
+
+    let mut wires = BTreeMap::<String, String>::new();
+    let mut live = BTreeMap::<String, (String, Option<String>, Option<String>, bool, usize)>::new();
+    let mut scratch = vec![];
     for (index, leaf) in leaves.iter_mut().enumerate() {
         if leaf.operation == "alloc" {
-            for (bit, wire) in leaf.wires.iter_mut().enumerate() {
-                let actual = format!("$alloc{index}[{bit}]");
-                if live.insert(wire.clone(), actual.clone()).is_some() {
-                    return Err(err("double acquisition"));
-                }
-                *wire = actual;
+            leaf.scratch = marked.contains(&index);
+            let id = leaf
+                .allocation
+                .clone()
+                .ok_or_else(|| err("allocation identity missing"))?;
+            if live.contains_key(&id) {
+                return Err(err("double acquisition"));
             }
+            if leaf.scratch && leaf.state.as_deref() != Some("clean") {
+                return Err(err("library scratch must be clean"));
+            }
+            let actual = format!("$alloc{index}");
+            live.insert(
+                id.clone(),
+                (
+                    actual.clone(),
+                    leaf.class.clone(),
+                    leaf.state.clone(),
+                    leaf.scratch,
+                    leaf.wires.len(),
+                ),
+            );
+            if leaf.scratch {
+                scratch.push(id);
+            }
+            for (bit, wire) in leaf.wires.iter_mut().enumerate() {
+                let physical = format!("{actual}[{bit}]");
+                if wires.insert(wire.clone(), physical.clone()).is_some() {
+                    return Err(err("overlapping allocation"));
+                }
+                *wire = physical;
+            }
+            leaf.allocation = Some(actual);
         } else if leaf.operation == "release" {
+            let id = leaf
+                .allocation
+                .clone()
+                .ok_or_else(|| err("release identity missing"))?;
+            let (actual, class, state, marked, width) =
+                live.remove(&id).ok_or_else(|| err("unmatched release"))?;
+            if class != leaf.class || state != leaf.state || width != leaf.wires.len() {
+                return Err(err("release metadata mismatch"));
+            }
+            if marked && scratch.pop().as_ref() != Some(&id) {
+                return Err(err("library scratch release is not LIFO"));
+            }
+            leaf.scratch = marked;
+            leaf.allocation = Some(actual);
             for wire in &mut leaf.wires {
-                *wire = live.remove(wire).ok_or_else(|| err("unmatched release"))?;
+                *wire = wires
+                    .remove(wire)
+                    .ok_or_else(|| err("unmatched release wire"))?;
             }
         } else {
             let resolve = |wire: &String| -> Result<String, String> {
                 if wire.starts_with("$decl") {
-                    live.get(wire)
+                    wires
+                        .get(wire)
                         .cloned()
                         .ok_or_else(|| err("inactive allocation wire use"))
                 } else {
@@ -548,6 +640,13 @@ fn bind_formals(
     validate_formals(formals)?;
     let mut env = capture.clone();
     env.locals.clear();
+    for f in formals {
+        let name = f
+            .as_str()
+            .map(Ok)
+            .unwrap_or_else(|| string(field(f, "name")?))?;
+        env.values.remove(name);
+    }
     let mut names = BTreeSet::new();
     for (f, a) in formals.iter().zip(args) {
         let (name, ty) = if let Some(n) = f.as_str() {
@@ -1059,6 +1158,30 @@ mod binding_tests {
     use super::*;
     fn j(s: &str) -> Json {
         json::parse(s).unwrap()
+    }
+
+    #[test]
+    fn scratch_mark_survives_aliases_and_inverse_release() {
+        let mut c = Catalog::published().unwrap();
+        let Json::Obj(doc) = &mut c.doc else { panic!() };
+        let Json::Arr(recipes) = doc.get_mut("recipes").unwrap() else {
+            panic!()
+        };
+        recipes.push(j(r#"{"kind":"marked.acquire","parameters":[{"name":"D","type":"allocation"}],"scratch":["D"],"body":[{"acquire":"D"}]}"#));
+        recipes.push(j(r#"{"kind":"alias.release","parameters":[{"name":"Other","type":"allocation"}],"scratch":[],"body":[{"relinquish":"Other"}]}"#));
+        let body = r#"[{"declare":"d","width":1,"class":{"class":"fast"},"state":"clean","body":[{"invoke":"marked.acquire","args":["d"]},{"invoke":"alias.release","args":["d"]}]}]"#;
+        let mut b = Bindings::new();
+        b.body("B", j(body)).unwrap();
+        b.body("I", j(r#"[{"inverse":true,"body":[{"splice":"B"}]}]"#))
+            .unwrap();
+        let inverse = c.expand("adj", &[j(r#""I""#)], &b).unwrap();
+        assert!(inverse.iter().all(|l| l.scratch));
+        b.body("bad",j(r#"[{"declare":"d","width":1,"class":{"class":"fast"},"state":"clean","body":[{"declare":"e","width":1,"class":{"class":"fast"},"state":"clean","body":[{"invoke":"marked.acquire","args":["d"]},{"invoke":"marked.acquire","args":["e"]},{"invoke":"alias.release","args":["d"]},{"invoke":"alias.release","args":["e"]}]}]}]"#)).unwrap();
+        assert!(
+            c.expand("adj", &[j(r#""bad""#)], &b)
+                .unwrap_err()
+                .contains("LIFO")
+        );
     }
 
     #[test]

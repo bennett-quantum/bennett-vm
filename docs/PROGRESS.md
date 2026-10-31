@@ -1,8 +1,8 @@
 # ISA 0.9 remainder implementation — 2026-10-31
 Resume: 47t in progress; full source/schedule realisation precedes hsd/clw; fat untouched.
-Pass 1 a5e3d90: catalog image/events and allocation forwarding; 8 ref09 tests/engine.
-Pass 2: typed records/regions/values, generic templates and post-inversion lifetime validation.
-RED .tmp/47t-typed-red.log; GREEN 8 library + 9 ref09 tests/engine (typed-green logs).
+Passes 1–2 a5e3d90/151f1ba: image/events, allocation forwarding, typed records/regions/values/templates.
+Pass 3: zero-width identity checks; clean scratch LIFO marks survive aliases and raw inverses.
+RED .tmp/47t-{lifetime,scratch}-red.log; GREEN 9 library + 10 ref09 tests/engine; strict Clippy pass.
 Before: interpreter 118/5; JIT 120/5 incl pass-1 tests; differential 14/4 both. Full support unclaimed.
 
 # ISA 0.9 consumer — 2026-10-31

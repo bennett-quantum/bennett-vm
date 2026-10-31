@@ -263,3 +263,16 @@ fn typed_templates_capture_records_and_region_shapes() {
     assert_eq!(l.first().unwrap().class.as_deref(), Some("fast"));
     assert_eq!(l.first().unwrap().wires, l.last().unwrap().wires);
 }
+
+#[test]
+fn zero_width_allocations_still_have_checked_lifetimes() {
+    let c = Catalog::published().unwrap();
+    for body in [
+        r#"[{"declare":"d","width":0,"class":{"class":"fast"},"state":"clean","body":[{"acquire":"d"}]}]"#,
+        r#"[{"declare":"d","width":0,"class":{"class":"fast"},"state":"clean","body":[{"acquire":"d"},{"acquire":"d"},{"relinquish":"d"}]}]"#,
+    ] {
+        let mut b = Bindings::new();
+        b.body("B", j(body)).unwrap();
+        assert!(c.expand("adj", &[j(r#""B""#)], &b).is_err());
+    }
+}

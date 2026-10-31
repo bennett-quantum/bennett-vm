@@ -21,6 +21,12 @@ GREEN — three new replay tests plus ten existing certificate tests (.tmp/clw-g
 INV-6 — borrowed labels cannot cover interface slots; omitted-zero slice reports 2/4 evidence.
 Disposition — scheduled/controlled/universal replay and certificate dispatch remain in bennett-vm-clw.
 
+cxg — K9 exact zero-based decimal bucket uses requested epsilon_share and rational comparisons.
+RED — .tmp/cxg-red.log (old unimplemented rejection).
+GREEN — two new boundary/prohibition tests plus ten target tests (.tmp/cxg-green.log).
+Coverage — zero/negative/>1/unbound eps, out-of-array, long-decimal neighbours, 10^-100.
+Disposition — bennett-vm-cxg closed; existing exact-entry eps prohibition includes nested table indices.
+
 # Published unavailable metadata re-baseline — 2026-10-30
 
 Initial published ISA checkout `0b913da`; final tested checkout `e332108`;

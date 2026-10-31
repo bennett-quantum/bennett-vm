@@ -95,7 +95,15 @@ fn check_expr(j: &Json, bound: &[&str]) -> Result<BTreeSet<String>, String> {
         keys(j, &["table", "index"])?;
         string(field(j, "table")?)?;
         let i = string(field(j, "index")?)?;
-        match i{"k"=>{if !bound.contains(&"k"){return Err("§8.1: unbound k".into());}vars.insert("k".into());},"eps_decade"=>return Err("unimplemented: eps_decade index (milestone 4); §8.1 specifies no rounding/index rule".into()),_=>return Err("§8.1: invalid table index name".into())}
+        let variable = match i {
+            "k" => "k",
+            "eps_decade" => "eps",
+            _ => return Err("§8.1: invalid table index name".into()),
+        };
+        if !bound.contains(&variable) {
+            return Err(format!("§8.1: unbound {variable}"));
+        }
+        vars.insert(variable.into());
     } else {
         return Err("§8.1: invalid expression AST".into());
     }
@@ -122,7 +130,19 @@ pub fn eval(
     }
     if let Some(t) = j.get("table") {
         let t = tables.get(string(t)?).ok_or("§8.1: unknown table")?;
-        let i = vars.get("k").ok_or("§8.1: unbound k")?.usize()?;
+        let i = if string(field(j, "index")?)? == "eps_decade" {
+            let mut eps = vars.get("eps").ok_or("§8.1: unbound eps")?.clone();
+            let mut index = 0usize;
+            while eps < R::from(1) {
+                eps = eps.mul(&R::from(10));
+                index = index
+                    .checked_add(1)
+                    .ok_or("§8.1: host limit: eps_decade index")?;
+            }
+            index
+        } else {
+            vars.get("k").ok_or("§8.1: unbound k")?.usize()?
+        };
         return t
             .get(i)
             .cloned()

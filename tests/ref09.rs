@@ -236,3 +236,30 @@ fn declaration_aliases_keep_class_state_and_inverse_lifetimes() {
     assert_eq!(i[0].class.as_deref(), Some("ancilla"));
     assert_eq!(i[0].wires, i[3].wires);
 }
+
+#[test]
+fn typed_templates_capture_records_and_region_shapes() {
+    let c = Catalog::published().unwrap();
+    let mut b = Bindings::new();
+    b.wire("a", 16);
+    b.body("B", j(r#"[{"invoke":"qregion","args":[2,8,"",[{"parameters":[{"name":"cells","type":"wire","width":16}],"body":[{"invoke":"qregion","args":[1,1,"",[{"parameters":[{"name":"scratch","type":"wire","width":1}],"body":[{"gate":"cx","wires":["a[0]","scratch"]},{"gate":"cx","wires":["a[0]","scratch"]}]}],[]]}]}],[]]}]"#)).unwrap();
+    let l = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
+    assert_eq!(l.iter().filter(|l| l.operation == "cx").count(), 2);
+    assert_ne!(l[0].wires, l[1].wires);
+
+    // K25 descriptor validation runs at binding, including an empty visit domain.
+    let args = j(r#"[1,1,1,"pc","next","frame",[],[]]"#);
+    b.wire("pc", 1);
+    b.wire("next", 1);
+    b.wire("frame", 1);
+    assert!(c.expand("step", args.as_arr().unwrap(), &b).is_err());
+    // A source qload accepts shape and role, never equal flattened width alone.
+    b.body("R", j(r#"[{"declare":"d","width":8,"class":{"class":"fast"},"state":"clean","body":[{"invoke":"qload.in","args":[1,2,8,"address",{"address":1,"cell":8,"role":"in","origin":"interface:db","cells":"a"},"d"]},{"invoke":"qunload.in","args":[1,2,8,"address",{"address":1,"cell":8,"role":"in","origin":"interface:db","cells":"a"},"d"]}]}]"#)).unwrap();
+    b.wire("address", 1);
+    // Re-capture after address is bound.
+    let mut r = b.clone();
+    r.body("R", j(r#"[{"declare":"d","width":8,"class":{"class":"fast"},"state":"clean","body":[{"invoke":"qload.in","args":[1,2,8,"address",{"address":1,"cell":8,"role":"in","origin":"interface:db","cells":"a"},"d"]},{"invoke":"qunload.in","args":[1,2,8,"address",{"address":1,"cell":8,"role":"in","origin":"interface:db","cells":"a"},"d"]}]}]"#)).unwrap();
+    let l = c.expand("adj", &[j(r#""R""#)], &r).unwrap();
+    assert_eq!(l.first().unwrap().class.as_deref(), Some("fast"));
+    assert_eq!(l.first().unwrap().wires, l.last().unwrap().wires);
+}

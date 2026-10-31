@@ -5,7 +5,7 @@ use crate::{
     target::{Rational as R, arr, field, keys, string},
 };
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     path::Path,
     rc::Rc,
@@ -25,20 +25,33 @@ enum Bound {
     Image(String),
     Event(Json),
     Class(String),
+    Region {
+        address: usize,
+        cell: usize,
+        role: String,
+        origin: String,
+        cells: Vec<String>,
+    },
+    Value(Json, Json),
+    Records {
+        fields: Json,
+        order: Json,
+        rows: Vec<BTreeMap<String, Bound>>,
+    },
 }
 #[derive(Clone, Debug)]
 struct Allocation {
-    name: String,
     width: usize,
     wires: Vec<String>,
     class: String,
     state: String,
-    live: bool,
 }
 #[derive(Clone, Debug, Default)]
 pub struct Bindings {
     values: BTreeMap<String, Bound>,
     controls: BTreeSet<String>,
+    locals: BTreeSet<String>,
+    declarations: Rc<Cell<usize>>,
 }
 impl Bindings {
     pub fn new() -> Self {
@@ -157,6 +170,7 @@ impl Catalog {
         let mut next = 0;
         let mut active = vec![];
         self.invoke(kind, args, bindings, &mut out, &mut next, &mut active)?;
+        resolve_lifetimes(&mut out)?;
         Ok(out)
     }
     fn invoke(
@@ -176,88 +190,7 @@ impl Catalog {
         if formals.len() != args.len() {
             return Err(err(format!("{kind}: arity mismatch")));
         }
-        let mut env = outer.clone();
-        let mut names = BTreeSet::new();
-        for (f, a) in formals.iter().zip(args) {
-            let (name, ty) = if let Some(n) = f.as_str() {
-                (n, "integer")
-            } else {
-                (string(field(f, "name")?)?, string(field(f, "type")?)?)
-            };
-            if !names.insert(name) {
-                return Err(err("duplicate formal"));
-            }
-            let value = match ty {
-                "integer" => Bound::Integer(scalar(a, outer)?),
-                "wire" => {
-                    let w = wires(a, outer)?;
-                    if w.len() != scalar(field(f, "width")?, &env)?.usize()? {
-                        return Err(err("wire width mismatch"));
-                    }
-                    if w.iter().collect::<BTreeSet<_>>().len() != w.len() {
-                        return Err(err("duplicate wire actual"));
-                    }
-                    Bound::Wire(w)
-                }
-                "environment" => {
-                    let w = wires(a, outer)?;
-                    env.controls.extend(w.iter().cloned());
-                    Bound::Wire(w)
-                }
-                "angle" => Bound::Angle(angle(a, outer)?),
-                "allocation" => match a.as_str().and_then(|n| outer.values.get(n)) {
-                    Some(Bound::Allocation(a)) => Bound::Allocation(a.clone()),
-                    _ => return Err(err("unbound allocation actual")),
-                },
-                "class" => Bound::Class(class(a, outer)?),
-                "image" => Bound::Image(image(a, outer)?),
-                "event" => {
-                    let value = match a.as_str().and_then(|n| outer.values.get(n)) {
-                        Some(Bound::Event(e)) => e.clone(),
-                        _ => a.clone(),
-                    };
-                    keys(&value, &["instruction", "point"])?;
-                    string(field(&value, "instruction")?)?;
-                    string(field(&value, "point")?)?;
-                    Bound::Event(value)
-                }
-                "templates" => {
-                    if let Some(Bound::Templates(t, e)) =
-                        a.as_str().and_then(|n| outer.values.get(n))
-                    {
-                        if arr(t)?.len() != scalar(field(f, "length")?, &env)?.usize()? {
-                            return Err(err("templates length mismatch"));
-                        }
-                        Bound::Templates(t.clone(), e.clone())
-                    } else {
-                        let ts = arr(a)?;
-                        if ts.len() != scalar(field(f, "length")?, &env)?.usize()? {
-                            return Err(err("templates length mismatch"));
-                        }
-                        for t in ts {
-                            keys(t, &["parameters", "body"])?;
-                            validate_formals(arr(field(t, "parameters")?)?)?;
-                            syntax(field(t, "body")?)?;
-                        }
-                        Bound::Templates(a.clone(), Box::new(outer.clone()))
-                    }
-                }
-                "body" => {
-                    if let Some(Bound::Body(b, e)) = a.as_str().and_then(|n| outer.values.get(n)) {
-                        Bound::Body(b.clone(), e.clone())
-                    } else {
-                        syntax(a)?;
-                        Bound::Body(a.clone(), Box::new(outer.clone()))
-                    }
-                }
-                _ => {
-                    return Err(err(format!(
-                        "unavailable.reason: typed {ty} binding/linked-source formation is staged in bennett-vm-47t"
-                    )));
-                }
-            };
-            env.values.insert(name.into(), value);
-        }
+        let mut env = bind_formals(formals, args, outer, outer)?;
         active.push(kind.into());
         let result = self.walk(field(r, "body")?, &mut env, out, next, active);
         active.pop();
@@ -274,6 +207,9 @@ impl Catalog {
         for c in arr(body)? {
             if let Some(g) = c.get("gate") {
                 let op = string(g)?;
+                if !crate::action::is_gate_name(op) {
+                    return Err(err("unknown gate"));
+                }
                 let mut ws = vec![];
                 for w in arr(field(c, "wires")?)? {
                     ws.extend(wires(w, env)?);
@@ -310,33 +246,44 @@ impl Catalog {
                 *next += 1;
             } else if let Some(n) = c.get("alloc") {
                 let name = string(n)?;
-                if let Some(value) = env.values.get(name)
-                    && !matches!(value, Bound::Allocation(a) if !a.borrow().live)
-                {
-                    return Err(err("allocation shadows live binding"));
-                }
                 let width = scalar(field(c, "width")?, env)?.usize()?;
                 let state = string(field(c, "state")?)?;
                 if state != "clean" && state != "borrowed" {
                     return Err(err("invalid allocation state"));
                 }
-                // Legacy alloc.class is a literal spelling, unlike declare.class.
                 let cls = string(field(c, "class")?)?;
                 if cls.is_empty() {
                     return Err(err("empty allocation class"));
                 }
-                let ws: Vec<_> = (0..width)
-                    .map(|i| format!("$alloc{}.{}[{i}]", *next, name))
-                    .collect();
+                // A repeated alloc in a raw inverse refers to the declaration at
+                // that restored position. Validate actual lifetimes only after
+                // inverse traversal, never by executing its forward prefix.
+                let ws = if env.locals.contains(name) {
+                    match env.values.get(name) {
+                        Some(Bound::Allocation(a)) => {
+                            let a = a.borrow();
+                            if a.width != width || a.state != state || a.class != cls {
+                                return Err(err("allocation metadata changed"));
+                            }
+                            a.wires.clone()
+                        }
+                        _ => return Err(err("allocation shadows binding")),
+                    }
+                } else {
+                    let id = env.declarations.get();
+                    env.declarations.set(id + 1);
+                    (0..width)
+                        .map(|i| format!("$decl{id}.{name}[{i}]"))
+                        .collect::<Vec<_>>()
+                };
+                env.locals.insert(name.into());
                 env.values.insert(
                     name.into(),
                     Bound::Allocation(Rc::new(RefCell::new(Allocation {
-                        name: name.into(),
                         width,
                         wires: ws.clone(),
                         class: cls.into(),
                         state: state.into(),
-                        live: true,
                     }))),
                 );
                 out.push(Leaf {
@@ -354,11 +301,7 @@ impl Catalog {
                 let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
                     return Err(err("unbound release"));
                 };
-                let mut a = a.borrow_mut();
-                if !a.live {
-                    return Err(err("invalid allocation lifetime"));
-                }
-                a.live = false;
+                let a = a.borrow();
                 out.push(Leaf {
                     ordinal: *next,
                     operation: "release".into(),
@@ -492,37 +435,27 @@ impl Catalog {
                 if !["clean", "borrowed"].contains(&state.as_str()) {
                     return Err(err("invalid allocation state"));
                 }
+                let id = env.declarations.get();
+                env.declarations.set(id + 1);
                 let a = Rc::new(RefCell::new(Allocation {
-                    name: name.into(),
                     width,
-                    wires: vec![],
+                    wires: (0..width)
+                        .map(|i| format!("$decl{id}.{name}[{i}]"))
+                        .collect(),
                     class,
                     state,
-                    live: false,
                 }));
                 let mut local = env.clone();
                 local
                     .values
                     .insert(name.into(), Bound::Allocation(a.clone()));
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
-                if a.borrow().live {
-                    return Err(err("declaration left live"));
-                }
             } else if let Some(n) = c.get("acquire").or_else(|| c.get("relinquish")) {
                 let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
                     return Err(err("unbound allocation"));
                 };
-                let mut a = a.borrow_mut();
+                let a = a.borrow();
                 let acquire = c.get("acquire").is_some();
-                if a.live == acquire {
-                    return Err(err("invalid allocation lifetime"));
-                }
-                a.live = acquire;
-                if acquire {
-                    a.wires = (0..a.width)
-                        .map(|i| format!("$alloc{}.{}[{i}]", *next, a.name))
-                        .collect();
-                }
                 out.push(Leaf {
                     ordinal: *next,
                     operation: if acquire { "alloc" } else { "release" }.into(),
@@ -534,6 +467,15 @@ impl Catalog {
                     event: None,
                 });
                 *next += 1;
+            } else if let Some(n) = c.get("visit") {
+                let Some(Bound::Records { rows, .. }) = env.values.get(string(n)?) else {
+                    return Err(err("unbound records"));
+                };
+                for row in rows.clone() {
+                    let mut local = env.clone();
+                    local.values.extend(row);
+                    self.walk(field(c, "body")?, &mut local, out, next, active)?;
+                }
             } else if let Some(n) = c.get("apply") {
                 let Some(Bound::Templates(t, cap)) = env.values.get(string(n)?) else {
                     return Err(err("unbound templates"));
@@ -542,30 +484,10 @@ impl Catalog {
                     .get(scalar(field(c, "index")?, env)?.usize()?)
                     .ok_or_else(|| err("template index out of range"))?
                     .clone();
-                let mut local = *cap.clone();
-                local.controls.extend(env.controls.clone());
                 let fs = arr(field(&t, "parameters")?)?;
                 let args = arr(field(c, "args")?)?;
-                if fs.len() != args.len() {
-                    return Err(err("template arity"));
-                }
-                let mut names = BTreeSet::new();
-                for (f, a) in fs.iter().zip(args) {
-                    let name = string(field(f, "name")?)?;
-                    if !names.insert(name) {
-                        return Err(err("duplicate formal"));
-                    }
-                    if string(field(f, "type")?)? != "wire" {
-                        return Err(err(
-                            "unavailable.reason: non-wire template formal staged in bennett-vm-47t",
-                        ));
-                    }
-                    let w = wires(a, env)?;
-                    if w.len() != scalar(field(f, "width")?, &local)?.usize()? {
-                        return Err(err("template width mismatch"));
-                    }
-                    local.values.insert(name.into(), Bound::Wire(w));
-                }
+                let mut local = bind_formals(fs, args, env, &cap)?;
+                local.controls.extend(env.controls.clone());
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
                 return Err(err(
@@ -575,6 +497,359 @@ impl Catalog {
         }
         Ok(())
     }
+}
+fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
+    let mut live = BTreeMap::<String, String>::new();
+    for (index, leaf) in leaves.iter_mut().enumerate() {
+        if leaf.operation == "alloc" {
+            for (bit, wire) in leaf.wires.iter_mut().enumerate() {
+                let actual = format!("$alloc{index}[{bit}]");
+                if live.insert(wire.clone(), actual.clone()).is_some() {
+                    return Err(err("double acquisition"));
+                }
+                *wire = actual;
+            }
+        } else if leaf.operation == "release" {
+            for wire in &mut leaf.wires {
+                *wire = live.remove(wire).ok_or_else(|| err("unmatched release"))?;
+            }
+        } else {
+            let resolve = |wire: &String| -> Result<String, String> {
+                if wire.starts_with("$decl") {
+                    live.get(wire)
+                        .cloned()
+                        .ok_or_else(|| err("inactive allocation wire use"))
+                } else {
+                    Ok(wire.clone())
+                }
+            };
+            leaf.wires = leaf.wires.iter().map(resolve).collect::<Result<_, _>>()?;
+            leaf.controls = leaf
+                .controls
+                .iter()
+                .map(resolve)
+                .collect::<Result<_, _>>()?;
+        }
+    }
+    if !live.is_empty() {
+        return Err(err("unmatched allocation/declaration left live"));
+    }
+    Ok(())
+}
+fn bind_formals(
+    formals: &[Json],
+    args: &[Json],
+    outer: &Bindings,
+    capture: &Bindings,
+) -> Result<Bindings, String> {
+    if formals.len() != args.len() {
+        return Err(err("arity mismatch"));
+    }
+    validate_formals(formals)?;
+    let mut env = capture.clone();
+    env.locals.clear();
+    let mut names = BTreeSet::new();
+    for (f, a) in formals.iter().zip(args) {
+        let (name, ty) = if let Some(n) = f.as_str() {
+            (n, "integer")
+        } else {
+            (string(field(f, "name")?)?, string(field(f, "type")?)?)
+        };
+        if !names.insert(name) {
+            return Err(err("duplicate formal"));
+        }
+        let value = match ty {
+            "integer" => Bound::Integer(scalar(a, outer)?),
+            "wire" => {
+                let w = wires(a, outer)?;
+                if w.len() != scalar(field(f, "width")?, &env)?.usize()? {
+                    return Err(err("wire width mismatch"));
+                }
+                if w.iter().collect::<BTreeSet<_>>().len() != w.len() {
+                    return Err(err("duplicate wire actual"));
+                }
+                Bound::Wire(w)
+            }
+            "environment" => {
+                let w = wires(a, outer)?;
+                env.controls.extend(w.iter().cloned());
+                Bound::Wire(w)
+            }
+            "angle" => Bound::Angle(angle(a, outer)?),
+            "allocation" => match a.as_str().and_then(|n| outer.values.get(n)) {
+                Some(Bound::Allocation(a)) => Bound::Allocation(a.clone()),
+                _ => return Err(err("unbound allocation actual")),
+            },
+            "class" => Bound::Class(class(a, outer)?),
+            "image" => Bound::Image(image(a, outer)?),
+            "event" => {
+                let value = match a.as_str().and_then(|n| outer.values.get(n)) {
+                    Some(Bound::Event(e)) => e.clone(),
+                    _ => a.clone(),
+                };
+                keys(&value, &["instruction", "point"])?;
+                string(field(&value, "instruction")?)?;
+                string(field(&value, "point")?)?;
+                Bound::Event(value)
+            }
+            "region" => bind_region(f, a, outer, &env)?,
+            "value" => {
+                let ty = field(f, "isa_type")?;
+                if let Some(Bound::Value(value, source_ty)) =
+                    a.as_str().and_then(|n| outer.values.get(n))
+                {
+                    if source_ty != ty {
+                        return Err(err("value isa_type mismatch"));
+                    }
+                    Bound::Value(value.clone(), ty.clone())
+                } else {
+                    let isa_ty = if let Some(ptr) = ty.get("ptr") {
+                        keys(ty, &["ptr"])?;
+                        let width = ptr
+                            .as_usize()
+                            .filter(|n| *n > 0)
+                            .ok_or_else(|| err("invalid pointer width"))?;
+                        crate::invocation::decode_args(
+                            &Json::Arr(vec![a.clone()]),
+                            &[crate::object::Type::Ptr],
+                            width,
+                        )?;
+                        None
+                    } else {
+                        let text = string(ty)?;
+                        let parsed = crate::object::Type::parse(text)?;
+                        if !matches!(parsed, crate::object::Type::I(n) if n > 0)
+                            && !matches!(
+                                parsed,
+                                crate::object::Type::F64 | crate::object::Type::Token
+                            )
+                        {
+                            return Err(err("invalid value isa_type"));
+                        }
+                        if parsed.signature_text() != text {
+                            return Err(err("noncanonical value isa_type"));
+                        }
+                        Some(parsed)
+                    };
+                    if let Some(t) = isa_ty {
+                        crate::invocation::decode_args(&Json::Arr(vec![a.clone()]), &[t], 1)?;
+                    }
+                    Bound::Value(a.clone(), ty.clone())
+                }
+            }
+            "records" => bind_records(f, a, outer, &env)?,
+            "templates" => {
+                if let Some(Bound::Templates(t, e)) = a.as_str().and_then(|n| outer.values.get(n)) {
+                    if arr(t)?.len() != scalar(field(f, "length")?, &env)?.usize()? {
+                        return Err(err("templates length mismatch"));
+                    }
+                    Bound::Templates(t.clone(), e.clone())
+                } else {
+                    let ts = arr(a)?;
+                    if ts.len() != scalar(field(f, "length")?, &env)?.usize()? {
+                        return Err(err("templates length mismatch"));
+                    }
+                    for t in ts {
+                        keys(t, &["parameters", "body"])?;
+                        validate_formals(arr(field(t, "parameters")?)?)?;
+                        syntax(field(t, "body")?)?;
+                    }
+                    Bound::Templates(a.clone(), Box::new(outer.clone()))
+                }
+            }
+            "body" => {
+                if let Some(Bound::Body(b, e)) = a.as_str().and_then(|n| outer.values.get(n)) {
+                    Bound::Body(b.clone(), e.clone())
+                } else {
+                    syntax(a)?;
+                    Bound::Body(a.clone(), Box::new(outer.clone()))
+                }
+            }
+            _ => {
+                return Err(err(format!(
+                    "unavailable.reason: typed {ty} binding/linked-source formation is staged in bennett-vm-47t"
+                )));
+            }
+        };
+        env.locals.insert(name.into());
+        env.values.insert(name.into(), value);
+    }
+    Ok(env)
+}
+fn bind_region(f: &Json, a: &Json, outer: &Bindings, env: &Bindings) -> Result<Bound, String> {
+    let address = scalar(field(f, "address")?, env)?.usize()?;
+    let cell = scalar(field(f, "cell")?, env)?.usize()?;
+    let role = string(field(f, "role")?)?;
+    if cell == 0 || !["in", "mut"].contains(&role) {
+        return Err(err("invalid region formal"));
+    }
+    let value = if let Some(r @ Bound::Region { .. }) = a.as_str().and_then(|n| outer.values.get(n))
+    {
+        r.clone()
+    } else {
+        keys(a, &["address", "cell", "role", "origin", "cells"])?;
+        let origin = string(field(a, "origin")?)?;
+        let suffix = origin
+            .strip_prefix("interface:")
+            .or_else(|| origin.strip_prefix("local:"))
+            .ok_or_else(|| err("invalid region origin"))?;
+        if suffix.is_empty()
+            || !suffix.bytes().enumerate().all(|(i, b)| {
+                b.is_ascii_alphabetic() || b == b'_' || i > 0 && (b.is_ascii_digit() || b == b'.')
+            })
+        {
+            return Err(err("invalid region origin NAME"));
+        }
+        Bound::Region {
+            address: field(a, "address")?
+                .as_usize()
+                .ok_or_else(|| err("invalid region address"))?,
+            cell: field(a, "cell")?
+                .as_usize()
+                .ok_or_else(|| err("invalid region cell"))?,
+            role: string(field(a, "role")?)?.into(),
+            origin: origin.into(),
+            cells: wires(field(a, "cells")?, outer)?,
+        }
+    };
+    let Bound::Region {
+        address: actual_a,
+        cell: actual_w,
+        role: actual_role,
+        cells,
+        origin,
+    } = &value
+    else {
+        unreachable!()
+    };
+    let width = u32::try_from(address)
+        .ok()
+        .and_then(|a| 1usize.checked_shl(a))
+        .and_then(|n| n.checked_mul(cell))
+        .ok_or_else(|| err("region width exceeds host limit"))?;
+    if *actual_a != address
+        || *actual_w != cell
+        || actual_role != role
+        || cells.len() != width
+        || origin.is_empty()
+    {
+        return Err(err("region shape/role/width mismatch"));
+    }
+    if cells.iter().collect::<BTreeSet<_>>().len() != cells.len() {
+        return Err(err("duplicate region wire"));
+    }
+    Ok(value)
+}
+fn bind_records(f: &Json, a: &Json, outer: &Bindings, env: &Bindings) -> Result<Bound, String> {
+    let fields = field(f, "fields")?;
+    let fs = arr(fields)?;
+    validate_formals(fs)?;
+    let names = fs
+        .iter()
+        .map(|f| {
+            f.as_str()
+                .map(Ok)
+                .unwrap_or_else(|| string(field(f, "name")?))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    for f in fs {
+        if f.as_str().is_none()
+            && !["integer", "wire", "region", "class", "allocation", "image"]
+                .contains(&string(field(f, "type")?)?)
+        {
+            return Err(err("invalid record field type"));
+        }
+    }
+    let order = field(f, "order")?;
+    let mut ordered = BTreeSet::new();
+    for k in arr(order)? {
+        let k = string(k)?;
+        if !ordered.insert(k)
+            || !fs.iter().any(|f| {
+                f.as_str() == Some(k)
+                    || f.get("name").and_then(Json::as_str) == Some(k)
+                        && f.get("type").and_then(Json::as_str) == Some("integer")
+            })
+        {
+            return Err(err("invalid record order"));
+        }
+    }
+    let rows = if let Some(Bound::Records {
+        fields: old_fields,
+        order: old_order,
+        rows,
+    }) = a.as_str().and_then(|n| outer.values.get(n))
+    {
+        if old_fields != fields || old_order != order {
+            return Err(err("record schema/order mismatch"));
+        }
+        // Revalidate the receiving widths with resolved identities, never wire names.
+        for row in rows {
+            let mut local = env.clone();
+            for f in fs {
+                let name = f
+                    .as_str()
+                    .map(Ok)
+                    .unwrap_or_else(|| string(field(f, "name")?))?;
+                let value = &row[name];
+                if let Bound::Wire(w) = value
+                    && w.len() != scalar(field(f, "width")?, &local)?.usize()?
+                {
+                    return Err(err("forwarded record width mismatch"));
+                }
+                if let Bound::Region {
+                    address,
+                    cell,
+                    role,
+                    ..
+                } = value
+                    && (*address != scalar(field(f, "address")?, &local)?.usize()?
+                        || *cell != scalar(field(f, "cell")?, &local)?.usize()?
+                        || role != string(field(f, "role")?)?)
+                {
+                    return Err(err("forwarded record region mismatch"));
+                }
+                local.values.insert(name.into(), value.clone());
+            }
+        }
+        rows.clone()
+    } else {
+        let mut rows = vec![];
+        for row in arr(a)? {
+            keys(row, &names)?;
+            let args = names
+                .iter()
+                .map(|n| field(row, n).cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            let local = bind_formals(fs, &args, outer, env)?;
+            rows.push(
+                names
+                    .iter()
+                    .map(|n| ((*n).into(), local.values[*n].clone()))
+                    .collect::<BTreeMap<_, _>>(),
+            );
+        }
+        rows
+    };
+    let mut previous = None;
+    for row in &rows {
+        let tuple = arr(order)?
+            .iter()
+            .map(|k| match row.get(string(k)?) {
+                Some(Bound::Integer(n)) => Ok(n.clone()),
+                _ => Err(err("noninteger record order field")),
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        if !tuple.is_empty() && previous.as_ref().is_some_and(|p| p >= &tuple) {
+            return Err(err("records not strictly ordered"));
+        }
+        previous = Some(tuple);
+    }
+    Ok(Bound::Records {
+        fields: fields.clone(),
+        order: order.clone(),
+        rows,
+    })
 }
 fn class(j: &Json, e: &Bindings) -> Result<String, String> {
     if let Some(Bound::Class(c)) = j.as_str().and_then(|n| e.values.get(n)) {
@@ -702,11 +977,11 @@ fn wires(j: &Json, e: &Bindings) -> Result<Vec<String>, String> {
         if let Some(Bound::Wire(w)) = e.values.get(s) {
             return Ok(w.clone());
         }
+        if let Some(Bound::Region { cells, .. }) = e.values.get(s) {
+            return Ok(cells.clone());
+        }
         if let Some(Bound::Allocation(a)) = e.values.get(s) {
             let a = a.borrow();
-            if !a.live {
-                return Err(err("inactive allocation wire use"));
-            }
             return Ok(a.wires.clone());
         }
         if let Some((name, index)) = s.split_once('[') {
@@ -777,4 +1052,58 @@ fn syntax(body: &Json) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+    fn j(s: &str) -> Json {
+        json::parse(s).unwrap()
+    }
+
+    #[test]
+    fn ordered_records_revalidate_shape_and_capture_wire_identities() {
+        let f = j(
+            r#"{"name":"Layout","type":"records","fields":["base","extent",{"name":"cells","type":"wire","width":["*",8,"extent"]}],"order":["base"]}"#,
+        );
+        let mut b = Bindings::new();
+        b.wire("a", 8);
+        b.wire("b", 16);
+        let a = j(r#"[{"base":0,"extent":1,"cells":"a"},{"base":1,"extent":2,"cells":"b"}]"#);
+        let records = bind_records(&f, &a, &b, &b).unwrap();
+        b.values.insert("L".into(), records);
+        b.wire("a", 1);
+        let forwarded = bind_records(&f, &j(r#""L""#), &b, &b).unwrap();
+        let Bound::Records { rows, .. } = forwarded else {
+            panic!()
+        };
+        assert!(matches!(&rows[0]["cells"], Bound::Wire(w) if w.len() == 8));
+        for a in [
+            r#"[{"base":1,"extent":1,"cells":"b"}]"#,
+            r#"[{"base":1,"extent":2,"cells":"b"},{"base":1,"extent":2,"cells":"b"}]"#,
+            r#"[{"base":1,"extent":2,"cells":"b","extra":0}]"#,
+        ] {
+            assert!(bind_records(&f, &j(a), &b, &b).is_err());
+        }
+    }
+
+    #[test]
+    fn value_formals_preserve_bits_and_require_identical_types() {
+        let fs = j(
+            r#"[{"name":"x","type":"value","isa_type":"i128"},{"name":"f","type":"value","isa_type":"f64"},{"name":"tk","type":"value","isa_type":"token"}]"#,
+        );
+        let a = j(r#"["18446744073709551617","0x7ff8000000000001",["2","0","0","0"]]"#);
+        let b = Bindings::new();
+        let cap = bind_formals(arr(&fs).unwrap(), arr(&a).unwrap(), &b, &b).unwrap();
+        let aliases = j(r#"["x","f","tk"]"#);
+        bind_formals(arr(&fs).unwrap(), arr(&aliases).unwrap(), &cap, &b).unwrap();
+        let changed = j(&fs.to_jcs().replace("i128", "i129"));
+        assert!(bind_formals(arr(&changed).unwrap(), arr(&aliases).unwrap(), &cap, &b).is_err());
+        for a in [
+            r#"["340282366920938463463374607431768211456","0x7ff8000000000001",["2","0","0","0"]]"#,
+            r#"["1","0x7ff8000000000001",["2","0","0"]]"#,
+        ] {
+            assert!(bind_formals(arr(&fs).unwrap(), arr(&j(a)).unwrap(), &b, &b).is_err());
+        }
+    }
 }

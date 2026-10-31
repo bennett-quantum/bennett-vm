@@ -1,9 +1,9 @@
 # ISA 0.9 remainder implementation — 2026-10-31
-Resume: 47t in progress; source lowering/schedule realisation precede hsd/clw; fat untouched.
-47t pass 1: image X order/restoration, classical event payloads, allocation declaration forwarding, closed raw inverses.
-RED: .tmp/47t-remainder-red.log; GREEN: 8/8 ref09 tests in each engine (remainder-green logs).
-Existing inverse fixture strengthened to exact successful ordinals/identities; no fixture removed.
-Full before gates running; no complete schedule/launch/certificate support claimed.
+Resume: 47t in progress; full source/schedule realisation precedes hsd/clw; fat untouched.
+Pass 1 a5e3d90: catalog image/events and allocation forwarding; 8 ref09 tests/engine.
+Pass 2: typed records/regions/values, generic templates and post-inversion lifetime validation.
+RED .tmp/47t-typed-red.log; GREEN 8 library + 9 ref09 tests/engine (typed-green logs).
+Before: interpreter 118/5; JIT 120/5 incl pass-1 tests; differential 14/4 both. Full support unclaimed.
 
 # ISA 0.9 consumer — 2026-10-31
 Resume: entered at eb7ca3a (108 tests/engine recorded baseline); accepted 0.9

@@ -39,6 +39,11 @@ fn block_image_reads_a_whole_sector_and_reverses() {
 #[test]
 fn incomplete_block_images_are_rejected_before_execution() {
     let raw = block_object(false);
+    assert!(
+        bennett_vm::load(&raw, false)
+            .unwrap_err()
+            .contains("complete 512-byte sectors")
+    );
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".tmp/invalid-block-sector.bisa");
     std::fs::write(&path, raw).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_bennett-vm"))

@@ -666,6 +666,9 @@ fn validate_layout(obj: &Object) -> Result<(), String> {
             format!("layout block_image {img:?} is not a data entry"),
         ));
     }
+    if let Some(img) = &layout.block_image {
+        crate::device::validate_block_image(&obj.data[img])?;
+    }
     Ok(())
 }
 

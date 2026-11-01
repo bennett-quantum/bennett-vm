@@ -65,7 +65,7 @@ impl Program {
                 }
             };
             let first = result.rows.len();
-            for (close, open) in oracle_cleanup::pairs(f)? {
+            for (close, open) in oracle_cleanup::pairs(f, first, &plan.functions)? {
                 result.pairs.insert(first + close, first + open);
             }
             let mut transformed = f.clone();

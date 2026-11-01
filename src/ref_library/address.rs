@@ -60,9 +60,10 @@ impl Bindings {
         let object = &oracle.registry.object;
         let mut pairs = vec![];
         let mut first = 0;
-        for instance in crate::instances::for_oracle(object, &oracle.name)? {
-            let f = object.function(&instance.symbol).unwrap();
-            for (cleanup, computing) in oracle_cleanup::pairs(f)? {
+        let plan = crate::instances::Plan::form(object, &oracle.name)?;
+        for name in &plan.order {
+            let f = &plan.functions[name];
+            for (cleanup, computing) in oracle_cleanup::pairs(f, first, &plan.functions)? {
                 pairs.push(OracleCleanupPair {
                     computing_point: oracle.rows[first + computing].clone(),
                     cleanup_point: oracle.rows[first + cleanup].clone(),

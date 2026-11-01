@@ -34,7 +34,7 @@ fn key(i: &Instr) -> Result<Option<Identity>, String> {
         arguments: crate::validate::list_operand(&i.operands[6])?,
     }))
 }
-fn writes(i: &Instr) -> Result<Vec<String>, String> {
+pub(super) fn writes(i: &Instr) -> Result<Vec<String>, String> {
     let mut writes = i.lhs.clone();
     match i.op.as_str() {
         "lift.oracle_call" | "lift.oracle_uncall" => {
@@ -63,41 +63,17 @@ fn reachable(edges: &[Vec<usize>], start: usize, stop: Option<usize>) -> Vec<boo
 /// unrolling a source path or bounding the number of retained invocations.
 /// Each §5.5 operand identity has an independent LIFO stack. Other call
 /// identities are neutral for this stack.
-pub(super) fn pairs(f: &Function) -> Result<BTreeMap<usize, usize>, String> {
+pub(super) fn pairs(
+    f: &Function,
+    first: usize,
+    functions: &BTreeMap<String, Function>,
+) -> Result<BTreeMap<usize, usize>, String> {
     let rows = f.blocks.iter().flat_map(|b| &b.instrs).collect::<Vec<_>>();
     if !rows.iter().any(|i| i.op == "lift.oracle_uncall") {
         return Ok(BTreeMap::new());
     }
     let n = rows.len();
-    let mut labels = BTreeMap::new();
-    let mut offset = 0;
-    for b in &f.blocks {
-        labels.insert(b.name.as_str(), offset);
-        offset += b.instrs.len();
-    }
-    let target = |s: &str| -> Result<usize, String> {
-        labels
-            .get(s.trim_start_matches('^'))
-            .copied()
-            .ok_or_else(|| err("§5.5: unresolved lifted control-flow target"))
-    };
-    let mut edges = vec![vec![]; n + 1];
-    for (row, i) in rows.iter().enumerate() {
-        edges[row] = match i.op.as_str() {
-            "qjump" => vec![target(&i.operands[0])?],
-            "qbranch" => vec![target(&i.operands[1])?, target(&i.operands[2])?],
-            // No guessed target set may stand in for a proof of pair identity.
-            "qjumpr" => {
-                return Err(failure(
-                    f,
-                    i,
-                    "unavailable.reason: indirect lifted cleanup path proof remains staged in bennett-vm-47t-c2.1",
-                ));
-            }
-            "lift.ret" | "lift.retval" | "fault" => vec![n],
-            _ => vec![row + 1],
-        };
-    }
+    let edges = super::oracle_paths::edges(f, first, functions)?;
     let live = reachable(&edges, 0, None);
     let keys = rows.iter().map(|i| key(i)).collect::<Result<Vec<_>, _>>()?;
     let identities = rows
@@ -201,7 +177,11 @@ pub(super) fn pairs(f: &Function) -> Result<BTreeMap<usize, usize>, String> {
                 }
             }
             for row in 0..n {
-                if between[row] && writes(rows[row])?.iter().any(|w| inputs.contains(w)) {
+                if between[row]
+                    && call_writes(f, rows[row], functions)?
+                        .iter()
+                        .any(|w| inputs.contains(w))
+                {
                     return Err(failure(
                         f,
                         i,
@@ -213,4 +193,42 @@ pub(super) fn pairs(f: &Function) -> Result<BTreeMap<usize, usize>, String> {
         }
     }
     Ok(result)
+}
+
+// A recursive activation of this fixed instance shares its locations, and
+// captures its parameters before executing its rows. Other instances have
+// disjoint locations even when they originate from the same source lproc.
+pub(super) fn call_writes(
+    f: &Function,
+    i: &Instr,
+    functions: &BTreeMap<String, Function>,
+) -> Result<Vec<String>, String> {
+    let mut out = writes(i)?;
+    if i.op == "lift.call" {
+        let mut pending = vec![i.operands[0].trim_start_matches('@').to_string()];
+        let mut seen = BTreeSet::new();
+        while let Some(name) = pending.pop() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let callee = functions
+                .get(&name)
+                .ok_or_else(|| err("missing fixed call instance"))?;
+            if name == f.name {
+                out.extend(f.lists[0].iter().map(|p| p.name.clone()));
+                for row in f.blocks.iter().flat_map(|b| &b.instrs) {
+                    out.extend(writes(row)?);
+                }
+            }
+            for row in callee
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instrs)
+                .filter(|i| i.op == "lift.call")
+            {
+                pending.push(row.operands[0].trim_start_matches('@').into());
+            }
+        }
+    }
+    Ok(out)
 }

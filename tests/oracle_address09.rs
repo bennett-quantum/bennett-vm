@@ -164,7 +164,7 @@ fn k64_step_support_excludes_rows_and_rows_next_share_ordinals() {
 
 fn paired_source(rows: &str) -> bennett_vm::object::Object {
     let text = support::source(&format!(
-        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, other:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4], fs:reg[4], pc:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, other:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4], fs:reg[4], pc:reg[4], offset:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
     ));
     bennett_vm::load(&text, false).unwrap().0
 }
@@ -296,9 +296,67 @@ fn lifted_uncall_indirect_proof_obligation_does_not_remove_raw_provenance() {
     );
     let mut env = Bindings::new();
     env.address_oracle(&object, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].computing_point.point, "entry:1");
+    assert_eq!(pairs[0].cleanup_point.point, "entry:2");
+    // This proof authenticates source ownership only. The raw catalog stream
+    // still requires source/descriptor consistency (the K64 tests above).
+    assert!(env.body("forged", j(r#"[{"$cleanup":{"target":"s","point":"entry:1","computing":[],"uncomputing":[],"perm":true},"body":[]}]"#)).is_err());
+    assert!(
+        env.body(
+            "forged",
+            j(r#"[{"$source":{"point":"entry:2"},"body":[]}]"#)
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn indirect_pairs_use_computed_interior_targets_and_balanced_value_paths() {
+    for rows in [
+        "pc = lift.label ^done\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "pc = lift.label ^done\noffset = lift.const.i4 1\npc = lift.add pc offset\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^done():\nr = lift.mov x\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nqbranch x ^left ^right\n^left():\npc = lift.label ^join\nqjumpr pc\n^right():\npc = lift.label ^join\nqjumpr pc\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "pc = lift.label ^body\nqjumpr pc\n^body():\nlift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nqjumpr pc",
+    ] {
+        // The second witness jumps to the interior cleanup row by arithmetic.
+        let mut env = Bindings::new();
+        env.address_oracle(&paired_source(rows), "root").unwrap();
+        assert_eq!(env.oracle_cleanup_pairs().unwrap().len(), 1, "{rows}");
+    }
+}
+
+#[test]
+fn indirect_pairs_reject_underflow_ambiguity_successors_and_input_writes() {
+    for rows in [
+        "pc = lift.label ^body\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^body():\nlift.oracle_uncall @id tk (x) r fr () ()\nqjumpr pc",
+        "pc = lift.label ^join\nqbranch x ^left ^right\n^left():\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^right():\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "pc = lift.label ^done\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^done():\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.retval r",
+        "s = lift.mov x\npc = lift.label ^done\nlift.oracle_call @id tk (s) r fr () ()\nqjumpr pc\n^done():\ns = lift.mov x\nlift.oracle_uncall @id tk (s) r fr () ()\nlift.retval r",
+    ] {
+        let mut env = Bindings::new();
+        env.address_oracle(&paired_source(rows), "root").unwrap();
+        assert!(env.oracle_cleanup_pairs().unwrap_err().contains("§5.5"));
+    }
+}
+
+#[test]
+fn recursive_instance_capture_invalidates_an_indirect_pairs_readable_version() {
+    let text = support::source(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs { r:reg[1] }\n^entry():\nr = lift.call @work (x) (tk) () ()\nlift.retval r\nlproc @work (x:reg[1]) (r:reg[1]) (tk:token) () ()\nregs { fr:reg[4], pc:reg[5] }\n^entry():\npc = lift.label ^done\nlift.oracle_call @id tk (x) r fr () ()\nr = lift.call @work (r) (tk) () ()\npc = lift.label ^done\nqjumpr pc\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.ret r\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x",
+    );
+    let text = support::sign(&format!(
+        "{}\nsection layout\n{}\n",
+        text,
+        j(r#"{"ptr_width":32,"H":6,"A_tab":0,"S_cells":4,"null_size":16,"heap_base":32,"heap_limit_max":0,"globals":{},"interface_regions":{}}"#).to_jcs()
+    ));
+    let (object, _) = bennett_vm::load(&text, false).unwrap();
+    let mut env = Bindings::new();
+    env.address_oracle(&object, "root").unwrap();
     assert!(
         env.oracle_cleanup_pairs()
             .unwrap_err()
-            .contains("unavailable.reason: indirect")
+            .contains("intervening row writes")
     );
 }

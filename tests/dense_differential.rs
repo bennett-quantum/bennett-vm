@@ -271,3 +271,48 @@ fn empty_measurement_matches_exact_interpreter() {
         assert_agree(&dense, &exact, n, "empty measurement");
     }
 }
+
+#[test]
+fn selected_dense_cli_executes_bell_and_labels_numerical_evidence() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
+        .env("BENNETT_VM_ENGINE", "dense")
+        .args([
+            "run-action",
+            fixture.to_str().unwrap(),
+            "bell",
+            "--mut",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "selected dense action failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = bennett_vm::json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+    let evidence = report
+        .get("simulation")
+        .expect("dense execution needs simulation provenance");
+    assert_eq!(
+        evidence.get("kind").and_then(|j| j.as_str()),
+        Some("numerical")
+    );
+    assert!(
+        evidence.get("error_bound").is_some(),
+        "dense evidence needs its numerical bound"
+    );
+    let state = report.get("state").unwrap().as_obj().unwrap();
+    for bits in ["00", "11"] {
+        let amp = state.get(bits).unwrap().as_arr().unwrap();
+        let re: f64 = match &amp[0] {
+            bennett_vm::json::Json::Num(s) => s.parse().unwrap(),
+            other => panic!("invalid amplitude {other:?}"),
+        };
+        assert!((re - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-14);
+    }
+}

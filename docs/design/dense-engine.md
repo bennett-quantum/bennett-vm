@@ -1,11 +1,16 @@
 # Dense state-vector engine — bennett-vm-bjm
 
-The standalone engine is implemented in `src/dense/`. Q-action and CC
-selection through `BENNETT_VM_ENGINE=dense` is the last deliverable,
-pending the orchestrator merging closed `bennett-vm-rhc` from main into
-this branch and notifying this job. `src/action.rs` and `src/cc.rs` have
-not been edited by this job. The full action-corpus differential and
-certificate output remain integration acceptance items.
+The standalone engine is implemented in `src/dense/`. The orchestrator
+confirmed `bennett-vm-rhc` closed and merged here as `644a212` on
+2026-11-01 at 22:39 UTC, clearing the original integration dependency.
+Engine-selected action/CC execution remains incomplete. Its new red CLI
+test fails in `src/jit.rs::selection` before reaching the action executor:
+`unimplemented: execution engine dense (milestone 5)`. Finishing selection
+and action-report provenance requires `src/jit.rs` and `src/qcli.rs`,
+which are outside this job's current write scope. The integration-stage
+note permits narrow wiring in `src/action.rs` / `src/cc.rs`; those files
+have not been edited by this job. The full action-corpus differential
+and actual numerical provenance remain integration acceptance items.
 
 ## Literature actually read
 
@@ -326,7 +331,8 @@ Interpretation and limits:
   preliminary rows had one-minute load 14–23. Final rows supersede them;
   shared-machine variation prevents a controlled before/after claim.
 
-Final standalone gate after the empty-register compatibility fix:
+Standalone gate after the empty-register compatibility fix (before
+adding the selected-engine integration regression):
 
 ```
 timeout 300 cargo test -j4 --offline --test dense_kernels --test dense_differential -- --test-threads=4
@@ -341,3 +347,12 @@ The empty-register fix was made after the benchmark run; it changes
 only measurement, which the benchmark does not call. The benchmarked
 pair, SIMD and fusion kernels are unchanged. Full action selection and
 certificate-output verification still await the integration boundary.
+
+The next integration gate is now red in
+`selected_dense_cli_executes_bell_and_labels_numerical_evidence`: dense
+selection must execute the existing Bell fixture, preserve its amplitudes,
+and emit a `simulation` object containing kind `numerical` and an error
+bound. This report metadata is separate from formal ISA certificate
+claims. The five existing exact-interpreter differential tests and all
+26 kernel tests still pass; the whole crate builds. No test was skipped
+or weakened to conceal the selector failure.

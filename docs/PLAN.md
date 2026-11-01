@@ -101,9 +101,11 @@ frames, never re-execution.
    `exhaustive` (design: `docs/design/dense-engine.md`; benchmarks:
    `examples/dense_bench.rs`, numbers recorded in the design doc). Remaining:
    selection via `BENNETT_VM_ENGINE=dense` in the Q-action/CC paths and the
-   full action corpus differential and certificate provenance, after the
-   orchestrator merges closed rhc from main and notifies this job. State-error
-   metadata does not replace ISA 0.9's interval-checked numerical claims.
+   full action corpus differential and certificate provenance. rhc has
+   landed; integration also needs ownership of the `src/jit.rs` selector
+   and `src/qcli.rs` action-report path (the selected-engine red test rejects
+   dense before execution). State-error metadata does not replace ISA 0.9's
+   interval-checked numerical claims.
 
 ## ISA 0.9 watch list (draft, not accepted; build stays on 0.8)
 

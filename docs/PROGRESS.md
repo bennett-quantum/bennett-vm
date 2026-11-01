@@ -1,3 +1,10 @@
+# 47t-c whole written inverse sequences — 2026-11-01
+Resume: c IN PROGRESS: exact clean-input/nonempty-call recompute, broader inverse patterns, lifted oracle-uncall pairing and full bound-library occurrence validation remain; then d, b, hsd, clw. ol3 CLOSED (a4d1375); a still waits on ISA 7js.
+Target-local qalloc/qcopy computing sequences bind their whole written inverse/release to one carrier before expansion; matched nonempty/nonadjacent action adjoints retain carriers. Controlled-call carriers now include the explicit call control.
+ISA 5cd best-supported implementation choice: written reverse leaves retain their source points; newly instantiated whole recompute leaves belong to the terminating release point, with library forward ordinals retained by inverse traversal. Rationale: §11.1 numbers within the containing instruction and K65 selects that instruction's chosen expansion; revisit on ruling.
+Seven new tests cover full-domain maps in both directions, exact row/ordinal ownership, controls, iterations, fresh classes, ties and explicit other/nonempty-call recompute obligations. Existing multirow test is strengthened to require realised carriers/recompute; no test removed. Final sequential interpreter/JIT each 219/0/0 (before 212/0), differential each 18/0; fmt/strict all-target Clippy/whitespace green (.tmp/c-multirow-gate-*).
+No new ISA bead (5cd already records both readings), dependency, foreign implementation access, fixture weakening or push. Earlier gates stopped for controlled-carrier and unbound-write RED/GREEN fixes; only final completed sequential logs count.
+
 # ol3 pointer comparison admission — 2026-11-01
 Resume: finish 47t-c general whole-pair cleanup and bound-library occurrence validation, then d, b, hsd, clw; ISA 5cd remains open, implement best-supported source-ownership reading with a note.
 Split icmp from integer-only arithmetic: matching iN or ptr operands produce i1; all classical instruction typing errors now identify function, block, line and source instruction.

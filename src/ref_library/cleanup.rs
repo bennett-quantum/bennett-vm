@@ -71,7 +71,7 @@ impl Catalog {
             .collect::<Vec<_>>();
         if crate::sched::select(&selectors, &address)?.is_some() {
             return Err(err(
-                "unavailable.reason: whole multirow cleanup pairing/addresses remain staged (ISA b-isa-spec-5cd)",
+                "unavailable.reason: exact whole-source cleanup pairing remains staged in bennett-vm-47t-c",
             ));
         }
         self.walk(field(c, "body")?, env, out, next, active)
@@ -110,6 +110,11 @@ impl Catalog {
         }
         if field(pair, "perm")? != &Json::Bool(true) {
             return Err(err("recompute requires a permutation computing sequence"));
+        }
+        if pair.get("recompute_supported") == Some(&Json::Bool(false)) {
+            return Err(err(
+                "unavailable.reason: nonempty call cleanup needs its exact clean-input computing sequence",
+            ));
         }
         let name = string(field(pair, "target")?)?;
         if name.is_empty() {

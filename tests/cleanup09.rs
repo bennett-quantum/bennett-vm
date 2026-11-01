@@ -242,19 +242,24 @@ fn k65_zero_trip_pairs_do_not_generate_carriers_or_ties() {
 }
 #[test]
 fn default_lowering_preserves_explicit_multirow_inverse_sequences() {
-    // Pair ownership for a realised multirow recompute awaits ISA 5cd; the
-    // ordinary default source action and its adjoint must remain available.
+    // Binding the whole explicit inverse must preserve the existing default
+    // source trace and its adjoint, while enabling the selected recompute.
     let body = "d = qcopy x\nqxor x d\nqfree d";
     for adjoint in [false, true] {
         let e = lower(body, &[], adjoint).unwrap();
         assert_eq!(e.leaves.len(), 6);
-        assert!(!e.cleanup_pairing_complete);
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 1);
+        let selected = lower(
+            body,
+            &[entry(j("0"), CleanupRealisation::Recompute)],
+            adjoint,
+        )
+        .unwrap();
+        assert!(selected.cleanup_pairing_complete);
+        assert_eq!(selected.cleanups[0].address, e.cleanups[0].address);
+        assert_eq!(selected.leaves.len(), 12);
     }
-    assert!(
-        lower(body, &[entry(j("0"), CleanupRealisation::Recompute)], false)
-            .unwrap_err()
-            .contains("unavailable.reason")
-    );
 }
 #[test]
 fn dormant_unresolved_multirow_pairs_do_not_reject_a_cleanup_policy() {

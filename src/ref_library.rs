@@ -1437,7 +1437,16 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
         if source_formed && c.get("$cleanup").is_some() {
             keys(c, &["$cleanup", "body"])?;
             let pair = field(c, "$cleanup")?;
-            keys(pair, &["target", "point", "computing", "perm"])?;
+            keys(
+                pair,
+                &[
+                    "target",
+                    "point",
+                    "computing",
+                    "perm",
+                    "recompute_supported",
+                ],
+            )?;
             syntax_inner(field(pair, "computing")?, true)?;
             syntax_inner(field(c, "body")?, true)?;
             continue;

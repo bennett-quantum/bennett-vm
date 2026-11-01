@@ -24,6 +24,13 @@ struct Region {
     role: String,
     local: bool,
 }
+struct WholePair {
+    cleanup_end: usize,
+    carrier: usize,
+    computing: std::ops::RangeInclusive<usize>,
+    target: String,
+    perm: bool,
+}
 struct Source {
     symbol: String,
     points: BTreeMap<usize, String>,
@@ -51,9 +58,10 @@ impl Catalog {
     }
     /// Select whole explicit cleanup pairs before expanding them. This source
     /// trace boundary does not claim target realisation or schedule admission.
-    /// Direct copy/load pairs and adjacent empty lifetime/no-output-call pairs
-    /// are currently realised. Other explicit pairs leave a marked default
-    /// trace; supplying cleanup choices for them reports unavailable mechanics.
+    /// Direct copy/load pairs, target-local written inverse sequences and
+    /// matched action/adjoint calls retain whole-pair carriers. Source patterns
+    /// not yet bound leave a marked default trace; selecting an unavailable
+    /// recompute reports its remaining computing-sequence obligation.
     pub fn lower_action_with_cleanup(
         &self,
         object: &Object,
@@ -416,6 +424,206 @@ impl Source {
         }
         Ok(())
     }
+    // Match a whole written inverse at source level before any cleanup leaf
+    // is expanded. Keep the original row wrappers for reverse; recompute is
+    // newly instantiated at the release point (see ISA b-isa-spec-5cd).
+    fn inverse_rows(a: &Instr, b: &Instr) -> bool {
+        if matches!(a.op.as_str(), "action_call" | "adj" | "ctl")
+            && matches!(b.op.as_str(), "action_call" | "adj" | "ctl")
+        {
+            return match (
+                crate::action::normalize_call(a),
+                crate::action::normalize_call(b),
+            ) {
+                (Ok((ai, ac, ao, aa)), Ok((bi, bc, bo, ba))) => {
+                    ai != bi && ac == bc && ao == bo && aa == ba
+                }
+                _ => false,
+            };
+        }
+        if a.operands != b.operands || !a.lhs.is_empty() || !b.lhs.is_empty() {
+            return false;
+        }
+        let inverse = match a.op.as_str() {
+            "s" => "sdg",
+            "sdg" => "s",
+            "t" => "tdg",
+            "tdg" => "t",
+            "x" | "y" | "z" | "h" | "cx" | "cy" | "cz" | "ccx" | "mcx" | "swap" | "qxor"
+            | "qexch" => a.op.as_str(),
+            _ => return false,
+        };
+        b.op == inverse
+    }
+    fn writes_only(i: &Instr, target: &str, env: &Bindings) -> bool {
+        let is_target = |name: &str| name == target || name.starts_with(&format!("{target}["));
+        if matches!(i.op.as_str(), "swap" | "qexch") {
+            return i.operands.iter().all(|n| is_target(n));
+        }
+        if crate::action::is_gate_name(&i.op) || i.op == "qxor" {
+            return i.operands.last().is_some_and(|n| is_target(n));
+        }
+        if let Ok((_, _, op, args)) = crate::action::normalize_call(i) {
+            return op == "action_call"
+                && crate::validate::list_operand(&args[1])
+                    .is_ok_and(|ns| !ns.is_empty() && ns.iter().all(|n| is_target(n)))
+                && env.registry.as_ref().is_some_and(|r| {
+                    r.object
+                        .function(args[0].trim_start_matches('@'))
+                        .is_some_and(|f| f.lists[2].iter().all(|p| p.role.as_deref() == Some("in")))
+                });
+        }
+        false
+    }
+    fn permutation_row(i: &Instr, env: &Bindings) -> bool {
+        if matches!(
+            i.op.as_str(),
+            "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch"
+        ) {
+            return true;
+        }
+        if let Ok((_, _, op, args)) = crate::action::normalize_call(i) {
+            return op == "action_call"
+                && env.registry.as_ref().is_some_and(|r| {
+                    r.object
+                        .function(args[0].trim_start_matches('@'))
+                        .is_some_and(|f| f.kind == FnKind::PermAction)
+                });
+        }
+        false
+    }
+    fn mentions(i: &Instr, target: &str) -> bool {
+        i.lhs.iter().any(|n| n == target)
+            || i.operands.iter().any(|a| {
+                crate::validate::list_operand(a)
+                    .unwrap_or_else(|_| vec![a.clone()])
+                    .iter()
+                    .any(|n| n == target || n.starts_with(&format!("{target}[")))
+            })
+            || i.nested.iter().flatten().any(|i| Self::mentions(i, target))
+    }
+    fn whole_pairs(
+        &self,
+        instructions: &[Instr],
+        adjoint: bool,
+        env: &Bindings,
+    ) -> BTreeMap<usize, WholePair> {
+        let mut pairs = BTreeMap::new();
+        for (end, release) in instructions.iter().enumerate() {
+            if !matches!(release.op.as_str(), "qfree" | "qreturn") {
+                continue;
+            }
+            let target = &release.operands[0];
+            let Some(start) = instructions[..end].iter().rposition(|i| {
+                matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy")
+                    && i.lhs.first() == Some(target)
+            }) else {
+                continue;
+            };
+            let allocation = &instructions[start];
+            if (release.op == "qreturn") != (allocation.op == "qborrow") {
+                continue;
+            }
+            let mut left = start + 1;
+            let mut right = end;
+            if allocation.op == "qcopy" {
+                if right <= left
+                    || instructions[right - 1].op != "qxor"
+                    || instructions[right - 1].operands
+                        != [allocation.operands[0].clone(), target.clone()]
+                {
+                    continue;
+                }
+                right -= 1;
+            }
+            let inverse_end = right;
+            while left + 1 < right
+                && Self::writes_only(&instructions[left], target, env)
+                && Self::inverse_rows(&instructions[left], &instructions[right - 1])
+            {
+                left += 1;
+                right -= 1;
+            }
+            // Do not infer a computation from an unmatched target mutation.
+            // An untouched allocation can still have an empty inverse pair.
+            if left == start + 1
+                && allocation.op != "qcopy"
+                && instructions[left..right]
+                    .iter()
+                    .any(|i| Self::mentions(i, target))
+            {
+                continue;
+            }
+            // A pair may not cross an effective-control scope. Those scopes
+            // are formed recursively by sequence instead.
+            if instructions[start..=end]
+                .iter()
+                .any(|i| matches!(i.op.as_str(), "qpred" | "qunpred"))
+            {
+                continue;
+            }
+            let k = inverse_end - right;
+            let cleanup_start = if adjoint { start } else { right };
+            let cleanup_end = if adjoint { start + k } else { end };
+            let computing = if adjoint {
+                right..=end
+            } else {
+                start..=start + k
+            };
+            let perm = allocation.op != "qborrow"
+                && instructions[start + 1..start + k + 1]
+                    .iter()
+                    .all(|i| Self::permutation_row(i, env));
+            pairs.insert(
+                cleanup_start,
+                WholePair {
+                    cleanup_end,
+                    carrier: if adjoint { start } else { end },
+                    computing,
+                    target: target.clone(),
+                    perm,
+                },
+            );
+        }
+        pairs
+    }
+    fn raw_sequence(
+        &self,
+        instructions: &[Instr],
+        adjoint: bool,
+        source: bool,
+        env: &mut Bindings,
+    ) -> Result<Vec<Json>, String> {
+        let mut body = vec![];
+        for i in instructions {
+            let row = self.instruction(i, adjoint, env)?;
+            if source {
+                body.push(self.source_annotation(i, adjoint, row));
+            } else {
+                body.extend(row);
+            }
+        }
+        if adjoint {
+            body.reverse();
+        }
+        Ok(body)
+    }
+    fn source_annotation(&self, i: &Instr, adjoint: bool, body: Vec<Json>) -> Json {
+        Json::obj(vec![
+            (
+                "$source",
+                Json::obj(vec![
+                    ("symbol", text(&self.symbol)),
+                    ("point", text(&self.points[&i.line])),
+                    (
+                        "reverse_iterations",
+                        Json::Bool(adjoint && i.op == "qloop" && i.operands.len() == 1),
+                    ),
+                ]),
+            ),
+            ("body", Json::Arr(body)),
+        ])
+    }
     fn sequence(
         &self,
         instructions: &[Instr],
@@ -423,6 +631,7 @@ impl Source {
         env: &mut Bindings,
     ) -> Result<Vec<Json>, String> {
         let mut out = vec![];
+        let whole_pairs = self.whole_pairs(instructions, adjoint, env);
         let mut empty_pairs = BTreeMap::new();
         for pair in instructions.windows(2) {
             if matches!(pair[0].op.as_str(), "qalloc" | "qborrow")
@@ -433,39 +642,85 @@ impl Source {
                 empty_pairs.insert(pair[1].line, pair[0].clone());
             }
         }
-        let mut empty_calls = BTreeMap::new();
-        for pair in instructions.windows(2) {
-            if !pair
-                .iter()
-                .all(|i| matches!(i.op.as_str(), "action_call" | "adj" | "ctl"))
-            {
+        let mut call_pairs = BTreeMap::new();
+        let mut calls = Vec::new();
+        let mut predicate_depth = 0;
+        for i in instructions {
+            match i.op.as_str() {
+                "qpred" => {
+                    predicate_depth += 1;
+                    continue;
+                }
+                "qunpred" => {
+                    predicate_depth -= 1;
+                    continue;
+                }
+                _ => {}
+            }
+            if predicate_depth != 0 {
                 continue;
             }
-            let (a, ca, oa, aa) = crate::action::normalize_call(&pair[0])?;
-            let (b, cb, ob, ab) = crate::action::normalize_call(&pair[1])?;
-            if a || !b || ca != cb || oa != ob || aa != ab || oa != "action_call" {
+            if !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
                 continue;
             }
+            let (inverse, control, op, args) = crate::action::normalize_call(i)?;
+            if op != "action_call" {
+                continue;
+            }
+            if !inverse {
+                calls.push(i);
+                continue;
+            }
+            let Some(n) = calls.iter().rposition(|compute| {
+                crate::action::normalize_call(compute)
+                    .is_ok_and(|(inv, c, o, a)| !inv && c == control && o == op && a == args)
+            }) else {
+                continue;
+            };
+            let compute = calls.remove(n);
             let registry = env
                 .registry
                 .as_ref()
                 .ok_or_else(|| err("source registry missing"))?;
             let f = registry
                 .object
-                .function(aa[0].trim_start_matches('@'))
+                .function(args[0].trim_start_matches('@'))
                 .ok_or_else(|| err("missing paired callee"))?;
-            if !f.lists[0].is_empty() || f.lists[2].iter().any(|p| p.role.as_deref() != Some("in"))
-            {
-                continue;
-            }
+            // Region recomputation needs a fresh region binding as well as
+            // fresh wires; retain an explicitly incomplete trace until formed.
+            let regions = f.lists[2].iter().any(|p| p.role.as_deref() != Some("in"));
+            let targets = crate::validate::list_operand(&args[1])?;
             let perm = f.kind == FnKind::PermAction;
-            empty_calls.insert(pair[0].line, (pair[1].clone(), perm));
-            empty_calls.insert(pair[1].line, (pair[0].clone(), perm));
+            call_pairs.insert(compute.line, (i.clone(), targets.clone(), perm, regions));
+            call_pairs.insert(i.line, (compute.clone(), targets, perm, regions));
         }
         let mut index = 0;
         while index < instructions.len() {
             let i = &instructions[index];
-            if i.op == "qpred" {
+            if let Some(pair) = whole_pairs.get(&index) {
+                let computing =
+                    self.raw_sequence(&instructions[pair.computing.clone()], adjoint, false, env)?;
+                let body =
+                    self.raw_sequence(&instructions[index..=pair.cleanup_end], adjoint, true, env)?;
+                let computing_start = if adjoint {
+                    *pair.computing.end()
+                } else {
+                    *pair.computing.start()
+                };
+                let annotation = self.pair_annotation(
+                    &pair.target,
+                    &self.points[&instructions[computing_start].line],
+                    computing,
+                    body,
+                    pair.perm,
+                );
+                out.push(self.source_annotation(
+                    &instructions[pair.carrier],
+                    adjoint,
+                    vec![annotation],
+                ));
+                index = pair.cleanup_end + 1;
+            } else if i.op == "qpred" {
                 let mut depth = 1;
                 let mut end = index + 1;
                 while end < instructions.len() {
@@ -510,37 +765,44 @@ impl Source {
                     } else {
                         body
                     }
-                } else if let Some((partner, perm)) = empty_calls.get(&i.line) {
-                    let (inverse, _, _, _) = crate::action::normalize_call(i)?;
+                } else if let Some((partner, targets, perm, regions)) = call_pairs.get(&i.line) {
+                    let (inverse, control, _, _) = crate::action::normalize_call(i)?;
                     if inverse ^ adjoint {
                         let computing = self.instruction(partner, adjoint, env)?;
-                        vec![self.pair_annotation(
-                            "",
-                            &self.points[&partner.line],
-                            computing,
-                            body,
-                            *perm,
-                        )]
+                        if *regions {
+                            self.defer_cleanup(body, env)?
+                        } else {
+                            let mut pair = self.pair_annotation(
+                                "",
+                                &self.points[&partner.line],
+                                computing,
+                                body,
+                                *perm,
+                            );
+                            if let Json::Obj(c) = &mut pair
+                                && let Some(Json::Obj(p)) = c.get_mut("$cleanup")
+                            {
+                                p.insert(
+                                    "recompute_supported".into(),
+                                    Json::Bool(targets.is_empty()),
+                                );
+                            }
+                            if let Some(control) = control {
+                                vec![invocation(
+                                    "ctl",
+                                    vec![text(control), Json::Arr(vec![pair])],
+                                )]
+                            } else {
+                                vec![pair]
+                            }
+                        }
                     } else {
                         body
                     }
                 } else {
                     self.cleanup_pair(i, adjoint, body, env)?
                 };
-                out.push(Json::obj(vec![
-                    (
-                        "$source",
-                        Json::obj(vec![
-                            ("symbol", text(&self.symbol)),
-                            ("point", text(&self.points[&i.line])),
-                            (
-                                "reverse_iterations",
-                                Json::Bool(adjoint && i.op == "qloop" && i.operands.len() == 1),
-                            ),
-                        ]),
-                    ),
-                    ("body", Json::Arr(body)),
-                ]));
+                out.push(self.source_annotation(i, adjoint, body));
                 index += 1;
             }
         }

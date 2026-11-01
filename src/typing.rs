@@ -37,7 +37,7 @@ fn bundle(env: &BTreeMap<String, Type>, n: &str, w: usize) -> Result<(), String>
         }
     } else {
         check(
-            read(env, n)? == Type::Qreg(w),
+            matches!(read(env, n)?, Type::QregDynamic) || read(env, n)? == Type::Qreg(w),
             "qreg width differs from region slot",
         )
     }
@@ -212,47 +212,85 @@ pub fn classical(obj: &Object, f: &Function) -> Result<(), String> {
                     )?;
                     results.push(Type::I(obj.ptr_width));
                 }
+                "fault" => {}
+                "budget" => {
+                    for x in &xs[1..] {
+                        check(read(&env, x)? == Type::I(64), "budget limits must be i64")?;
+                    }
+                    results.push(Type::Token);
+                }
                 "qreg" => match op {
-                    "qreg.new" => results.push(Type::Qreg(
-                        xs[1]
-                            .parse()
-                            .map_err(|_| err("3.3", "invalid qreg length"))?,
-                    )),
-                    "qreg.free" => {
+                    "qreg.new" => {
+                        if let Ok(n) = xs[1].parse::<usize>() {
+                            check(n > 0, "literal qreg length must be positive")?;
+                            results.push(Type::Qreg(n));
+                        } else {
+                            check(
+                                obj.isa == "0.9" && read(&env, &xs[1])? == Type::I(64),
+                                "dynamic qreg length must be i64",
+                            )?;
+                            results.push(Type::QregDynamic);
+                        }
+                    }
+                    "qreg.free" | "qreg.width" | "qreg.id" => {
                         check(
-                            matches!(read(&env, &xs[0])?, Type::Qreg(_)),
-                            "qreg.free needs handle",
+                            matches!(read(&env, &xs[0])?, Type::Qreg(_) | Type::QregDynamic),
+                            "expected qreg handle",
                         )?;
+                        if op != "qreg.free" {
+                            results.push(Type::I(64));
+                        }
+                    }
+                    "qreg.from_id" => {
+                        check(read(&env, &xs[0])? == Type::I(64), "qreg id must be i64")?;
+                        results.push(Type::QregDynamic);
                     }
                     "qreg.slice" => {
-                        let Type::Qreg(n) = read(&env, &xs[0])? else {
-                            return Err(err("3.3", "slice needs qreg"));
-                        };
-                        let lo: usize = xs[1].parse().map_err(|_| err("3.3", "invalid slice"))?;
-                        let len: usize = xs[2].parse().map_err(|_| err("3.3", "invalid slice"))?;
                         check(
-                            lo.checked_add(len).is_some_and(|e| e <= n),
-                            "slice outside register",
+                            matches!(read(&env, &xs[0])?, Type::Qreg(_) | Type::QregDynamic),
+                            "slice needs qreg",
                         )?;
-                        results.push(Type::Qreg(len));
+                        for x in &xs[1..] {
+                            if x.parse::<usize>().is_err() {
+                                check(read(&env, x)? == Type::I(64), "slice index must be i64")?;
+                            }
+                        }
+                        results.push(match xs[2].parse::<usize>() {
+                            Ok(n) => Type::Qreg(n),
+                            Err(_) => Type::QregDynamic,
+                        });
                     }
                     "qreg.concat" => {
-                        let (Type::Qreg(a), Type::Qreg(b)) =
-                            (read(&env, &xs[0])?, read(&env, &xs[1])?)
-                        else {
-                            return Err(err("3.3", "concat needs qreg"));
-                        };
-                        results.push(Type::Qreg(
-                            a.checked_add(b).ok_or("host limit: concatenated width")?,
-                        ));
+                        let (a, b) = (read(&env, &xs[0])?, read(&env, &xs[1])?);
+                        check(
+                            matches!(a, Type::Qreg(_) | Type::QregDynamic)
+                                && matches!(b, Type::Qreg(_) | Type::QregDynamic),
+                            "concat needs qreg",
+                        )?;
+                        results.push(match (a, b) {
+                            (Type::Qreg(a), Type::Qreg(b)) => Type::Qreg(
+                                a.checked_add(b).ok_or("host limit: concatenated width")?,
+                            ),
+                            _ => Type::QregDynamic,
+                        });
                     }
                     _ => return Err(err("4.8", "unknown qreg row")),
                 },
                 "measure" => {
-                    let Type::Qreg(n) = read(&env, &xs[0])? else {
-                        return Err(err("3.3", "measure needs qreg"));
+                    let ty = read(&env, &xs[0])?;
+                    let n = if op == "measure" {
+                        let Type::Qreg(n) = ty else {
+                            return Err(err("3.3", "dynamic measure requires width suffix"));
+                        };
+                        n
+                    } else {
+                        check(
+                            matches!(ty, Type::Qreg(_) | Type::QregDynamic),
+                            "measure needs qreg",
+                        )?;
+                        suffix()?
                     };
-                    check(n <= 128, "measurement width exceeds i128")?;
+                    check((1..=128).contains(&n), "measurement width outside 1..=128")?;
                     results.push(Type::I(n));
                 }
                 "action_call" | "oracle_call" | "adj" | "ctl" => {

@@ -49,3 +49,130 @@ fn layout_paths_are_injective_and_select_original_keys() {
     );
     assert!(leaves.windows(2).all(|p| p[0].0 < p[1].0));
 }
+
+fn bound_source() -> String {
+    let text = examples()[1].clone();
+    text.replace(
+        "(db:region[4,8] in) ()",
+        "(db:region[4,8] in) (tk:token, a:i8, b:i8)",
+    )
+    .replace(
+        "(r:reg[8]) () () ()",
+        "(r:reg[8]) (tk:token token) (a:i8 classical) (db:region[4,8] in)",
+    )
+    .replace("@sum (n, acc, base)", "@sum (n, acc, base) (tk) (a) (db)")
+    .replace(
+        "@sum (n2, acc2, base)",
+        "@sum (n2, acc2, base) (tk) (a) (db)",
+    )
+}
+fn resign(text: &str) -> String {
+    let mut obj = object::parse(text).unwrap();
+    let names = obj.symbols.keys().cloned().collect::<Vec<_>>();
+    for name in &names {
+        obj.symbols.get_mut(name).unwrap().signature =
+            bennett_vm::validate::derived_signature(&obj, name).unwrap();
+    }
+    let entries = names
+        .iter()
+        .map(|n| {
+            let s = &obj.symbols[n];
+            (
+                s.index.to_string(),
+                bennett_vm::json::Json::obj(vec![
+                    ("name", bennett_vm::json::Json::Str(n.clone())),
+                    ("kind", bennett_vm::json::Json::Str(s.kind.clone())),
+                    ("signature", s.signature.clone()),
+                    (
+                        "interface_hash",
+                        bennett_vm::json::Json::Str(s.stored_hash.clone()),
+                    ),
+                ]),
+            )
+        })
+        .collect();
+    let line = bennett_vm::json::Json::Obj(entries).to_jcs();
+    let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
+    let pos = lines.iter().position(|s| s == "section symbols").unwrap();
+    lines[pos + 1] = line;
+    lines.join("\n") + "\n"
+}
+#[test]
+fn typed_lproc_binding_groups_and_immutable_origins() {
+    let text = resign(&bound_source());
+    bennett_vm::load(&text, true).unwrap();
+    for (from, to) in [
+        ("tk:token token", "tk:token classical"),
+        ("a:i8 classical", "a:i8 token"),
+        ("(tk) (a) (db)", "(tk) (acc) (db)"),
+        ("(tk) (a) (db)", "(tk) (1) (db)"),
+        ("(tk) (a) (db)", "(a) (a) (db)"),
+        ("(tk) (a) (db)", "(tk) (a) ()"),
+        ("(tk) (a) (db)", "()"),
+        ("n2 = lift.sub n one", "a = lift.sub n one"),
+    ] {
+        assert!(
+            bennett_vm::load(&resign(&text.replace(from, to)), true).is_err(),
+            "accepted {from} -> {to}"
+        );
+    }
+}
+#[test]
+fn fixed_instances_close_recursive_forwarding_by_position() {
+    let text = resign(&bound_source().replace(
+        "lift.retval r",
+        "r = lift.call @sum (n, acc, base) (tk) (b) (db)\nlift.retval r",
+    ));
+    let (obj, _) = bennett_vm::load(&text, true).unwrap();
+    let instances = bennett_vm::instances::for_oracle(&obj, "sum_db").unwrap();
+    assert_eq!(
+        instances
+            .iter()
+            .map(|i| (&*i.symbol, i.key.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("sum_db", vec![]),
+            ("sum", vec![0, 1, 0]),
+            ("sum", vec![0, 2, 0])
+        ]
+    );
+}
+
+#[test]
+fn all_published_09_objects_verify_stored_hashes() {
+    for (i, text) in examples().iter().enumerate() {
+        bennett_vm::load(text, false).unwrap_or_else(|e| panic!("example {}: {e}", i + 1));
+    }
+}
+
+#[test]
+fn published_interfaces_reject_wrong_roles_types_and_widths() {
+    let xs = examples();
+    for (index, from, to) in [
+        (2, "regs {  }", "regs { ghost:reg[1] }"),
+        (3, "measure.i3 q2", "measure.i129 q2"),
+        (3, "qreg.from_id id2", "qreg.from_id p"),
+        (
+            5,
+            "budget.mint @inc8 s zero zero zero",
+            "budget.mint @inc8 zero zero zero n",
+        ),
+        (
+            6,
+            "qinplace @g @ginv tk x (y) () (a)",
+            "qinplace @g @ginv tk x",
+        ),
+        (9, "(tk) (a) (db)", "(tk) (x) (db)"),
+        (
+            9,
+            "(r:reg[2]) (tk:token token)",
+            "(r:reg[3]) (tk:token token)",
+        ),
+    ] {
+        assert!(xs[index].contains(from), "missing test trigger {from}");
+        assert!(
+            bennett_vm::load(&resign(&xs[index].replace(from, to)), true).is_err(),
+            "accepted {from} -> {to}"
+        );
+    }
+}

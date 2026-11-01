@@ -13,6 +13,7 @@ pub mod device;
 pub mod estimate;
 pub mod exact;
 pub mod identity;
+pub mod instances;
 pub mod interval;
 pub mod invocation;
 pub mod jit;

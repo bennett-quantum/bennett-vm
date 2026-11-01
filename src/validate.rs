@@ -892,6 +892,19 @@ pub fn is_int_literal(text: &str) -> bool {
 }
 
 fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
+    if obj.isa == "0.9" {
+        crate::instances::validate_groups(f)?;
+    } else if f
+        .lists
+        .iter()
+        .flatten()
+        .any(|p| matches!(p.role.as_deref(), Some("token" | "classical")))
+    {
+        return Err(err(
+            "16.2",
+            "0.8 does not have token/classical parameter suffixes",
+        ));
+    }
     // Unique declared names across header lists and regs.
     let mut names: BTreeMap<&str, &Param> = BTreeMap::new();
     for list in f.lists.iter() {
@@ -922,7 +935,9 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
     match f.kind {
         FnKind::Oracle => {
             for p in &f.lists[0] {
-                if p.role.as_deref() != Some("in") {
+                if p.role.as_deref() != Some("in")
+                    && !(obj.isa == "0.9" && matches!(p.ty, Type::Wire(_)) && p.role.is_none())
+                {
                     return Err(err(
                         "5.1",
                         format!("oracle input {:?} of @{} needs role in", p.name, f.name),
@@ -930,7 +945,9 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
                 }
             }
             for p in &f.lists[3] {
-                if p.role.as_deref() != Some("in") {
+                if p.role.as_deref() != Some("in")
+                    && !(obj.isa == "0.9" && matches!(p.ty, Type::Wire(_)) && p.role.is_none())
+                {
                     return Err(err(
                         "5.1",
                         format!(
@@ -943,7 +960,9 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
         }
         FnKind::Action | FnKind::PermAction => {
             for p in &f.lists[0] {
-                if p.role.as_deref() != Some("mut") {
+                if p.role.as_deref() != Some("mut")
+                    && !(obj.isa == "0.9" && matches!(p.ty, Type::Wire(_)) && p.role.is_none())
+                {
                     return Err(err(
                         "5.1",
                         format!(
@@ -954,7 +973,9 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
                 }
             }
             for p in &f.lists[1] {
-                if p.role.as_deref() != Some("in") {
+                if p.role.as_deref() != Some("in")
+                    && !(obj.isa == "0.9" && matches!(p.ty, Type::Wire(_)) && p.role.is_none())
+                {
                     return Err(err(
                         "5.1",
                         format!("action in bundle {:?} of @{} needs role in", p.name, f.name),
@@ -972,7 +993,7 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
                             format!("i{n} in @{} is outside 1..=128", f.name),
                         ));
                     }
-                    Type::Ptr | Type::F64 | Type::Token | Type::Qreg(_) => {}
+                    Type::Ptr | Type::F64 | Type::Token | Type::Qreg(_) | Type::QregDynamic => {}
                     _ => {
                         return Err(err(
                             "3.3",
@@ -1012,7 +1033,7 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
             }
         }
     }
-    validate_terminators(f)?;
+    validate_terminators(obj, f)?;
     let mut flat = Vec::new();
     f.flat_instrs(&mut flat);
     for ins in &flat {
@@ -1062,7 +1083,7 @@ const LIFTED_TERMINATORS: [&str; 6] = [
     "fault",
 ];
 
-fn validate_terminators(f: &Function) -> Result<(), String> {
+fn validate_terminators(obj: &Object, f: &Function) -> Result<(), String> {
     match f.kind {
         FnKind::Oracle | FnKind::Lproc => {
             for b in &f.blocks {
@@ -1105,14 +1126,18 @@ fn validate_terminators(f: &Function) -> Result<(), String> {
         FnKind::Cc | FnKind::R => {
             for b in &f.blocks {
                 let last = &b.instrs[b.instrs.len() - 1];
-                if !["br", "ret", "trap"].contains(&last.op.as_str()) {
+                if !["br", "ret", "trap"].contains(&last.op.as_str())
+                    && !(obj.isa == "0.9" && last.op == "fault")
+                {
                     return Err(err(
                         "3.4",
                         format!("block ^{} in @{} must end with br or ret", b.name, f.name),
                     ));
                 }
                 for ins in &b.instrs[..b.instrs.len() - 1] {
-                    if ["br", "ret"].contains(&ins.op.as_str()) {
+                    if ["br", "ret"].contains(&ins.op.as_str())
+                        || (obj.isa == "0.9" && matches!(ins.op.as_str(), "fault" | "trap"))
+                    {
                         return Err(err(
                             "3.4",
                             format!(
@@ -1185,9 +1210,13 @@ fn lhs_n(f: &Function, ins: &crate::object::Instr, want: usize) -> Result<(), St
 }
 
 fn validate_instr(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<(), String> {
+    if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
+        crate::instances::validate_writes(f, ins)?;
+    }
     let op = ins.op.as_str();
-    let is_lifted =
-        op.starts_with("lift.") || ["qjump", "qbranch", "qjumpr", "fault"].contains(&op);
+    let is_lifted = op.starts_with("lift.")
+        || ["qjump", "qbranch", "qjumpr"].contains(&op)
+        || (op == "fault" && !(obj.isa == "0.9" && matches!(f.kind, FnKind::Cc | FnKind::R)));
     let is_region_call = ["oracle_call", "action_call", "adj", "ctl"].contains(&op);
     match f.kind {
         FnKind::Oracle | FnKind::Lproc => {
@@ -1217,7 +1246,7 @@ fn validate_instr(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Res
                     format!("effect is R only, used in CC @{}", f.name),
                 ));
             }
-            if (op == "hostcall" || op == "measure" || op.starts_with("qreg."))
+            if (op == "hostcall" || op == "measure" || op.starts_with("measure."))
                 && f.kind != FnKind::Cc
             {
                 return Err(err(
@@ -1393,6 +1422,17 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             Ok(())
         }
+        "qreg.width" | "qreg.id" | "qreg.from_id" if obj.isa == "0.9" => {
+            arity(f, ins, 1)?;
+            lhs_n(f, ins, 1)
+        }
+        op if op.starts_with("measure.i") && obj.isa == "0.9" => {
+            if !matches!(suffix_width(op, "measure."), Some(1..=128)) {
+                return Err(err("3.3", "measurement width outside 1..=128"));
+            }
+            arity(f, ins, 1)?;
+            lhs_n(f, ins, 1)
+        }
         "measure" => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
@@ -1405,6 +1445,17 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
                 ));
             }
             lhs_n(f, ins, 0)
+        }
+        "budget.mint" if obj.isa == "0.9" => {
+            if !matches!(f.kind, FnKind::Cc | FnKind::R) {
+                return Err(err("3.3", "budget.mint outside CC/R"));
+            }
+            arity(f, ins, 5)?;
+            let (_, kind) = callee_kind(obj, f, &ins.operands[0])?;
+            if kind != "oracle" {
+                return Err(err("5.4", "budget.mint target is not an oracle"));
+            }
+            lhs_n(f, ins, 1)
         }
         "qreg.new" => {
             arity(f, ins, 2)?;
@@ -1692,8 +1743,11 @@ fn validate_lifted_or_q(
                     .layout
                     .as_ref()
                     .is_some_and(|l| l.globals.contains_key(name));
-                let is_region =
-                    f.kind == FnKind::Oracle && f.lists[3].iter().any(|p| p.name == name);
+                let is_region = (f.kind == FnKind::Oracle
+                    && f.lists[3].iter().any(|p| p.name == name))
+                    || (obj.isa == "0.9"
+                        && f.kind == FnKind::Lproc
+                        && f.lists[4].iter().any(|p| p.name == name));
                 if !is_global && !is_region {
                     return Err(err(
                         "4.2",
@@ -1757,7 +1811,11 @@ fn validate_lifted_or_q(
         "fault" => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)?;
-            if crate::bigint::BigUint::parse_int(&ins.operands[0]).is_err() {
+            if crate::bigint::BigUint::parse_int(&ins.operands[0]).is_err()
+                || (matches!(f.kind, FnKind::Cc | FnKind::R)
+                    && crate::bigint::BigUint::parse_int(&ins.operands[0])
+                        .is_ok_and(|v| v.bits() > 64))
+            {
                 return Err(err(
                     "4.2",
                     format!("fault code in @{} must be an integer literal", f.name),
@@ -1766,6 +1824,18 @@ fn validate_lifted_or_q(
             Ok(())
         }
         "lift.call" => {
+            if obj.isa == "0.9" {
+                lhs_n(f, ins, 1)?;
+                let target = ins
+                    .operands
+                    .first()
+                    .ok_or_else(|| err("3.7", "lift.call has no target"))?;
+                let (_, kind) = callee_kind(obj, f, target)?;
+                if kind != "lproc" {
+                    return Err(err("3.7", "lift.call targets non-lproc"));
+                }
+                return crate::instances::validate_call(obj, f, ins);
+            }
             arity(f, ins, 2)?;
             lhs_n(f, ins, 1)?;
             let (name, kind) = callee_kind(obj, f, &ins.operands[0])?;
@@ -1933,6 +2003,9 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
             lhs_n(f, ins, 0)
         }
         "qinplace" => {
+            if obj.isa == "0.9" {
+                return validate_qinplace09(obj, f, ins);
+            }
             arity(f, ins, 4)?;
             lhs_n(f, ins, 0)?;
             for tok in [&ins.operands[0], &ins.operands[1]] {
@@ -2067,6 +2140,49 @@ fn validate_action_acyclic(obj: &Object) -> Result<(), String> {
         if state.get(&n).copied().unwrap_or(0) == 0 {
             visit(&n, &graph, &mut state)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_qinplace09(
+    obj: &Object,
+    f: &Function,
+    ins: &crate::object::Instr,
+) -> Result<(), String> {
+    if !matches!(ins.operands.len(), 4 | 7) {
+        return Err(err(
+            "4.5",
+            "qinplace takes four operands or all three additional lists",
+        ));
+    }
+    lhs_n(f, ins, 0)?;
+    let mut signatures = Vec::new();
+    for tok in &ins.operands[..2] {
+        let (name, kind) = callee_kind(obj, f, tok)?;
+        if kind != "oracle" {
+            return Err(err("4.5", "qinplace requires oracles"));
+        }
+        signatures.push(signature_of(obj, &name)?);
+    }
+    if signatures[0] != signatures[1] {
+        return Err(err("4.5", "qinplace oracle signatures disagree"));
+    }
+    let sig = oracle_sig(obj, ins.operands[0].trim_start_matches('@'))?;
+    if sig.ins.first() != Some(&sig.tgt) {
+        return Err(err("4.5", "qinplace input and target widths disagree"));
+    }
+    if ins.operands.len() == 4 {
+        if sig.ins.len() != 1 || !sig.mem.is_empty() || !sig.args.is_empty() {
+            return Err(err(
+                "4.5",
+                "qinplace short form requires empty extra groups",
+            ));
+        }
+    } else if list_operand(&ins.operands[4])?.len() != sig.ins.len() - 1
+        || list_operand(&ins.operands[5])?.len() != sig.mem.len()
+        || list_operand(&ins.operands[6])?.len() != sig.args.len()
+    {
+        return Err(err("4.5", "qinplace argument group count mismatch"));
     }
     Ok(())
 }

@@ -16,11 +16,15 @@ pub enum Type {
     Reg(usize),
     Region(usize, usize),
     Qreg(usize),
+    QregDynamic,
 }
 
 impl Type {
     pub fn parse(text: &str) -> Result<Type, String> {
         let t = text;
+        if t == "qreg[*]" {
+            return Ok(Type::QregDynamic);
+        }
         if t == "ptr" {
             return Ok(Type::Ptr);
         }
@@ -79,6 +83,7 @@ impl Type {
             Type::Reg(n) => format!("reg[{n}]"),
             Type::Region(a, w) => format!("region[{a},{w}]"),
             Type::Qreg(n) => format!("qreg[{n}]"),
+            Type::QregDynamic => "qreg[*]".into(),
         }
     }
     pub fn width(&self) -> Option<usize> {
@@ -904,6 +909,8 @@ fn parse_params(token: &str) -> Result<Vec<Param>, String> {
         if let Some(r) = &role
             && r != "in"
             && r != "mut"
+            && r != "token"
+            && r != "classical"
         {
             return Err(err(
                 "16.2",

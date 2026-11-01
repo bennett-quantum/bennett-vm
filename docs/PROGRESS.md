@@ -1,3 +1,10 @@
+# 47t-c K64 emitted support partition — 2026-11-01
+Resume: c IN PROGRESS; K65 whole-pair carriers and remaining source/bound-library semantic-call validation precede d, b, hsd, clw; a zero-width item still waits on ISA 7js.
+Source-derived oracle/instance row maps annotate the authenticated construction with separate construct/step/commit/release spaces, per-step/phase support counters and shared Rows/Next row counters; raw leaves/charges/order stay identical.
+Implicit local qregion allocation/image restoration retains its declaration point. Provenance binding alone does not admit raw descriptors against source or realise a schedule (b/d remain required).
+RED missing address API and implicit-local provenance; GREEN two K64 witnesses plus local-region regression. Interpreter/JIT each 200/0 (before 197/0), differential each18/0; fmt/strict Clippy/whitespace green, .tmp/c-k64-gate-*.log.
+No bead closed, ISA issue/text change, dependencies, fixture/test weakening or push. K65 is next in this same child bead.
+
 # 47t-c source invocation addressing — 2026-11-01
 Resume: c IN PROGRESS; finish K64 emitted support partition/domains and K65 paired cleanup carriers, then d, b, hsd, clw. a zero-width addressing still waits on ISA 7js.
 Ordinary source-action rows carry interface-hash program-point chains, per-row generated ordinals/call occurrences and source-loop iteration vectors; source adjoints retain forward addresses. Raw catalog ordinal compatibility is preserved.

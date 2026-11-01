@@ -96,3 +96,19 @@ fn adjoint_keeps_forward_source_points_and_iteration_coordinates() {
         );
     }
 }
+#[test]
+fn implicit_qregion_support_retains_declaration_provenance() {
+    let leaves = lower("qregion m 1 2\nx x[0]", false);
+    assert!(
+        leaves.iter().all(|l| l.address.is_some()),
+        "implicit local image support must be addressed"
+    );
+    let support = leaves
+        .iter()
+        .filter(|l| l.operation == "alloc" || l.operation == "release")
+        .collect::<Vec<_>>();
+    assert_eq!(support.len(), 2);
+    for l in support {
+        assert_eq!(l.address.as_ref().unwrap().path[0].point, "entry:0");
+    }
+}

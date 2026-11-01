@@ -1,5 +1,6 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
+mod address;
 mod source;
 use crate::{
     json::{self, Json},
@@ -87,6 +88,9 @@ pub struct Bindings {
     source_iterations: Vec<usize>,
     reverse_iterations: bool,
     source_formed: bool,
+    oracle_address: Option<Rc<address::OracleAddress>>,
+    row_spaces: Vec<address::RowSpace>,
+    coordinate: crate::sched::Coordinate,
 }
 impl Bindings {
     /// Reparse the canonical source before constructing a linked registry;
@@ -106,7 +110,8 @@ impl Bindings {
                 path: vec![p],
                 generated: ordinal,
                 kind,
-                ..Default::default()
+                step: self.coordinate.step,
+                phase: self.coordinate.phase.clone(),
             }
         })
     }
@@ -277,7 +282,13 @@ impl Catalog {
             .map(|n| string(n).map(String::from))
             .collect::<Result<_, _>>()?;
         active.push(kind.into());
-        let result = self.walk(field(r, "body")?, &mut env, out, next, active);
+        let result = if env.oracle_address.is_some() && kind == "oracle.construct" {
+            self.walk_oracle(field(r, "body")?, &env, out, next, active)
+        } else if env.oracle_address.is_some() && kind == "step" {
+            self.walk_step(field(r, "body")?, &env, out, next, active)
+        } else {
+            self.walk(field(r, "body")?, &mut env, out, next, active)
+        };
         active.pop();
         result
     }
@@ -549,11 +560,7 @@ impl Catalog {
                 let b = b.clone();
                 let mut cap = *cap.clone();
                 cap.add_controls(env.controls.clone());
-                cap.call_index = env.call_index.clone();
-                cap.source_point = env.source_point.clone();
-                cap.source_next = env.source_next.clone();
-                cap.source_iterations = env.source_iterations.clone();
-                cap.reverse_iterations = env.reverse_iterations;
+                cap.inherit_address(env);
                 cap.active_symbols = env.active_symbols.clone();
                 // Captured actual syntax is finite; repeating a higher-order
                 // recipe here is not a cycle in declared recipe dependencies.
@@ -651,6 +658,7 @@ impl Catalog {
                     bind_formals(&formals, arr(args)?, env, &Bindings::new())?
                 };
                 callee.registry = Some(registry.clone());
+                callee.coordinate = env.coordinate.clone();
                 callee.declarations = env.declarations.clone();
                 callee.active_symbols = env.active_symbols.clone();
                 callee.add_controls(env.controls.clone());
@@ -692,6 +700,13 @@ impl Catalog {
                 for row in rows.clone() {
                     let mut local = env.clone();
                     local.values.extend(row);
+                    if n.as_str() == Some("Frames")
+                        && active.last().map(String::as_str) == Some("oracle.construct")
+                        && env.oracle_address.is_some()
+                    {
+                        local.coordinate.step =
+                            Some(scalar(&Json::Str("index".into()), &local)?.usize()? + 1);
+                    }
                     self.walk(field(c, "body")?, &mut local, out, next, active)?;
                 }
             } else if let Some(n) = c.get("apply") {
@@ -706,11 +721,13 @@ impl Catalog {
                 let args = arr(field(c, "args")?)?;
                 let mut local = bind_formals(fs, args, env, cap)?;
                 local.add_controls(env.controls.clone());
-                local.call_index = env.call_index.clone();
-                local.source_point = env.source_point.clone();
-                local.source_next = env.source_next.clone();
-                local.source_iterations = env.source_iterations.clone();
-                local.reverse_iterations = env.reverse_iterations;
+                local.inherit_address(env);
+                if env.oracle_address.is_some()
+                    && active.last().map(String::as_str) == Some("step")
+                    && matches!(n.as_str(), Some("Rows" | "Next"))
+                {
+                    self.address_row(&mut local, scalar(field(c, "index")?, env)?.usize()?)?;
+                }
                 local.active_symbols = env.active_symbols.clone();
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {

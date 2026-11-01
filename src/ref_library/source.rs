@@ -262,16 +262,29 @@ pub(super) fn action_body(
             ),
             ("body", Json::Arr(body)),
         ]);
-        body = vec![invocation(
-            "qregion",
-            vec![
-                num(cells / region.cell),
-                num(region.cell),
-                text(image),
-                Json::Arr(vec![template]),
-                Json::Arr(vec![]),
-            ],
-        )];
+        body = vec![Json::obj(vec![
+            (
+                "$source",
+                Json::obj(vec![
+                    ("symbol", text(&source.symbol)),
+                    ("point", text(&source.points[&local.line])),
+                    ("reverse_iterations", Json::Bool(false)),
+                ]),
+            ),
+            (
+                "body",
+                Json::Arr(vec![invocation(
+                    "qregion",
+                    vec![
+                        num(cells / region.cell),
+                        num(region.cell),
+                        text(image),
+                        Json::Arr(vec![template]),
+                        Json::Arr(vec![]),
+                    ],
+                )]),
+            ),
+        ])];
     }
     Ok(Json::Arr(body))
 }

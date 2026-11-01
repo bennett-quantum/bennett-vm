@@ -515,7 +515,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
     ])]);
     Ok(result)
 }
-fn call(object: &Object, i: &Instr, env: &Bindings) -> Result<Json, String> {
+pub(super) fn call(object: &Object, i: &Instr, env: &Bindings) -> Result<Json, String> {
     let name = i.operands[0].trim_start_matches('@');
     let hash = env.registry.as_ref().unwrap().identities.closure[name]
         .as_ref()

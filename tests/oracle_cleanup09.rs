@@ -363,3 +363,112 @@ fn nested_constructor_keeps_fixed_classical_values_separate_from_readable_bits()
         }
     }
 }
+
+#[test]
+fn action_oracle_calls_capture_each_source_token_under_controls_and_adjoints() {
+    let (obj, ids) = bennett_vm::load(&support::source("action @root (t:wire mut, f:wire[4] mut) (x:wire in, p:wire in) () (short:token, enough:token) ()\n^entry():\nctl p oracle_call @outer short (x) t f () (enough)\nctl p oracle_call @outer enough (x) t f () (enough)\noracle @outer (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs { r:reg[1], fr:reg[4] }\n^entry():\nlift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval x\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"), false).unwrap();
+    let catalog = Catalog::published().unwrap();
+    for adjoint in [false, true] {
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","iteration":"*","call_index":0}},{{"symbol":"{}","point":"entry:1","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"], ids.interface["outer"])).unwrap();
+            let e = catalog
+                .lower_action_with_cleanup(
+                    &obj,
+                    "root",
+                    &json::parse(r#"[["0","0","0","0"],["3","0","0","0"]]"#).unwrap(),
+                    adjoint,
+                    0,
+                    &[CleanupEntry {
+                        selector: Selector::parse(&selector).unwrap(),
+                        realisation: choice,
+                    }],
+                )
+                .unwrap();
+            // B=0 emits no steps/carriers, B=3 emits one carrier per step/phase.
+            assert_eq!(e.cleanups.len(), 6);
+            for c in &e.cleanups {
+                assert_eq!(c.realisation, choice);
+                assert_eq!(c.address.path.len(), 2);
+                assert_eq!(c.address.path[0].symbol, ids.interface["root"]);
+                assert_eq!(c.address.path[0].point, "entry:1");
+                assert_eq!(c.address.path[0].call_index, Some(0));
+                assert_eq!(c.address.path[1].symbol, ids.interface["outer"]);
+                assert_eq!(c.address.path[1].point, "entry:1");
+                assert!(c.controls.iter().any(|w| w == "p[0]"));
+            }
+            for bits in 0..128 {
+                let mut state = std::collections::BTreeMap::from([
+                    ("x[0]".to_string(), bits & 1 != 0),
+                    ("t[0]".into(), bits & 2 != 0),
+                    ("p[0]".into(), bits & 64 != 0),
+                ]);
+                for i in 0..4 {
+                    state.insert(format!("f[{i}]"), bits & (4 << i) != 0);
+                }
+                let mut expected = state.clone();
+                if bits & 64 != 0 {
+                    *expected.get_mut("t[0]").unwrap() ^= bits & 1 != 0;
+                    *expected.get_mut("f[0]").unwrap() ^= true;
+                }
+                assert_eq!(replay(&e.leaves, state), expected, "{adjoint} {bits}");
+            }
+        }
+    }
+}
+
+#[test]
+fn action_oracle_source_arguments_keep_the_admission_type_guard() {
+    let text = support::source(
+        "action @root (t:wire mut, f:wire[4] mut) (x:wire in) () (tk:token) ()\n^entry():\noracle_call @pick tk (x) t f () (-1)\noracle @pick (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\n^entry():\nlift.retval a",
+    );
+    // Source argument slots require typed names. Lowering must not bypass this
+    // guard merely because a raw catalog value could encode the same bits.
+    let error = bennett_vm::load(&text, false).expect_err("untyped source argument admitted");
+    assert!(
+        error.contains("call classical/token argument type mismatch"),
+        "{error}"
+    );
+}
+
+#[test]
+fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
+    let (obj, ids) = bennett_vm::load(&support::source("action @root (x:wire[2] mut, f:wire[4] mut) (z:wire[2] in) () (tk:token) ()\n^entry():\nd = qcopy x\noracle_call @id tk (z) x f () ()\naction_call @mix (d) () () ()\nadj action_call @mix (d) () () ()\noracle_call @id tk (z) x f () ()\nquncopy x d\nperm_action @mix (d:wire[2] mut) () () () ()\n^entry():\ncx d[0] d[1]\noracle @id (x:wire[2] in) (t:wire[2]) (f:wire[4]) () ()\n^entry():\nlift.retval x"), false).unwrap();
+    let catalog = Catalog::published().unwrap();
+    let params = json::parse(r#"[["1","0","0","0"]]"#).unwrap();
+    let reverse = catalog
+        .lower_action_with_cleanup(&obj, "root", &params, false, 0, &[])
+        .unwrap();
+    assert!(reverse.cleanup_pairing_complete);
+    for bits in 0..256 {
+        let mut state = std::collections::BTreeMap::new();
+        for (name, width, value) in [
+            ("x", 2, bits & 3),
+            ("z", 2, (bits >> 2) & 3),
+            ("f", 4, bits >> 4),
+        ] {
+            for i in 0..width {
+                state.insert(format!("{name}[{i}]"), value & (1 << i) != 0);
+            }
+        }
+        assert_eq!(replay(&reverse.leaves, state.clone()), state);
+    }
+    let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:3","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
+    let error = match catalog.lower_action_with_cleanup(
+        &obj,
+        "root",
+        &params,
+        false,
+        0,
+        &[CleanupEntry {
+            selector: Selector::parse(&selector).unwrap(),
+            realisation: CleanupRealisation::Recompute,
+        }],
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("recompute silently substituted a later external input version"),
+    };
+    assert!(
+        error.contains("exact clean-input computing sequence"),
+        "{error}"
+    );
+}

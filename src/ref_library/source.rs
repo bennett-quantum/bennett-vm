@@ -565,10 +565,13 @@ impl Source {
             "swap" | "qexch" => i.operands.clone(),
             "qstore" => vec![i.operands[0].clone()],
             "qexchm" => vec![i.operands[0].clone(), i.operands[2].clone()],
-            "action_call" | "adj" | "ctl" => {
+            "action_call" | "oracle_call" | "adj" | "ctl" => {
                 let Ok((_, _, op, args)) = crate::action::normalize_call(i) else {
                     return vec![];
                 };
+                if op == "oracle_call" {
+                    return args[3..5].to_vec();
+                }
                 if op != "action_call" {
                     return vec![];
                 }
@@ -1561,6 +1564,24 @@ impl Source {
                 format!("gate.{op}")
             };
             return Ok(vec![invocation(&kind, args)]);
+        }
+        if matches!(op, "oracle_call" | "adj" | "ctl") {
+            let (_, control, inner, operands) = crate::action::normalize_call(i)?;
+            if inner == "oracle_call" {
+                let mut call = i.clone();
+                call.op = inner.into();
+                call.operands = operands;
+                let registry = env
+                    .registry
+                    .clone()
+                    .ok_or_else(|| err("source closure registry missing"))?;
+                let body = vec![super::oracle_source::call(&registry.object, &call, env)?];
+                return Ok(if let Some(control) = control {
+                    vec![invocation("ctl", vec![text(control), Json::Arr(body)])]
+                } else {
+                    body
+                });
+            }
         }
         let (kind, args) = match op {
             "action_call" | "adj" | "ctl" => {

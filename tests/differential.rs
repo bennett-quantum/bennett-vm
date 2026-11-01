@@ -1690,6 +1690,300 @@ fn measurement_draws_compare_exact_born_weights() {
     }
 }
 
+/// bennett-vm-ffj: ill-formed under the text at both versions. Each is rejected
+/// at load by every command that loads an object.
+const ILL_FORMED: [(&str, &str, &str); 19] = [
+    (
+        "retval-undeclared",
+        "§3.7",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval l14",
+    ),
+    (
+        "qbranch-undeclared",
+        "§3.7",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nqbranch l4 ^b1 ^b2\n^b1():\nlift.retval l1\n^b2():\nlift.retval l1",
+    ),
+    (
+        "faultif-undeclared",
+        "§3.7",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nlift.faultif l2 3\nlift.retval l1",
+    ),
+    (
+        "destination-undeclared",
+        "§3.7",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nl2 = lift.const.i1 0\nlift.retval l1",
+    ),
+    (
+        "destination-input",
+        "§3.7",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nx = lift.const.i1 0\nlift.retval l1",
+    ),
+    (
+        "const-width",
+        "§3.3",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1], l2:reg[8] }\n^entry():\nl2 = lift.const.i7 0\nlift.retval l1",
+    ),
+    (
+        "retval-width",
+        "§3.3",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[8] }\n^entry():\nl1 = lift.const.i8 0\nlift.retval l1",
+    ),
+    (
+        "regs-role-suffix",
+        "§16.2",
+        "oracle @main (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1],x l2:reg[1] }\n^entry():\nl1 = lift.const.i1 0\nlift.retval l1",
+    ),
+    (
+        "uncall-without-call",
+        "§5.5",
+        "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nl1 = lift.const.i1 0\nlift.retval l1\noracle @main () (t:wire) (f:wire[4]) () (tk:token)\nregs { i:reg[1], o:reg[1], e:reg[4] }\n^entry():\ni = lift.const.i1 0\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+    ),
+    (
+        "uncall-on-one-path",
+        "§5.5",
+        "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nl1 = lift.const.i1 0\nlift.retval l1\noracle @main (c:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs { i:reg[1], o:reg[1], e:reg[4] }\n^entry():\ni = lift.const.i1 0\nqbranch c ^call ^join\n^call():\nlift.oracle_call @inner tk (i) o e () ()\nqjump ^join\n^join():\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+    ),
+    (
+        "uncall-after-ins-write",
+        "§5.5",
+        "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nl1 = lift.const.i1 0\nlift.retval l1\noracle @main () (t:wire) (f:wire[4]) () (tk:token)\nregs { i:reg[1], o:reg[1], e:reg[4] }\n^entry():\ni = lift.const.i1 0\nlift.oracle_call @inner tk (i) o e () ()\ni = lift.const.i1 1\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+    ),
+    (
+        "empty-qif-arm",
+        "§16.2",
+        "action @main (t:wire mut) (c:wire in) () () ()\n^entry():\nqif c {\n} {\nx t\n}",
+    ),
+    (
+        "empty-qloop",
+        "§16.2",
+        "action @main (t:wire mut) () () () ()\nregs {  } bounds {2}\n^entry():\nqloop 2 {\n}\nx t",
+    ),
+    (
+        "qloop-escaping-alloc",
+        "§3.3",
+        "action @main (t:wire mut) () () () ()\nregs {  } bounds {2}\n^entry():\nqloop 2 {\nw = qalloc any 1\n}\nh w\nh w\nqfree w",
+    ),
+    (
+        "qfree-entangled",
+        "§6.2",
+        "action @main (t:wire mut) () () () ()\n^entry():\nw = qalloc any 1\ncx t w\nqfree w",
+    ),
+    (
+        "qfree-not-cleaned",
+        "§6.2",
+        "action @main (t:wire mut) () () () ()\n^entry():\nw = qalloc any 1\nx w\nqfree w",
+    ),
+    (
+        "quncopy-window-closed",
+        "§6.2",
+        "action @main (t:wire mut) () () () ()\n^entry():\nd = qcopy t\nh t\nquncopy t d",
+    ),
+    (
+        "quncopy-without-qcopy",
+        "§6.2",
+        "action @main (t:wire mut) () () () ()\n^entry():\nd = qalloc any 1\nquncopy t d",
+    ),
+    (
+        "quncopy-other-source",
+        "§6.2",
+        "action @main (t:wire mut, u:wire mut) () () () ()\n^entry():\nd = qcopy t\nquncopy u d",
+    ),
+];
+
+#[test]
+fn ill_formed_objects_are_rejected_at_load() {
+    let mut escaped = vec![];
+    for version in ["0.8", "0.9"] {
+        for (name, rule, functions) in ILL_FORMED {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".tmp")
+                .join(format!("ffj-{name}-{version}-{}.bisa", std::process::id()));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, ill_formed_text(version, functions)).unwrap();
+            let path = path.display().to_string();
+            let args = s(&["check", &path]);
+            let refr = raw_run(&reference(), &args, "interpreter");
+            let refr_says = String::from_utf8_lossy(&refr.stderr);
+            if refr.status.code() != Some(1) || !refr_says.contains(rule) {
+                escaped.push(format!("{version} {name}: reference: {}", refr_says.trim()));
+            }
+            for engine in ENGINES {
+                let out = raw_run(Path::new(vm()), &args, engine);
+                let says = String::from_utf8_lossy(&out.stderr);
+                if out.status.code() != Some(1) || !says.contains(rule) {
+                    let says = says.lines().last().unwrap_or("accepted");
+                    escaped.push(format!("{version} {name} {engine}: VM: {says}"));
+                }
+            }
+        }
+    }
+    assert!(escaped.is_empty(), "{}", escaped.join("\n"));
+}
+
+/// §6.2's admitted cleanups: the checker above must leave these alone.
+const CLEANUPS: [(&str, &str); 16] = [
+    ("x-x", "w = qalloc any 1\nx w\nx w\nqfree w"),
+    ("h-h", "w = qalloc any 1\nh w\nh w\nqfree w"),
+    ("cx-cx", "w = qalloc any 1\ncx t w\ncx t w\nqfree w"),
+    ("nested", "w = qalloc any 1\nx w\nh w\nh w\nx w\nqfree w"),
+    ("rotation", "w = qalloc any 1\nrx 0.5 w\nrx -0.5 w\nqfree w"),
+    ("phase", "w = qalloc any 1\nh w\ns w\nsdg w\nh w\nqfree w"),
+    (
+        "bundle-order",
+        "w = qalloc any 2\nx w[0]\nx w[1]\nx w[0]\nx w[1]\nqfree w",
+    ),
+    ("xor", "w = qalloc any 1\nqxor t w\nqxor t w\nqfree w"),
+    ("exch", "w = qalloc any 1\nqexch t w\nqexch t w\nqfree w"),
+    ("copy", "d = qcopy t\nquncopy t d"),
+    ("copy-diagonal", "d = qcopy t\nrz 0.5 t\nquncopy t d"),
+    (
+        "copy-read",
+        "d = qcopy t\nw = qalloc any 1\ncx d w\ncx d w\nqfree w\nquncopy t d",
+    ),
+    (
+        "calls",
+        "w = qalloc any 1\naction_call @flip (w) () () ()\nadj action_call @flip (w) () () ()\nqfree w",
+    ),
+    ("loop", "w = qalloc any 1\nqloop 2 {\nx w\n}\nqfree w"),
+    ("loop-local", "qloop 2 {\nw = qalloc any 1\nqfree w\n}\nx t"),
+    (
+        "qif",
+        "w = qalloc any 1\nv = qalloc any 1\nqif t {\nx w\n} {\nx v\n}\nqif t {\nx w\n} {\nx v\n}\nqfree w\nqfree v",
+    ),
+];
+
+#[test]
+fn exact_inverse_cleanups_are_admitted() {
+    for version in ["0.8", "0.9"] {
+        for (name, body) in CLEANUPS {
+            let bounds = if body.contains("qloop") {
+                "regs {  } bounds {2}\n"
+            } else {
+                ""
+            };
+            let path = signed_object(
+                &format!("cleanup-{name}"),
+                version,
+                &format!(
+                    "perm_action @flip (t:wire mut) () () () ()\n^entry():\nx t\naction @main (t:wire mut) () () () ()\n{bounds}^entry():\n{body}"
+                ),
+            );
+            let args = s(&["run-action", &path, "main", "--basis", "1"]);
+            assert_coherent(&args);
+        }
+    }
+}
+
+const UNCALL_PRELUDE: &str = "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l1:reg[1] }\n^entry():\nl1 = lift.const.i1 0\nlift.retval l1\n";
+
+/// §5.5's admitted pairs: nested LIFO, one path each, and an intervening store,
+/// "an intervening `lift.store` is not ill-formed". A 0.9 layout defeats the
+/// reference's identity check (b-isa-spec-7fd), so the store is judged by the text.
+#[test]
+fn matched_oracle_uncalls_are_admitted() {
+    for (name, regs, body) in [
+        (
+            "pair",
+            "i:reg[1], o:reg[1], e:reg[4]",
+            "i = lift.const.i1 0\nlift.oracle_call @inner tk (i) o e () ()\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+        ),
+        (
+            "retained",
+            "i:reg[1], o:reg[1], e:reg[4]",
+            "i = lift.const.i1 0\nlift.oracle_call @inner tk (i) o e () ()\nlift.retval o",
+        ),
+        (
+            "nested",
+            "i:reg[1], o:reg[1], e:reg[4]",
+            "i = lift.const.i1 0\nlift.oracle_call @inner tk (i) o e () ()\nlift.oracle_call @inner tk (i) o e () ()\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+        ),
+        (
+            "both-paths",
+            "i:reg[1], o:reg[1], e:reg[4]",
+            "i = lift.const.i1 0\nlift.oracle_call @inner tk (i) o e () ()\nqbranch i ^a ^b\n^a():\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o\n^b():\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o",
+        ),
+        (
+            "loop-balanced",
+            "i:reg[1], o:reg[1], e:reg[4], n:reg[1]",
+            "i = lift.const.i1 0\nqjump ^head\n^head():\nlift.oracle_call @inner tk (i) o e () ()\nlift.oracle_uncall @inner tk (i) o e () ()\nn = lift.const.i1 1\nqbranch n ^out ^head\n^out():\nlift.retval o",
+        ),
+    ] {
+        for version in ["0.8", "0.9"] {
+            let path = signed_object(
+                &format!("uncall-{name}"),
+                version,
+                &format!(
+                    "{UNCALL_PRELUDE}oracle @main () (t:wire) (f:wire[4]) () (tk:token)\nregs {{ {regs} }}\n^entry():\n{body}"
+                ),
+            );
+            assert_coherent(&s(&[
+                "run-oracle",
+                &path,
+                "main",
+                "--input",
+                "",
+                "--arg",
+                "token:64",
+            ]));
+        }
+    }
+    let text = source09::source(&format!(
+        "{UNCALL_PRELUDE}oracle @stores () (t:wire) (f:wire[4]) (db:region[0,8] in) (tk:token)\nregs {{ i:reg[1], o:reg[1], e:reg[4], a:reg[32], v:reg[8] }}\n^entry():\ni = lift.const.i1 0\nv = lift.const.i8 1\nlift.oracle_call @inner tk (i) o e () ()\na = lift.addr @db\nlift.store.i8 a v\nlift.oracle_uncall @inner tk (i) o e () ()\nlift.retval o"
+    ));
+    bennett_vm::load(&text, false).unwrap();
+}
+
+/// 0.9 §3.4: "the result of at least one defining instruction of that function,
+/// and all its definitions give it one type"; §7.4: "every executed defining
+/// instruction creates a new instance". The reference rejects this object
+/// ("SSA definition reused"), which is filed against it; the text decides.
+#[test]
+fn cc_names_may_have_several_defining_instructions() {
+    let text = source09::source(
+        "fn cc @main () (r:i8) () () ()\n^entry():\nr = const.i8 1\nr = const.i8 2\nret r",
+    );
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".tmp")
+        .join(format!("several-definitions-{}.bisa", std::process::id()));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, text).unwrap();
+    let path = path.display().to_string();
+    for engine in ENGINES {
+        let json = vm_json(engine, &s(&["run-cc", &path, "main"]));
+        let result = &json.get("results").unwrap().as_arr().unwrap()[0];
+        assert_eq!(result.get("value").unwrap().as_str(), Some("2"), "{engine}");
+    }
+}
+
+/// The real bodies under the symbols of a body-free skeleton: signatures come from
+/// the headers alone, and the cited rule in the test shows the verdict is not §9.
+fn ill_formed_text(version: &str, functions: &str) -> String {
+    let skeleton = functions
+        .lines()
+        .filter(|l| {
+            ["fn ", "oracle ", "action ", "perm_action "]
+                .iter()
+                .any(|k| l.starts_with(k))
+        })
+        .map(|l| {
+            // A bounds list is part of the signature.
+            let bounds = functions
+                .split_once(&format!("{l}\nregs {{  }} bounds"))
+                .map_or("", |_| "regs {  } bounds {2}\n");
+            format!("{l}\n{bounds}^entry():\nqjump ^entry\n")
+        })
+        .collect::<String>();
+    let signed = source09::source_at(version, skeleton.trim_end());
+    let symbols = signed
+        .lines()
+        .skip_while(|l| *l != "section symbols")
+        .nth(1)
+        .unwrap();
+    format!(
+        "bennett-object isa={version} object={version} launch={version} sched={version} cert={version} coverage={version} target={version} ptr_width=32\n\nsection symbols\n{symbols}\n\nsection functions\n{functions}\n"
+    )
+}
+
 #[test]
 fn classical_rows_and_boundary_faults() {
     let text = std::fs::read_to_string(fixtures().join("classical.bisa")).unwrap();

@@ -32,11 +32,14 @@ pub fn validate(obj: &Object) -> Result<(), String> {
         if obj.isa == "0.9" {
             crate::coherent_typing::function(obj, f)?;
         }
-        if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
+        if matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
             crate::lifted_typing::function(obj, f)?;
-        } else {
+            crate::call_matching::function(f)?;
+        }
+        if obj.isa != "0.9" || !matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
             crate::qvalidate::validate(obj, f)?;
         }
+        crate::cleanup_discipline::function(obj, f)?;
     }
     if obj.isa == "0.9" {
         crate::lifted_typing::closures(obj)?;

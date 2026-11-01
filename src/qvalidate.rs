@@ -3,7 +3,7 @@ use crate::object::{FnKind, Function, Instr, Object, Type};
 use crate::validate::{err, list_operand};
 use std::collections::{BTreeMap, BTreeSet};
 type Wire = (String, usize);
-fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
+pub(crate) fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
     let (name, index) = if let Some((n, i)) = s.split_once('[') {
         (
             n,
@@ -28,7 +28,10 @@ fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
         Ok((0..n).map(|i| (name.into(), i)).collect())
     }
 }
-fn flip(ins: &Instr, env: &BTreeMap<String, usize>) -> Result<(Vec<Wire>, Wire), String> {
+pub(crate) fn flip(
+    ins: &Instr,
+    env: &BTreeMap<String, usize>,
+) -> Result<(Vec<Wire>, Wire), String> {
     let xs = &ins.operands;
     let (controls, target) = match ins.op.as_str() {
         "x" => (vec![], &xs[0]),

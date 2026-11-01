@@ -1,3 +1,9 @@
+# u8m saved effect journals and tape-consuming replay — 2026-11-01
+Resume: u8m CLOSED; next work 47t-c1. Parent c is split into c1 fixed nested-loop/qif histories, c2 lifted oracle-uncall, c3 bound-library occurrences, c4 pair partition (BLOCKED on ISA9hv), c5 general bounded-while/cross-domain histories. Rung 2 complete; next ladder rung 3. Never push.
+RED/GREEN six CLI regressions and one direct-row unit test: file save/replay, byte-identical output/final state, both launch reset paths, forward prefixes, cancelled segments, fault atomicity, malformed/duplicate inputs and corrupted/order/short/extra tapes. Repeated rejection preserves state/history/control/cursor exactly.
+Contract follows the reference README: --tape-out file and --replay-tape file on run-cc, CC/R reverse and run-program. Validate candidates before commit against supplied entropy; saved execution journal retains cancelled effects while the active tape reverses normally. No output-schema change.
+FINAL GREEN .tmp/u8m-final2-*: interpreter255/0/0 and JIT255/0/0 each (before248/0/0), differential18/0 each; fmt strict all-target Clippy whitespace pass. Earlier red/setup-fix logs retained. No spec edits, dependencies, fixture weakening, foreign implementation reads or pushes.
+
 # 47t-c transitive and mutable-region input histories — 2026-11-01
 Resume: c IN PROGRESS; finish remaining nested loop/branch/general histories, lifted oracle-uncall integration and complete bound-library occurrence validation; resolve overlapping cleanup-pair partition with ISA 9hv. Order c, d, b, u8m, hsd, clw.
 RED/GREEN eight new regressions: transitive owned dependencies/read-only actuals, nonzero local-region images and prior stores, sliced target aliases, borrowed read dependencies without fresh borrowing, external input versions through cleanup and effective predicate versions/scopes. Focused cleanup_fresh09 18/0; local-region case exhausts all 512 inputs in both source directions.

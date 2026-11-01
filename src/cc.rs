@@ -99,6 +99,7 @@ struct Machine {
     fault: Option<u64>,
     results: Vec<Value>,
     entropy: std::sync::Arc<Vec<u8>>,
+    effects: EffectJournal,
     draws: Seq<f64>,
     draw_pos: usize,
     replies: Seq<Json>,
@@ -108,6 +109,78 @@ struct Machine {
     register_changes: BTreeMap<Key, Option<Value>>,
     nan_registers: Map<Key, ()>,
     trace_enabled: bool,
+}
+/// The execution journal is deliberately outside reversible device state: uncall
+/// cancels the active tape, but replay must still consume those executed effects.
+#[derive(Clone, Default)]
+struct EffectJournal {
+    saved: Seq<Json>,
+    replay: Option<std::sync::Arc<Vec<Json>>>,
+}
+impl EffectJournal {
+    fn read(path: Option<&str>) -> Result<Self, String> {
+        let Some(path) = path else {
+            return Ok(Self::default());
+        };
+        let doc = json::parse(&cliargs::read_object(path)?)
+            .map_err(|e| format!("§7.3/§10: replay tape: {e}"))?;
+        let entries = doc
+            .as_arr()
+            .ok_or("§7.3/§10: replay tape must be an array")?;
+        for (index, entry) in entries.iter().enumerate() {
+            let valid = || -> Option<()> {
+                let fields = entry.as_obj()?;
+                if fields.len() != 4 {
+                    return None;
+                }
+                entry.get("dev")?.as_str()?;
+                entry.get("op")?.as_str()?;
+                from_hex(entry.get("bytes")?.as_str()?).ok()?;
+                for arg in entry.get("args")?.as_arr()? {
+                    let value = arg.as_u64()?;
+                    if *arg != Json::u64(value) {
+                        return None;
+                    }
+                }
+                Some(())
+            };
+            if valid().is_none() {
+                return Err(format!(
+                    "§7.3/§10: invalid replay tape entry {index} (dev/op/args/bytes encoding)"
+                ));
+            }
+        }
+        Ok(Self {
+            saved: Seq::new(),
+            replay: Some(std::sync::Arc::new(entries.clone())),
+        })
+    }
+    fn append(&mut self, event: Json) -> Result<(), String> {
+        if let Some(expected) = &self.replay
+            && expected.get(self.saved.len()) != Some(&event)
+        {
+            return Err(format!(
+                "§7.3/§10: replay mismatch at effect {}: expected {:?}, actual {}",
+                self.saved.len(),
+                expected.get(self.saved.len()),
+                event.to_jcs()
+            ));
+        }
+        self.saved.push(event);
+        Ok(())
+    }
+    fn finish(&self) -> Result<(), String> {
+        if let Some(expected) = &self.replay
+            && expected.len() != self.saved.len()
+        {
+            return Err(format!(
+                "§7.3/§10: replay mismatch: consumed {} of {} effects",
+                self.saved.len(),
+                expected.len()
+            ));
+        }
+        Ok(())
+    }
 }
 fn err(s: impl std::fmt::Display) -> String {
     format!("§3.4: {s}")
@@ -488,6 +561,24 @@ impl Machine {
         }
     }
     fn step_row(&mut self, effective: Option<&Instr>) -> Result<(), String> {
+        // Replay rejection is a diagnostic before this effect commits, including
+        // its control advance and any target classical-step accounting.
+        let activation = self.stack.last().unwrap();
+        let row = effective.unwrap_or(
+            &self.obj.function(&activation.function).unwrap().blocks[activation.block].instrs
+                [activation.index],
+        );
+        let checkpoint =
+            (self.effects.replay.is_some() && row.op == "effect").then(|| self.clone());
+        let result = self.step_row_inner(effective);
+        if result.is_err()
+            && let Some(before) = checkpoint
+        {
+            *self = before;
+        }
+        result
+    }
+    fn step_row_inner(&mut self, effective: Option<&Instr>) -> Result<(), String> {
         let a = self.stack.last().unwrap().clone();
         let obj = self.obj.clone();
         let f = obj.function(&a.function).unwrap();
@@ -955,42 +1046,23 @@ impl Machine {
         {
             return Ok(Some(10));
         }
+        // Form and validate the event from entry state before any device or
+        // memory mutation. Entropy comes from the supplied entropy, never the tape.
         let bytes = match (dev, op) {
-            ("console", "write") => {
-                let bs = self.data.read(&u(p), n);
-                self.data.console.extend(bs.iter().copied());
-                bs
-            }
-            ("clock", "read") => {
-                let bs = self.data.clock.to_le_bytes().to_vec();
-                self.data.clock = self.data.clock.wrapping_add(1);
-                self.data.write(&u(p), &bs);
-                bs
-            }
+            ("console", "write") | ("block", "write") => self.data.read(&u(p), n),
+            ("clock", "read") => self.data.clock.to_le_bytes().to_vec(),
             ("entropy", "read") => {
-                let bs = self.entropy[self.data.entropy_pos..self.data.entropy_pos + n].to_vec();
-                self.data.entropy_pos += n;
-                self.data.write(&u(p), &bs);
-                bs
+                self.entropy[self.data.entropy_pos..self.data.entropy_pos + n].to_vec()
             }
-            ("block", "write") => {
-                let bs = self.data.read(&u(p), n);
-                self.data.block.insert(args[0], bs.clone());
-                bs
-            }
-            ("block", "read") => {
-                let bs = self
-                    .data
-                    .block
-                    .get(&args[0])
-                    .cloned()
-                    .unwrap_or_else(|| vec![0; 512]);
-                self.data.write(&u(p), &bs);
-                bs
-            }
+            ("block", "read") => self
+                .data
+                .block
+                .get(&args[0])
+                .cloned()
+                .unwrap_or_else(|| vec![0; 512]),
             _ => unreachable!(),
         };
-        self.data.tape.push(Json::obj(vec![
+        let event = Json::obj(vec![
             (
                 "args",
                 Json::Arr(args.iter().map(|v| Json::u64(*v)).collect()),
@@ -998,7 +1070,25 @@ impl Machine {
             ("bytes", Json::Str(hex(&bytes))),
             ("dev", Json::Str(dev.into())),
             ("op", Json::Str(op.into())),
-        ]));
+        ]);
+        self.effects.append(event.clone())?;
+        match (dev, op) {
+            ("console", "write") => self.data.console.extend(bytes.iter().copied()),
+            ("clock", "read") => {
+                self.data.clock = self.data.clock.wrapping_add(1);
+                self.data.write(&u(p), &bytes);
+            }
+            ("entropy", "read") => {
+                self.data.entropy_pos += n;
+                self.data.write(&u(p), &bytes);
+            }
+            ("block", "write") => {
+                self.data.block.insert(args[0], bytes);
+            }
+            ("block", "read") => self.data.write(&u(p), &bytes),
+            _ => unreachable!(),
+        }
+        self.data.tape.push(event);
         Ok(None)
     }
     fn region(&mut self, ins: &Instr) -> Result<(), String> {
@@ -1240,14 +1330,26 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let opts = cliargs::scan_opts(
         args,
         &[
-            "args", "input", "arg", "entropy", "replies", "draws", "budget", "mem", "steps",
+            "args",
+            "input",
+            "arg",
+            "entropy",
+            "replies",
+            "draws",
+            "budget",
+            "mem",
+            "steps",
             "target",
+            "tape-out",
+            "replay-tape",
         ],
         &["reverse"],
     )?;
     if opts.positional.len() != 2 {
         return Err("command requires <object> <entry>".into());
     }
+    let tape_out = opts.one("tape-out")?;
+    let effects = EffectJournal::read(opts.one("replay-tape")?)?;
     let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
     if obj.has_schedule && mode == Mode::Program {
         let doc = crate::sched::object_schedule(&obj)?.unwrap();
@@ -1412,6 +1514,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         fault: None,
         results: vec![],
         entropy: std::sync::Arc::new(entropy),
+        effects,
         draws: draws.into_iter().collect(),
         draw_pos: 0,
         replies: replies.into_iter().collect(),
@@ -1427,6 +1530,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         .map(|s| cliargs::parse_u64(s, "forward steps"))
         .transpose()?;
     m.drive(limit, budget.steps)?;
+    m.effects.finish()?;
     if m.reply_pos != m.replies.len() {
         return Err("§10: unused host replies".into());
     }
@@ -1550,7 +1654,15 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             Json::Str(m.quantum.target_error().decimal()),
         ));
     }
-    println!("{}", Json::obj(out).to_jcs());
+    let output = Json::obj(out).to_jcs();
+    if let Some(path) = tape_out {
+        std::fs::write(
+            path,
+            format!("{}\n", Json::Arr(m.effects.saved.to_vec()).to_jcs()),
+        )
+        .map_err(|e| format!("§7.3/§10: tape output {path:?}: {e}"))?;
+    }
+    println!("{output}");
     Ok(())
 }
 #[allow(clippy::too_many_arguments)]
@@ -1779,6 +1891,7 @@ impl RuntimeRun {
                 fault: None,
                 results: vec![],
                 entropy: std::sync::Arc::new(entropy),
+                effects: EffectJournal::default(),
                 draws: Seq::new(),
                 draw_pos: 0,
                 replies: Seq::new(),
@@ -2123,6 +2236,45 @@ mod scaling_tests {
         let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
         let resources = Resources::new(&obj).unwrap();
         RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap()
+    }
+
+    #[test]
+    fn replay_mismatch_keeps_effect_entry_state_and_cursor_exactly() {
+        let raw = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../bennett-isa-spec/reference-interpreter/tests/fixtures/classical.bisa"
+        ))
+        .unwrap();
+        let (obj, _) = crate::load(&raw, false).unwrap();
+        let obj = std::sync::Arc::new(obj);
+        let resources = Resources::new(&obj).unwrap();
+        let mut run =
+            RuntimeRun::new(obj, &resources, "effects", vec![], vec![11, 22, 33]).unwrap();
+        run.machine.drive(Some(3), 100).unwrap();
+        let snapshot = run.snapshot("RUNNING").unwrap();
+        let stack = run.machine.stack.clone();
+        let history = run.machine.history.len();
+        run.machine.effects.replay = Some(std::sync::Arc::new(vec![]));
+        for _ in 0..2 {
+            // Call the direct row path used by both CLI engines, not the
+            // RuntimeRun wrapper (which independently checkpoints diagnostics).
+            assert!(
+                run.machine
+                    .step_row(None)
+                    .unwrap_err()
+                    .contains("replay mismatch")
+            );
+            assert_eq!(run.snapshot("RUNNING").unwrap(), snapshot);
+            assert_eq!(run.machine.stack, stack);
+            assert_eq!(run.machine.history.len(), history);
+            assert!(run.machine.effects.saved.is_empty());
+        }
+        run.machine.effects.replay = None;
+        run.machine.step_row(None).unwrap();
+        assert_eq!(run.machine.effects.saved.len(), 1);
+        run.reverse_to(0).unwrap();
+        assert!(run.machine.data.tape.is_empty());
+        assert_eq!(run.machine.effects.saved.len(), 1);
     }
 
     #[test]

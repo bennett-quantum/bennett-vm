@@ -14,6 +14,19 @@ fault is a JSON `FAILED` run with no results. Unsupported later milestones
 fail explicitly with their plan item. Memory-digest serialization is local;
 see [verification and comparison limits](docs/PROGRESS.md).
 
+CC/R `run-cc`, `reverse`, and `run-program` accept `--tape-out file` and
+`--replay-tape file` (each once). The former saves a canonical JSON effect
+journal plus LF, including effects subsequently cancelled by segment `uncall`.
+Replay consumes and checks dev/op/integer args/transferred bytes before each
+effect commits, using the supplied entropy. Missing, changed or extra entries
+fail with a `replay mismatch` diagnostic (exit 1, no stdout or tape-output write).
+Malformed tapes and file errors also fail loudly. Use identical inputs, budgets,
+entropy, replies and prefix length; valid replay produces byte-identical stdout.
+`reverse --steps N` saves/checks that forward prefix; whole-run reversal retains
+the saved journal while restoring the active tape and device state to entry.
+Program faults can save their successful effect prefix; a failing effect adds
+no entry. The output JSON schema is unchanged, including its active `tape`.
+
 Build/test headlessly, without network or dependencies:
 
 ```sh

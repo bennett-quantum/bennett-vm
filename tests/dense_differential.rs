@@ -255,3 +255,19 @@ fn longer_fused_and_scalar_sequences_stay_within_reported_bound() {
         }
     }
 }
+
+#[test]
+fn empty_measurement_matches_exact_interpreter() {
+    for n in [0, 3] {
+        let mut exact = QuantumState::new();
+        exact.alloc_wires(n);
+        let mut dense = DenseState::with_threads(n, 1);
+        if n > 0 {
+            exact.apply1(1, &[], h_amp());
+            dense.h_gate(1);
+        }
+        let (value, bits) = exact.measure(&[], 0.7);
+        assert_eq!(dense.measure(&[], 0.7), (value.to_usize().unwrap(), bits));
+        assert_agree(&dense, &exact, n, "empty measurement");
+    }
+}

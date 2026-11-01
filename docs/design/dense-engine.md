@@ -127,14 +127,15 @@ that integration, rather than being inferred by this kernel.
 Measurement takes a caller-supplied draw in [0,1), enumerates outcomes
 lexicographically in wire-list order, collapses, renormalizes and resets
 measured wires to zero, matching the consumed-handle semantics of the
-exact interpreter. It never draws randomness: the caller owns ISA K17
+exact interpreter, including the empty-register outcome `(0, "")` on
+zero-wire states. It never draws randomness: the caller owns ISA K17
 ordering. Prefix reductions compute the next wire's two masses and
 condition the draw on the chosen positive mass. Zero branches are never
 selected, including when draw is the predecessor of 1 and the state
 norm has drifted. Zero/nonfinite norm, invalid draws and duplicate
 measurement wires fail explicitly.
 
-A measurement over k wires uses O(k * 2^n) work, O(workers) partials
+A measurement over k wires uses O((k+1) * 2^n) work, O(workers) partials
 and O(n) recursion stack per worker, without a 2^k outcome table. Each
 leaf sums at most 32 terms; the remaining tree and partial merge are
 balanced. `probabilities(wires)` is an explicit diagnostic which does
@@ -230,7 +231,10 @@ for selected execution and actual certificate output remain open.
 
 ## Verification and benchmark results
 
-The kernel tests use an independent out-of-place slow oracle.
+The kernel tests use independent out-of-place oracles: one with f64
+arithmetic and one with the crate's exact scalar arithmetic (including
+symbolic sqrt(1/2)). Their traversal is implemented in the test file,
+independently of both the dense kernels and QuantumState's map engine.
 `tests/dense_differential.rs` uses the exact interpreter, including a
 128-gate fused/scalar sequence, wire-order-sensitive measurement, and
 a two-wire Grover iteration. Tests cover SIMD/scalar agreement,
@@ -246,6 +250,94 @@ Printed GB/s is equivalent gate traffic, not physical DRAM bandwidth,
 especially for fused batches that reuse cache. Per-row machine load
 is printed. Only one benchmark runs at a time in this job.
 
-Final measured tables will be replaced after rebuilding the final
-kernels. Earlier predecessor tables have been removed because they
-were not reproduced and timed norm reductions as part of gate work.
+Final kernels rebuilt with rustc 1.99.1 on an Intel i7-1365U (12
+available threads, AVX2/FMA). Measurements began 2026-11-01 at 22:17
+UTC (20/24) and 22:19 UTC (28); this results section was written
+2026-11-01 22:23 UTC. Commands after the release build:
+
+```
+cargo build --release -j4 --offline --example dense_bench
+timeout 240 .tmp/bjm/target/release/examples/dense_bench --qubits 20,24 --reps 10
+timeout 240 .tmp/bjm/target/release/examples/dense_bench --qubits 28 --targets 27 --reps 1
+```
+
+Both runs exited successfully. There were three measured batches of ten
+repetitions at 20/24, and one measured batch of one repetition at 28,
+each after an untimed warmup. All norm and fused/sequential sample
+checks passed. The 28-qubit run deliberately limits single-gate targets
+to the highest wire; no unloaded-machine scaling claim is made.
+
+High-target one-wire gates, gates/second:
+
+| Qubits | Target | Naive AoS 1T | SoA scalar 1T | SoA AVX2 1T | SoA AVX2 12T | State MiB | Bytes/amplitude |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20 | 19 | 171.03 | 233.06 | 322.06 | 353.70 | 16 | 16 |
+| 24 | 23 | 8.63 | 19.31 | 22.40 | 58.44 | 256 | 16 |
+| 28 | 27 | 0.53 | 0.98 | 0.67 | 1.41 | 4096 | 16 |
+
+Low-wire AVX2 (target zero), gates/second:
+
+| Qubits | Naive AoS 1T | AVX2 1T | AVX2 12T |
+|---:|---:|---:|---:|
+| 20 | 173.93 | 318.71 | 287.14 |
+| 24 | 11.16 | 16.64 | 42.35 |
+
+Eight gates on wires 0–3, counted as eight gates per group:
+
+| Qubits | Fused 1T | Sequential 1T | Fused 12T | Sequential 12T |
+|---:|---:|---:|---:|---:|
+| 20 | 355.61 | 291.53 | 740.76 | 123.98 |
+| 24 | 28.27 | 17.85 | 120.64 | 24.51 |
+| 28 | 0.71 | 1.06 | 5.83 | 3.24 |
+
+Recorded one-minute load (including start/end readings) ranged from
+13.87 to 21.26 on 12 available threads. Start/end three-value load averages were:
+
+| Run | Start | End |
+|---|---|---|
+| 20/24 | 16.43 15.86 18.86 | 17.47 16.13 18.66 |
+| 28 | 21.26 17.14 18.92 | 19.56 17.99 18.96 |
+
+For the 28-qubit high-target rows, one-minute load was 20.47 (naive),
+19.98 (AVX2 1T), 18.91 (scalar), and 20.07 (AVX2 12T). The fused and
+sequential rows were 20.08/18.74 (1T) and 19.48/19.56 (12T).
+
+Interpretation and limits:
+
+- The state allocation meets 16 bytes/amplitude at every measured size.
+  Thread stacks, metadata and optional oracle memoization are separately
+  bounded as described above; the figure is not total process RSS.
+- Low-wire SIMD removes the scalar layout experiment's target-zero
+  disadvantage in this fixture. Cache fusion is faster than sequential
+  at 20 and 24 qubits, and at 28 qubits with 12 threads. It also avoids
+  spawning workers separately for every constituent gate.
+- Fusion is still slower at 28 qubits on one thread (0.71 vs 1.06).
+  `bennett-vm-1x1` therefore remains open with narrower evidence; no
+  universal fusion speedup is claimed. Tile-size and dispatch overhead
+  tuning remain performance follow-up work, not missing gate semantics.
+- At 28 qubits scalar is faster than single-thread AVX2 in this run.
+  The measurements do not isolate bandwidth, frequency or contention
+  well enough to assign that difference to one cause. Both paths are
+  tested, and runtime SIMD can be disabled explicitly.
+- Earlier predecessor tables were removed: they were not reproduced
+  and included norm reduction in gate timings. Before the low-wire
+  SIMD addition, this corrected harness measured n=24 fusion at
+  9.93/24.43 gates/s (1T/12T) versus 9.98/16.96 sequential. Those
+  preliminary rows had one-minute load 14–23. Final rows supersede them;
+  shared-machine variation prevents a controlled before/after claim.
+
+Final standalone gate after the empty-register compatibility fix:
+
+```
+timeout 300 cargo test -j4 --offline --test dense_kernels --test dense_differential -- --test-threads=4
+# 26 kernel tests + 5 exact-interpreter differential tests passed; none failed.
+timeout 300 cargo build -j4 --offline
+# Whole crate build passed.
+rustfmt --edition 2024 --check src/dense/mod.rs examples/dense_bench.rs tests/dense_kernels.rs tests/dense_differential.rs
+# Passed.
+```
+
+The empty-register fix was made after the benchmark run; it changes
+only measurement, which the benchmark does not call. The benchmarked
+pair, SIMD and fusion kernels are unchanged. Full action selection and
+certificate-output verification still await the integration boundary.

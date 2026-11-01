@@ -852,7 +852,6 @@ impl DenseState {
     /// The post-measurement state bound is conditional on this outcome;
     /// evidence also reports measurement distribution uncertainty.
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (usize, String) {
-        assert!(!wires.is_empty(), "dense: measure needs at least one wire");
         self.check_wires(wires);
         assert!(
             (0.0..1.0).contains(&draw),
@@ -860,7 +859,15 @@ impl DenseState {
         );
         let mut conditional_draw = draw;
         let (mut measured_mask, mut chosen_bits, mut value) = (0usize, 0usize, 0usize);
-        let mut p = 0.0;
+        // Empty registers, including a zero-wire state, have the one
+        // outcome (0, ""), just as in the exact interpreter.
+        let mut p = if wires.is_empty() { self.norm2() } else { 0.0 };
+        if wires.is_empty() {
+            assert!(
+                p > 0.0 && p.is_finite(),
+                "dense: measurement has zero or non-finite norm"
+            );
+        }
         let eta = gamma(2 * self.n + 64);
         let absolute = 4.0 * self.len() as f64 * f64::MIN_POSITIVE;
         let before = self.bound;

@@ -3,6 +3,7 @@
 //! exact sparse engine), deliberately different from the in-place pair
 //! kernels under test.
 use bennett_vm::dense::{Complex, DenseState, Gate};
+use bennett_vm::exact::Exact;
 
 type C = (f64, f64);
 fn cmul(a: C, b: C) -> C {
@@ -794,4 +795,105 @@ fn overflowing_error_bound_fails_loudly() {
             [Complex::ZERO, Complex::ONE],
         ],
     );
+}
+
+/// Independent slow algorithm using the crate's exact scalar arithmetic.
+/// Every input basis contribution goes into a new output vector; this
+/// shares neither the dense pair traversal nor QuantumState's map code.
+struct ExactOracle(Vec<Exact>);
+impl ExactOracle {
+    fn apply1(&mut self, target: usize, controls: &[usize], matrix: [[Exact; 2]; 2]) {
+        let mut next = vec![Exact::zero(); self.0.len()];
+        for (basis, amplitude) in self.0.iter().enumerate() {
+            if controls.iter().all(|&w| basis >> w & 1 == 1) {
+                let input = basis >> target & 1;
+                for (output, row) in matrix.iter().enumerate() {
+                    let index = (basis & !(1 << target)) | (output << target);
+                    next[index] = next[index].add(&amplitude.mul(&row[input]));
+                }
+            } else {
+                next[basis] = next[basis].add(amplitude);
+            }
+        }
+        self.0 = next;
+    }
+}
+
+#[test]
+fn fused_kernel_families_match_in_test_exact_oracle() {
+    let mut d = DenseState::with_threads(4, 1);
+    let mut oracle = ExactOracle(vec![Exact::zero(); d.len()]);
+    oracle.0[0] = Exact::one();
+    let group = [
+        Gate::One {
+            target: 0,
+            controls: vec![],
+            m: h(),
+        },
+        Gate::One {
+            target: 2,
+            controls: vec![0],
+            m: h(),
+        },
+        Gate::Diagonal {
+            target: 2,
+            controls: vec![],
+            d: [Complex::ONE, Complex::I],
+        },
+        Gate::Flip {
+            target: 3,
+            controls: vec![0, 2],
+        },
+        Gate::One {
+            target: 1,
+            controls: vec![],
+            m: u(0.41, -0.23),
+        },
+    ];
+    for _ in 0..4 {
+        d.apply_fused(&group);
+        for g in &group {
+            let (target, controls, matrix) = match g {
+                Gate::One {
+                    target,
+                    controls,
+                    m,
+                } => (*target, controls, *m),
+                Gate::Diagonal {
+                    target,
+                    controls,
+                    d,
+                } => (
+                    *target,
+                    controls,
+                    [[d[0], Complex::ZERO], [Complex::ZERO, d[1]]],
+                ),
+                Gate::Flip { target, controls } => (
+                    *target,
+                    controls,
+                    [[Complex::ZERO, Complex::ONE], [Complex::ONE, Complex::ZERO]],
+                ),
+            };
+            // Preserve symbolic sqrt(1/2) for the Hadamard fixtures;
+            // every other supplied binary64 entry is an exact dyadic.
+            let exact = matrix.map(|row| {
+                row.map(|z| {
+                    if z.im == 0.0 && z.re.abs() == std::f64::consts::FRAC_1_SQRT_2 {
+                        let v = Exact::sqrt_half();
+                        if z.re < 0.0 { v.neg() } else { v }
+                    } else {
+                        Exact::pair(z.re, z.im)
+                    }
+                })
+            });
+            oracle.apply1(target, controls, exact);
+        }
+        let mut distance2 = 0.0;
+        for (i, amplitude) in oracle.0.iter().enumerate() {
+            let (r, im) = amplitude.value();
+            distance2 += (d.amplitude(i) - Complex::new(r, im)).norm2();
+        }
+        let projection = 8.0 * f64::EPSILON * (d.len() as f64).sqrt();
+        assert!(distance2.sqrt() <= d.error_bound() + projection);
+    }
 }

@@ -1,7 +1,43 @@
 #!/usr/bin/env bash
+# Push gate (no CI): test exactly the commit being pushed (local sha from the refs
+# git supplies on stdin; HEAD when run directly) in a temporary detached worktree,
+# never the possibly dirty working tree (an editor may be mid-change while the
+# orchestrator pushes). The worktree is placed BESIDE the repo because the tests
+# resolve ../bennett-isa-spec relative to the crate. Exit status is cargo test's.
 set -euo pipefail
-repo_root="$(git rev-parse --show-toplevel)"
-unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
-export TMPDIR="$repo_root/.tmp"
-mkdir -p "$TMPDIR"
-cargo test --manifest-path "$repo_root/Cargo.toml" --offline
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
+script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+root="$(git -C "$script_dir" rev-parse --show-toplevel)"
+shas=()
+if [ ! -t 0 ]; then
+  while read -r -t 10 _ref sha _rref _rsha; do
+    case "$sha" in ''|*[!0-9a-f]*|0000000000000000000000000000000000000000) continue;; esac
+    shas+=("$sha")
+  done || true
+fi
+if [ "${#shas[@]}" -eq 0 ]; then shas=("$(git -C "$root" rev-parse HEAD)"); fi
+declare -A seen=()
+status=0
+for sha in "${shas[@]}"; do
+  sha="$(git -C "$root" rev-parse --verify "${sha}^{commit}")"
+  [ -n "${seen[$sha]:-}" ] && continue
+  seen[$sha]=1
+  wt="$(dirname "$root")/$(basename "$root")-gate-${sha:0:12}"
+  cleanup() {
+    git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    rm -rf "$wt"
+    git -C "$root" worktree prune
+  }
+  cleanup
+  mkdir -p "$root/.tmp/gate-target"
+  trap cleanup EXIT
+  git -C "$root" worktree add --detach "$wt" "$sha" >/dev/null
+  echo "pre-push: gating $sha in $wt" >&2
+  mkdir -p "$wt/.tmp"
+  env TMPDIR="$wt/.tmp" CARGO_TARGET_DIR="$root/.tmp/gate-target" \
+      cargo test --offline --manifest-path "$wt/Cargo.toml" || status=$?
+  cleanup
+  trap - EXIT
+  [ "$status" -eq 0 ] || break
+done
+exit "$status"

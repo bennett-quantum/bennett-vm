@@ -19,6 +19,7 @@ pub mod invocation;
 pub mod jit;
 pub mod json;
 pub mod launch;
+mod lifted_typing;
 pub mod object;
 pub mod oracle;
 pub mod qcli;

@@ -178,6 +178,103 @@ fn published_interfaces_reject_wrong_roles_types_and_widths() {
 }
 
 #[test]
+fn lifted_row_schemas_reject_width_loss_and_nonlocal_reads() {
+    let text = examples()[9].clone();
+    let mut accepted = vec![];
+    for (from, to) in [
+        ("base:reg[32]", "base:reg[31]"),
+        ("zero = lift.const.i4 0", "zero = lift.const.i3 0"),
+        ("zero = lift.const.i4 0", "zero = lift.const.i4 16"),
+        ("zero = lift.const.i4 0", "zero = lift.const.i4 -9"),
+        ("byte = lift.load.i8 base", "byte = lift.load.i16 base"),
+        ("byte = lift.load.i8 base", "byte = lift.load.i8 byte"),
+        ("low = lift.trunc.i2 byte", "low = lift.zext.i2 byte"),
+        ("low = lift.trunc.i2 byte", "low = lift.trunc.i3 byte"),
+        ("r = lift.add r low", "byte = lift.add r low"),
+        ("r = lift.add r low", "r = lift.mov byte"),
+        ("r = lift.add r low", "r = lift.mov missing"),
+        ("r = lift.add r low", "r = lift.select byte r low"),
+        ("bad = lift.icmp.ne fr zero", "fr = lift.icmp.ne fr zero"),
+        ("lift.faultif bad 9", "lift.faultif fr 9"),
+        ("lift.ret r", "lift.ret fr"),
+        ("lift.retval r", "lift.retval byte"),
+        (
+            "lift.oracle_call @plus_db tk",
+            "lift.oracle_call @plus_db a",
+        ),
+        ("(x) r fr (db) (a)", "(fr) r fr (db) (a)"),
+        ("(x) r fr (db) (a)", "(x) fr r (db) (a)"),
+        ("(x) r fr (db) (a)", "(x) r fr (absent) (a)"),
+        ("(x) r fr (db) (a)", "(x) r fr (db) (r)"),
+        ("(x) r fr (db) (a)", "(x) r fr (db) (tk)"),
+        (
+            "@flip_arg (r) () () (tk, a)",
+            "@flip_arg (fr) () () (tk, a)",
+        ),
+        ("@flip_arg (r) () () (tk, a)", "@flip_arg (r) () () (a, tk)"),
+    ] {
+        assert!(text.contains(from), "missing trigger {from}");
+        if bennett_vm::load(&resign(&text.replace(from, to)), true).is_ok() {
+            accepted.push((from, to));
+        }
+    }
+    assert!(accepted.is_empty(), "accepted invalid rows: {accepted:?}");
+    for c in ["-8", "15"] {
+        bennett_vm::load(
+            &resign(&text.replace("lift.const.i4 0", &format!("lift.const.i4 {c}"))),
+            true,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn lifted_fault_and_label_widths_use_each_oracle_instance_closure() {
+    let text = examples()[9].clone();
+    assert!(
+        bennett_vm::load(
+            &resign(&text.replace("lift.faultif bad 9", "lift.faultif bad 16")),
+            true
+        )
+        .is_err()
+    );
+    bennett_vm::load(
+        &resign(&text.replace("lift.faultif bad 9", "lift.faultif bad 15")),
+        true,
+    )
+    .unwrap();
+    let one = bound_source()
+        .replace("zp:reg[32]", "label:reg[5], zp:reg[32]")
+        .replace(
+            "zp = lift.addr @zero",
+            "label = lift.label ^entry\nzp = lift.addr @zero",
+        );
+    bennett_vm::load(&resign(&one), true).unwrap();
+    assert!(bennett_vm::load(&resign(&one.replace("label:reg[5]", "label:reg[4]")), true).is_err());
+    let two = one.replace(
+        "lift.retval r",
+        "r = lift.call @sum (n, acc, base) (tk) (b) (db)\nlift.retval r",
+    );
+    assert!(bennett_vm::load(&resign(&two), true).is_err());
+    bennett_vm::load(&resign(&two.replace("label:reg[5]", "label:reg[6]")), true).unwrap();
+}
+
+#[test]
+fn lifted_pseudo_locations_preserve_classical_bit_widths() {
+    let text = examples()[0]
+        .clone()
+        .replace("(f:wire[4]) () ()", "(f:wire[4]) () (a:f64, p:ptr)")
+        .replace("regs {", "regs { bits:reg[64], address:reg[32],")
+        .replace(
+            "^entry():",
+            "^entry():\nbits = lift.mov a\naddress = lift.mov p",
+        )
+        .replace("lift.retval r", "qjumpr p");
+    assert!(text.contains("p:ptr"));
+    bennett_vm::load(&resign(&text), true).unwrap();
+}
+
+#[test]
 fn lproc_fixed_values_execute_and_steps_reverse_complete_state() {
     use bennett_vm::{
         bigint::BigUint as B,

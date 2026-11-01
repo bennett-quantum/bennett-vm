@@ -29,7 +29,14 @@ pub fn validate(obj: &Object) -> Result<(), String> {
     for f in &obj.functions {
         validate_function(obj, f)?;
         crate::typing::classical(obj, f)?;
-        crate::qvalidate::validate(obj, f)?;
+        if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
+            crate::lifted_typing::function(obj, f)?;
+        } else {
+            crate::qvalidate::validate(obj, f)?;
+        }
+    }
+    if obj.isa == "0.9" {
+        crate::lifted_typing::closures(obj)?;
     }
     validate_action_acyclic(obj)?;
     Ok(())

@@ -1,10 +1,10 @@
-# ISA 0.9 object admission — 2026-11-01
-Resume: 47t in progress; complete catalog oracle construction and schedule realisation before hsd/clw; fat untouched.
+# ISA 0.9 admission and fixed instances — 2026-11-01
+Resume: 47t in progress; finish catalog oracle construction (ISA b-isa-spec-5xm token binding) then schedule realisation before hsd/clw; fat untouched.
 Published pin e834e9b: spec/Bennett-ISA-Spec-0.9.md at b77cbed; ref envelope unchanged (219 recipes).
-Pass 1 501b9c1: versioned headers/signatures/envelopes, structured K46/K47 paths and owner selection; published recursive hashes.
-Pass 2 cb5821c: typed lproc groups/fixed-position closure; all ten published objects verify stored hashes. Pass 3: fixed-instance execution in both engines and reversible step state.
-RED .tmp/47t-{object,binding,published,interfaces,instance-execution}-red.log; GREEN eight object09 tests/engine; 8,192 full-domain forwarding/reversal configurations, separate instance ranges; strict Clippy passes.
-Before interpreter/JIT each 131 PASS / 5 known FAIL, differential 14/4 each (JIT archived 93368f0); b-isa-spec-5xm asks oracle catalog token binding; no complete 0.9 executor claimed.
+Passes 1/2 501b9c1/cb5821c: versioned headers/signatures/envelopes, injective K46/K47 layout paths/owner selection, typed lproc groups and fixed-position closure; all ten published hashes verify.
+Pass 3 2fcb413: fixed-instance execution and reversible state in both engines. Pass 4 27e79d1: lifted row schemas, immutable semantic-call interfaces, per-oracle fault/instance index widths.
+RED .tmp/47t-{object,binding,published,interfaces,instance-execution,lifted-schema,lifted-pseudo}-red.log; 8,192 complete-state forwarding/reversal configurations, 24 invalid-row witnesses and distinct instance ranges; fmt/strict Clippy pass.
+Final interpreter/JIT each 142 PASS / 5 known FAIL / 0 ignored, before each 131/5 (JIT archived 93368f0); differential unchanged 14/4 each; all 11 added tests pass; no complete 0.9 executor claimed.
 
 # ISA 0.9 remainder implementation — 2026-10-31
 Resume: 47t in progress; oracle source/addressing and full schedule realisation precede hsd/clw; no bead closed; fat untouched.

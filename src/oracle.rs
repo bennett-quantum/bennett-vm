@@ -11,7 +11,7 @@ use crate::value::{
     Budget, FAULT_BUDGET_DEPTH, FAULT_BUDGET_HEAP, FAULT_BUDGET_STEPS, FAULT_UB_MEMFAULT,
     FAULT_UB_TRAP, Value, binop, div_fault, divop, icmp,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone, Debug)]
 pub struct Outcome {
@@ -59,9 +59,11 @@ pub struct Machine<'o> {
     oracle_name: String,
     locations: HashMap<String, HashMap<String, BigUint>>,
     widths: HashMap<String, HashMap<String, usize>>,
-    pseudo: HashMap<String, BigUint>,
-    pseudo_widths: HashMap<String, usize>,
-    args: HashMap<String, Value>,
+    pseudo: HashMap<(String, String), BigUint>,
+    pseudo_widths: HashMap<(String, String), usize>,
+    args: HashMap<(String, String), Value>,
+    functions: BTreeMap<String, Function>,
+    region_bindings: BTreeMap<(String, String), usize>,
     mem: HashMap<BigUint, u8>,
     regions: Vec<Vec<BigUint>>,
     region_maps: Vec<RegionMap>,
@@ -259,10 +261,13 @@ impl<'o> Machine<'o> {
                 .unwrap_or_default();
             return Ok((v, Some(*w)));
         }
-        if func == self.oracle_name
-            && let Some(v) = self.pseudo.get(token)
-        {
-            return Ok((v.clone(), self.pseudo_widths.get(token).copied()));
+        if let Some(v) = self.pseudo.get(&(func.into(), token.into())) {
+            return Ok((
+                v.clone(),
+                self.pseudo_widths
+                    .get(&(func.into(), token.into()))
+                    .copied(),
+            ));
         }
         Err(diag(
             "3.7",
@@ -292,9 +297,7 @@ impl<'o> Machine<'o> {
         if let Some(w) = self.widths.get(func).and_then(|m| m.get(name)) {
             return Ok(*w);
         }
-        if func == self.oracle_name
-            && let Some(w) = self.pseudo_widths.get(name)
-        {
+        if let Some(w) = self.pseudo_widths.get(&(func.into(), name.into())) {
             return Ok(*w);
         }
         Err(diag(
@@ -405,8 +408,8 @@ impl<'o> Machine<'o> {
             .get(func_name)
             .ok_or_else(|| diag("3.6", format!("@{func_name} is not in the index space")))?;
         let f = self
-            .obj
-            .function(func_name)
+            .functions
+            .get(func_name)
             .ok_or_else(|| diag("3.6", format!("unknown function @{func_name}")))?;
         let mut offset = start;
         for b in &f.blocks {
@@ -424,8 +427,8 @@ impl<'o> Machine<'o> {
     fn func_index_range(&self, func_name: &str) -> (usize, usize) {
         let start = *self.index_offsets.get(func_name).unwrap_or(&0);
         let n = self
-            .obj
-            .function(func_name)
+            .functions
+            .get(func_name)
             .map(|f| f.instr_count())
             .unwrap_or(0);
         (start, start + n)
@@ -577,7 +580,16 @@ impl<'o> Machine<'o> {
                         .layout
                         .as_ref()
                         .and_then(|l| l.interface_regions.get(&self.oracle_name))
-                        .and_then(|m| m.get(name))
+                        .and_then(|m| {
+                            self.region_bindings
+                                .get(&(fname.clone(), name.into()))
+                                .and_then(|i| {
+                                    m.get(
+                                        &self.obj.function(&self.oracle_name).unwrap().lists[3][*i]
+                                            .name,
+                                    )
+                                })
+                        })
                     {
                         base.clone()
                     } else {
@@ -859,7 +871,7 @@ impl<'o> Machine<'o> {
             .ok_or_else(|| diag("4.2", "malformed lift.oracle_call"))?
             .to_string();
         let tk = &ins.operands[1];
-        let budget = match self.args.get(tk) {
+        let budget = match self.args.get(&(fname.into(), tk.clone())) {
             Some(Value::Token(b) | Value::TokenId(_, b)) => *b,
             _ => {
                 return Err(diag(
@@ -880,7 +892,7 @@ impl<'o> Machine<'o> {
         let arg_names = crate::validate::list_operand(&ins.operands[6])?;
         let mut callee_args = Vec::new();
         for n in &arg_names {
-            match self.args.get(n) {
+            match self.args.get(&(fname.into(), n.clone())) {
                 Some(v) => callee_args.push(v.clone()),
                 None => {
                     // A literal integer classical argument.
@@ -907,19 +919,23 @@ impl<'o> Machine<'o> {
             .obj
             .function(&self.oracle_name)
             .ok_or_else(|| diag("3.7", "oracle vanished"))?;
-        let region_order: Vec<String> = oracle.lists[3].iter().map(|p| p.name.clone()).collect();
+        let _ = oracle;
         let mut taken: Vec<Vec<BigUint>> = Vec::new();
         let mut taken_idx: Vec<usize> = Vec::new();
         for m in &mem_names {
-            let idx = region_order.iter().position(|r| r == m).ok_or_else(|| {
-                diag(
-                    "4.2",
-                    format!(
-                        "mem operand {m:?} is not an interface region of @{}",
-                        self.oracle_name
-                    ),
-                )
-            })?;
+            let idx = self
+                .region_bindings
+                .get(&(fname.into(), m.clone()))
+                .copied()
+                .ok_or_else(|| {
+                    diag(
+                        "4.2",
+                        format!(
+                            "mem operand {m:?} is not an interface region of @{}",
+                            self.oracle_name
+                        ),
+                    )
+                })?;
             taken_idx.push(idx);
             taken.push(std::mem::take(&mut self.regions[idx]));
         }
@@ -961,22 +977,26 @@ impl<'o> Machine<'o> {
             .obj
             .function(&self.oracle_name)
             .ok_or_else(|| diag("3.7", "oracle vanished"))?;
-        let region_order: Vec<String> = oracle.lists[3].iter().map(|p| p.name.clone()).collect();
+        let _ = oracle;
         let mut taken: Vec<Vec<BigUint>> = Vec::new();
         let mut taken_idx: Vec<usize> = Vec::new();
         for m in &mem_names {
-            let idx = region_order.iter().position(|r| r == m).ok_or_else(|| {
-                diag(
-                    "4.2",
-                    format!("mem operand {m:?} is not an interface region"),
-                )
-            })?;
+            let idx = self
+                .region_bindings
+                .get(&(fname.into(), m.clone()))
+                .copied()
+                .ok_or_else(|| {
+                    diag(
+                        "4.2",
+                        format!("mem operand {m:?} is not an interface region"),
+                    )
+                })?;
             taken_idx.push(idx);
             taken.push(std::mem::take(&mut self.regions[idx]));
         }
         let mut callee_args = Vec::new();
         for n in &arg_names {
-            match self.args.get(n) {
+            match self.args.get(&(fname.into(), n.clone())) {
                 Some(v) => callee_args.push(v.clone()),
                 None => {
                     return Err(diag(
@@ -1066,13 +1086,14 @@ pub fn run_oracle(
             "oracle classical argument count differs from signature",
         ));
     }
-    let order = index_order(obj, func)?;
+    let plan = crate::instances::Plan::form(obj, name)?;
+    let order = plan.order.clone();
     let mut widths: HashMap<String, HashMap<String, usize>> = HashMap::new();
     let mut locations: HashMap<String, HashMap<String, BigUint>> = HashMap::new();
     let mut index_offsets: HashMap<String, usize> = HashMap::new();
     let mut offset = 0usize;
     for fname in &order {
-        let f = obj.function(fname).ok_or_else(|| {
+        let f = plan.functions.get(fname).ok_or_else(|| {
             diag(
                 "5.2",
                 format!(
@@ -1091,25 +1112,25 @@ pub fn run_oracle(
                 .collect(),
         );
     }
-    let mut pseudo: HashMap<String, BigUint> = HashMap::new();
-    let mut pseudo_widths: HashMap<String, usize> = HashMap::new();
+    let mut pseudo = HashMap::new();
+    let mut pseudo_widths = HashMap::new();
     for (p, v) in func.lists[0].iter().zip(inputs.iter()) {
-        pseudo.insert(p.name.clone(), v.clone());
+        pseudo.insert((name.into(), p.name.clone()), v.clone());
         if let Type::Wire(n) = p.ty {
-            pseudo_widths.insert(p.name.clone(), n);
+            pseudo_widths.insert((name.into(), p.name.clone()), n);
         }
     }
-    let mut arg_env: HashMap<String, Value> = HashMap::new();
+    let mut arg_env = HashMap::new();
     for (p, v) in func.lists[4].iter().zip(args.iter()) {
-        arg_env.insert(p.name.clone(), v.clone());
+        arg_env.insert((name.into(), p.name.clone()), v.clone());
         match (&p.ty, v) {
             (Type::I(n), Value::Int { bits, .. }) => {
-                pseudo.insert(p.name.clone(), bits.clone());
-                pseudo_widths.insert(p.name.clone(), *n);
+                pseudo.insert((name.into(), p.name.clone()), bits.clone());
+                pseudo_widths.insert((name.into(), p.name.clone()), *n);
             }
             (Type::Ptr, Value::Ptr(bits)) => {
-                pseudo.insert(p.name.clone(), bits.clone());
-                pseudo_widths.insert(p.name.clone(), obj.ptr_width);
+                pseudo.insert((name.into(), p.name.clone()), bits.clone());
+                pseudo_widths.insert((name.into(), p.name.clone()), obj.ptr_width);
             }
             (Type::Token, Value::Token(b) | Value::TokenId(_, b)) => {
                 cliargs::validate_budget(obj, b)?;
@@ -1201,6 +1222,24 @@ pub fn run_oracle(
             *cell = cell.mask(*w);
         }
     }
+    for ((instance, parameter), index) in &plan.arguments {
+        let value = args.get(*index).ok_or("§3.7: missing fixed argument")?;
+        let key = (instance.clone(), parameter.clone());
+        arg_env.insert(key.clone(), value.clone());
+        let bits = match value {
+            Value::Int { bits, .. } | Value::Ptr(bits) => Some(bits.clone()),
+            Value::F64(v) => Some(BigUint::from_u64(v.to_bits())),
+            _ => None,
+        };
+        if let Some(bits) = bits {
+            let width = match value {
+                Value::F64(_) => 64,
+                _ => value.width(obj.ptr_width).ok_or("§3.3: no bit width")?,
+            };
+            pseudo.insert(key.clone(), bits);
+            pseudo_widths.insert(key, width);
+        }
+    }
     let mut machine = Machine {
         obj,
         oracle_name: name.to_string(),
@@ -1209,6 +1248,8 @@ pub fn run_oracle(
         pseudo,
         pseudo_widths,
         args: arg_env,
+        functions: plan.functions,
+        region_bindings: plan.regions,
         mem: mem_map,
         regions,
         region_maps,
@@ -1233,11 +1274,13 @@ pub fn run_oracle(
 
 impl<'o> Machine<'o> {
     fn run(&mut self) -> Result<Outcome, String> {
-        let obj: &'o Object = self.obj;
+        let functions = self.functions.clone();
+        let mut compiled_object = self.obj.clone();
+        compiled_object.functions = functions.values().cloned().collect();
         let mut current = self.oracle_name.clone();
         let mut block_i = 0usize;
         let mut instr_i = 0usize;
-        let program = crate::jit::for_object(obj)?;
+        let program = crate::jit::for_object(&compiled_object)?;
         let start = program
             .as_ref()
             .map(|p| p.row(&current, 0, 0))
@@ -1252,8 +1295,8 @@ impl<'o> Machine<'o> {
                 });
                 return Ok(None);
             }
-            let func = obj
-                .function(&current)
+            let func = functions
+                .get(&current)
                 .ok_or_else(|| diag("3.7", format!("unknown function @{current}")))?;
             let block = func
                 .blocks
@@ -1295,7 +1338,7 @@ impl<'o> Machine<'o> {
                     return Ok(None);
                 }
                 Flow::Call(callee) => {
-                    let callee_f = obj.function(&callee).ok_or_else(|| {
+                    let callee_f = functions.get(&callee).ok_or_else(|| {
                         diag(
                             "3.7",
                             format!(

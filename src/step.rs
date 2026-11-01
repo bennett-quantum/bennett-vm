@@ -75,7 +75,9 @@ pub struct Machine<'a> {
     obj: &'a Object,
     name: String,
     budget: Budget,
-    args: BTreeMap<String, Value>,
+    args: BTreeMap<(String, String), Value>,
+    functions: BTreeMap<String, crate::object::Function>,
+    region_bindings: BTreeMap<(String, String), usize>,
     rows: Vec<(String, Instr)>,
     labels: BTreeMap<(String, String), usize>,
     ranges: BTreeMap<String, (usize, usize)>,
@@ -105,15 +107,15 @@ impl<'a> Machine<'a> {
         {
             return Err("§5.1: interface counts differ".into());
         }
-        let order = crate::oracle::index_order(obj, f)?;
+        let plan = crate::instances::Plan::form(obj, name)?;
         let mut rows = vec![];
         let mut labels = BTreeMap::new();
         let mut ranges = BTreeMap::new();
         let mut locations = vec![];
         let mut widths = BTreeMap::new();
         let mut pseudo = BTreeMap::new();
-        for fname in order {
-            let ff = obj.function(&fname).ok_or("§3.7: unresolved lproc")?;
+        for fname in &plan.order {
+            let ff = &plan.functions[fname];
             let first = rows.len();
             for b in &ff.blocks {
                 labels.insert((fname.clone(), b.name.clone()), rows.len());
@@ -137,7 +139,7 @@ impl<'a> Machine<'a> {
         }
         let mut argmap = BTreeMap::new();
         for (p, v) in f.lists[4].iter().zip(args) {
-            argmap.insert(p.name.clone(), v.clone());
+            argmap.insert((name.into(), p.name.clone()), v.clone());
             match v {
                 Value::Int { bits, .. } | Value::Ptr(bits) => {
                     pseudo.insert((name.into(), p.name.clone()), bits.clone());
@@ -147,6 +149,23 @@ impl<'a> Machine<'a> {
                     );
                 }
                 _ => {}
+            }
+        }
+        for ((instance, parameter), index) in &plan.arguments {
+            let value = args.get(*index).ok_or("§3.7: missing fixed argument")?;
+            argmap.insert((instance.clone(), parameter.clone()), value.clone());
+            let bits = match value {
+                Value::Int { bits, .. } | Value::Ptr(bits) => Some(bits.clone()),
+                Value::F64(v) => Some(BigUint::from_u64(v.to_bits())),
+                _ => None,
+            };
+            if let Some(bits) = bits {
+                let width = match value {
+                    Value::F64(_) => 64,
+                    _ => value.width(obj.ptr_width).ok_or("§3.3: no bit width")?,
+                };
+                pseudo.insert((instance.clone(), parameter.clone()), bits);
+                widths.insert((instance.clone(), parameter.clone()), width);
             }
         }
         let mut state = Configuration::default();
@@ -206,8 +225,9 @@ impl<'a> Machine<'a> {
             let ws = match i.op.as_str() {
                 "lift.alloc" => vec![obj.ptr_width, 2 * obj.ptr_width + 2, heap, atop],
                 "lift.call" => {
-                    let ff = obj
-                        .function(i.operands[0].trim_start_matches('@'))
+                    let ff = plan
+                        .functions
+                        .get(i.operands[0].trim_start_matches('@'))
                         .ok_or("§3.7: unresolved lproc")?;
                     let mut ws = ff.lists[0]
                         .iter()
@@ -245,6 +265,8 @@ impl<'a> Machine<'a> {
             name: name.into(),
             budget,
             args: argmap,
+            functions: plan.functions,
+            region_bindings: plan.regions,
             rows,
             labels,
             ranges,
@@ -372,7 +394,17 @@ impl<'a> Machine<'a> {
                         .or_else(|| {
                             l.interface_regions
                                 .get(&self.name)
-                                .and_then(|m| m.get(n))
+                                .and_then(|m| {
+                                    self.region_bindings.get(&(f.into(), n.into())).and_then(
+                                        |index| {
+                                            m.get(
+                                                &self.obj.function(&self.name).unwrap().lists[3]
+                                                    [*index]
+                                                    .name,
+                                            )
+                                        },
+                                    )
+                                })
                                 .cloned()
                         })
                         .ok_or("§7.2: unknown address")?,
@@ -507,7 +539,7 @@ impl<'a> Machine<'a> {
         inverse: bool,
     ) -> Result<(), String> {
         let callee = i.operands[0].trim_start_matches('@');
-        let ff = self.obj.function(callee).ok_or("§3.7: unresolved lproc")?;
+        let ff = self.functions.get(callee).ok_or("§3.7: unresolved lproc")?;
         let params = ff.lists[0].clone();
         let names = crate::validate::list_operand(&i.operands[1])?;
         let m = params.len();
@@ -655,14 +687,16 @@ impl<'a> Machine<'a> {
         let mut regions = vec![];
         let mut bases = vec![];
         for n in mem_names {
-            let p = root.lists[3]
-                .iter()
-                .find(|p| p.name == n)
+            let index = *self
+                .region_bindings
+                .get(&(f.into(), n.clone()))
                 .ok_or("§5.1: unmapped call region")?;
+            let p = &root.lists[3][index];
             let Type::Region(a, w) = p.ty else {
                 return Err("§5.1: invalid region".into());
             };
-            let base = self.obj.layout.as_ref().unwrap().interface_regions[&self.name][&n].clone();
+            let base =
+                self.obj.layout.as_ref().unwrap().interface_regions[&self.name][&p.name].clone();
             regions.push(
                 (0..(1usize << a))
                     .map(|j| self.load(&base.add(&u(j * w / 8)), w / 8))
@@ -674,13 +708,16 @@ impl<'a> Machine<'a> {
             .iter()
             .map(|n| {
                 self.args
-                    .get(n)
+                    .get(&(f.into(), n.clone()))
                     .cloned()
                     .ok_or_else(|| format!("§3.7: unknown classical argument {n}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
         if oracle {
-            let tk = self.args.get(&x[1]).ok_or("§5.4: unknown token")?;
+            let tk = self
+                .args
+                .get(&(f.into(), x[1].clone()))
+                .ok_or("§5.4: unknown token")?;
             let budget = match tk {
                 Value::Token(b) | Value::TokenId(_, b) => *b,
                 _ => return Err("§5.4: expected token".into()),

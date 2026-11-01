@@ -176,3 +176,146 @@ fn published_interfaces_reject_wrong_roles_types_and_widths() {
         );
     }
 }
+
+#[test]
+fn lproc_fixed_values_execute_and_steps_reverse_complete_state() {
+    use bennett_vm::{
+        bigint::BigUint as B,
+        value::{Budget, Value},
+    };
+    let text = examples()[9].clone();
+    let start = text.find("lproc @worker").unwrap();
+    let end = text.find("oracle @plus_db").unwrap();
+    let worker = text[start..end]
+        .replace("tk", "budget")
+        .replace("(a:i2 classical)", "(arg:i2 classical)")
+        .replace("(a)", "(arg)")
+        .replace("(tk, a)", "(budget, arg)")
+        .replace("(budget, a)", "(budget, arg)")
+        .replace("db:", "store:")
+        .replace("(db)", "(store)");
+    let text = format!("{}{}{}", &text[..start], worker, &text[end..]);
+    let (obj, _) = bennett_vm::load(&resign(&text), true).unwrap();
+    let budget = Budget {
+        steps: 8,
+        heap: 0,
+        stack: 8,
+        depth: 1,
+    };
+    for nested_steps in [5, 6] {
+        for x in 0..4 {
+            for a in 0..4 {
+                for d in 0..256 {
+                    let args = [
+                        Value::Token(Budget {
+                            steps: nested_steps,
+                            heap: 0,
+                            stack: 0,
+                            depth: 0,
+                        }),
+                        Value::int(2, B::from_u64(a)),
+                    ];
+                    let mem = vec![vec![B::from_u64(d)]];
+                    let mut step = bennett_vm::step::Machine::new(
+                        &obj,
+                        "through",
+                        &[B::from_u64(x)],
+                        &mem,
+                        &args,
+                        budget,
+                    )
+                    .unwrap();
+                    let initial = step.state.clone();
+                    for _ in 0..8 {
+                        let before = step.state.clone();
+                        step.forward_step().unwrap();
+                        let after = step.state.clone();
+                        step.inverse_step().unwrap();
+                        assert_eq!(step.state, before);
+                        step.forward_step().unwrap();
+                        assert_eq!(step.state, after);
+                    }
+                    let out = step.outcome();
+                    let expected = if nested_steps == 6 {
+                        (((x + a + d) % 4) ^ 1, 0)
+                    } else {
+                        (0, 9)
+                    };
+                    assert_eq!(
+                        (out.payload.clone(), out.code.clone()),
+                        (B::from_u64(expected.0), B::from_u64(expected.1))
+                    );
+                    let direct = bennett_vm::oracle::run_oracle(
+                        &obj,
+                        "through",
+                        &[B::from_u64(x)],
+                        &mut mem.clone(),
+                        &args,
+                        budget,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        (direct.payload, direct.code, direct.steps),
+                        (out.payload, out.code, out.steps)
+                    );
+                    for _ in 0..8 {
+                        step.inverse_step().unwrap();
+                    }
+                    assert_eq!(step.state, initial);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn separate_instance_locations_and_canonical_call_ranges() {
+    use bennett_vm::{
+        bigint::BigUint as B,
+        value::{Budget, Value},
+    };
+    let text = bound_source().replace("lift.retval r", "acc = lift.mov r\nr = lift.call @sum (n, acc, base) (tk) (b) (db)\nr = lift.add acc r\nlift.retval r");
+    let start = text.find("regs { zp:").unwrap();
+    let end = text.find("\n\nsection data").unwrap();
+    let text = format!(
+        "{}regs {{  }}\n^entry():\nr = lift.mov a\nlift.ret r{}",
+        &text[..start],
+        &text[end..]
+    );
+    let (obj, _) = bennett_vm::load(&resign(&text), true).unwrap();
+    let budget = Budget {
+        steps: 11,
+        heap: 0,
+        stack: 14,
+        depth: 1,
+    };
+    let args = [
+        Value::Token(Budget::default()),
+        Value::int(8, B::from_u64(3)),
+        Value::int(8, B::from_u64(7)),
+    ];
+    let mut mem = vec![vec![B::zero(); 16]];
+    let out = bennett_vm::oracle::run_oracle(&obj, "sum_db", &[B::zero()], &mut mem, &args, budget)
+        .unwrap();
+    assert_eq!(
+        (out.payload, out.code, out.steps),
+        (B::from_u64(10), B::zero(), 11)
+    );
+    let mut m =
+        bennett_vm::step::Machine::new(&obj, "sum_db", &[B::zero()], &mem, &args, budget).unwrap();
+    let initial = m.state.clone();
+    for step in 1..=11 {
+        m.forward_step().unwrap();
+        if step == 3 {
+            assert_eq!(m.state.pc, 7);
+        }
+        if step == 7 {
+            assert_eq!(m.state.pc, 9);
+        }
+    }
+    assert_eq!(m.outcome().payload, B::from_u64(10));
+    for _ in 0..11 {
+        m.inverse_step().unwrap();
+    }
+    assert_eq!(m.state, initial);
+}

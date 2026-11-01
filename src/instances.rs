@@ -14,6 +14,141 @@ pub struct Instance {
     pub regions: Vec<usize>,
 }
 
+impl Instance {
+    fn runtime_name(&self) -> String {
+        if self.key.is_empty() {
+            self.symbol.clone()
+        } else {
+            format!(
+                "{}${}",
+                self.symbol,
+                self.key
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".")
+            )
+        }
+    }
+    fn origins(&self, f: &Function) -> BTreeMap<String, usize> {
+        let mut origins = BTreeMap::new();
+        if f.kind == FnKind::Oracle {
+            for (i, p) in f.lists[4].iter().enumerate() {
+                origins.insert(p.name.clone(), i);
+            }
+            for (i, p) in f.lists[3].iter().enumerate() {
+                origins.insert(p.name.clone(), i);
+            }
+        } else {
+            for (ps, indices) in [&f.lists[2], &f.lists[3], &f.lists[4]].iter().zip([
+                &self.tokens,
+                &self.classical,
+                &self.regions,
+            ]) {
+                for (p, i) in ps.iter().zip(indices) {
+                    origins.insert(p.name.clone(), *i);
+                }
+            }
+        }
+        origins
+    }
+}
+
+/// Private execution graph. Retargeted names are never hashed or serialized as source.
+#[derive(Clone)]
+pub(crate) struct Plan {
+    pub functions: BTreeMap<String, Function>,
+    pub order: Vec<String>,
+    pub arguments: BTreeMap<(String, String), usize>,
+    pub regions: BTreeMap<(String, String), usize>,
+}
+thread_local! {
+    // Bounded to one complete parsed object, with one plan per oracle.
+    static PLAN_CACHE: std::cell::RefCell<Option<(String, BTreeMap<String, Plan>)>> = const { std::cell::RefCell::new(None) };
+}
+impl Plan {
+    pub fn form(obj: &Object, root: &str) -> Result<Self, String> {
+        let key = format!("{obj:?}");
+        if let Some(plan) = PLAN_CACHE.with(|cache| {
+            cache
+                .borrow()
+                .as_ref()
+                .filter(|(k, _)| *k == key)
+                .and_then(|(_, plans)| plans.get(root))
+                .cloned()
+        }) {
+            return Ok(plan);
+        }
+        let plan = Self::uncached(obj, root)?;
+        PLAN_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.as_ref().is_none_or(|(k, _)| *k != key) {
+                *cache = Some((key, BTreeMap::new()));
+            }
+            cache.as_mut().unwrap().1.insert(root.into(), plan.clone());
+        });
+        Ok(plan)
+    }
+    fn uncached(obj: &Object, root: &str) -> Result<Self, String> {
+        let instances = for_oracle(obj, root)?;
+        let mut plan = Self {
+            functions: BTreeMap::new(),
+            order: vec![],
+            arguments: BTreeMap::new(),
+            regions: BTreeMap::new(),
+        };
+        for instance in &instances {
+            let f = obj
+                .function(&instance.symbol)
+                .ok_or_else(|| err("3.7", "unresolved instance"))?;
+            let id = instance.runtime_name();
+            let origins = instance.origins(f);
+            let (args, mem) = if f.kind == FnKind::Oracle {
+                (f.lists[4].iter().collect::<Vec<_>>(), &f.lists[3])
+            } else {
+                (f.lists[2].iter().chain(&f.lists[3]).collect(), &f.lists[4])
+            };
+            for p in args {
+                plan.arguments
+                    .insert((id.clone(), p.name.clone()), origins[&p.name]);
+            }
+            for p in mem {
+                plan.regions
+                    .insert((id.clone(), p.name.clone()), origins[&p.name]);
+            }
+            let mut body = f.clone();
+            body.name = id.clone();
+            for ins in body
+                .blocks
+                .iter_mut()
+                .flat_map(|b| &mut b.instrs)
+                .filter(|i| i.op == "lift.call")
+            {
+                let mut key = vec![];
+                if ins.operands.len() == 5 {
+                    for group in &ins.operands[2..] {
+                        for n in list_operand(group)? {
+                            key.push(
+                                *origins
+                                    .get(&n)
+                                    .ok_or_else(|| err("3.7", "unknown fixed origin"))?,
+                            );
+                        }
+                    }
+                }
+                let target = instances
+                    .iter()
+                    .find(|i| i.symbol == ins.operands[0].trim_start_matches('@') && i.key == key)
+                    .ok_or_else(|| err("3.7", "missing fixed callee instance"))?;
+                ins.operands[0] = format!("@{}", target.runtime_name());
+            }
+            plan.order.push(id.clone());
+            plan.functions.insert(id, body);
+        }
+        Ok(plan)
+    }
+}
+
 fn params(f: &Function, group: usize) -> &[Param] {
     match (f.kind, group) {
         (FnKind::Oracle, 2 | 3) => &f.lists[4],

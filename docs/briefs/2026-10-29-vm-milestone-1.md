@@ -12,7 +12,7 @@ step-check, run-cc, reverse, run-action, run-program) is your differential oracl
 is the revolution; execution semantics by tier) and §5; ISA spec §3 (machine model), §4 (instructions), §5 (regions),
 §7 (memory), §9 (number formats), §10 (launch 0.3), §14.1 (interpreter), §16 (object format, examples, hashes);
 `../bennett-isa-spec/reference-interpreter/README.md` for the CLI you diff against; `../bennett-isa-spec/HANDOFF.md`
-to know that ISA 0.9 is drafted (`spec/Bennett-ISA-Spec-0.9-draft.md`, not accepted): build on 0.8, and note in your
+for context (updated 2026-11-01: ISA 0.9 is published as `spec/Bennett-ISA-Spec-0.9.md`): the original milestone built on 0.8; note in your
 plan which 0.9 items (typed `fault C` in R, lproc token/classical params) will touch you.
 
 ## Milestone 1

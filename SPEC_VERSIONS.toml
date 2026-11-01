@@ -13,8 +13,8 @@ target = "0.8"
 [isa_0_9]
 version = "0.9"
 status = "partial-consumer"
-source = "spec/Bennett-ISA-Spec-0.9-draft.md"
-commit = "22f2aac5a699b934d524a4cf35fef42c9aeefc4f"
+source = "spec/Bennett-ISA-Spec-0.9.md"
+commit = "b77cbed2989d94b164d734563743c1a4191a4820"
 ref_envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
 
 [isa_0_8]

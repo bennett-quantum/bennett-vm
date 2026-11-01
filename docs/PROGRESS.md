@@ -1,3 +1,10 @@
+# ol3 pointer comparison admission — 2026-11-01
+Resume: finish 47t-c general whole-pair cleanup and bound-library occurrence validation, then d, b, hsd, clw; ISA 5cd remains open, implement best-supported source-ownership reading with a note.
+Split icmp from integer-only arithmetic: matching iN or ptr operands produce i1; all classical instruction typing errors now identify function, block, line and source instruction.
+RED reduced pointer comparison and missing-location witnesses; GREEN all six predicates on pointers/integers and rejected pointer arithmetic, mixed types and pointer-to-pointer inttoptr.
+Both full rung-2 objects 18/23 at 20261101T094524.766276Z pass check (exit 0); logs .tmp/ol3-rung2-{18,23}.log. ol3 CLOSED: full sequential interpreter/JIT each 212/0 (before 210/0), differential each 18/0; fmt/strict-Clippy/whitespace green (.tmp/ol3-*.log/totals.json).
+No dependencies, foreign implementation reads/copies, fixture/test weakening, push or Dolt sync.
+
 # 47t-c K65 direct-pair carriers — 2026-11-01
 Resume: c IN PROGRESS; ISA b-isa-spec-5cd must settle multirow recompute source ownership; finish general pair binding and bound-library occurrence validation before d, b, hsd, clw. a zero-width item remains pending ISA 7js.
 Direct copy/load pairs select a non-emitting ordinal-0 carrier before expansion; reverse/recompute preserve controls, nested containing paths and source-loop/adjoint coordinates. Adjacent empty lifetime/no-output-call pairs retain carriers even with no leaves.

@@ -139,11 +139,20 @@ pub fn classical(obj: &Object, f: &Function) -> Result<(), String> {
                             results.push(Type::I(n));
                         }
                         "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr"
-                        | "udiv" | "urem" | "sdiv" | "srem" | "icmp" => {
+                        | "udiv" | "urem" | "sdiv" | "srem" => {
                             let a = read(&env, &xs[0])?;
                             check(integer(&a), "arithmetic needs integer operands")?;
                             check(a == read(&env, &xs[1])?, "classical operand types differ")?;
-                            results.push(if base == "icmp" { Type::I(1) } else { a });
+                            results.push(a);
+                        }
+                        "icmp" => {
+                            let a = read(&env, &xs[0])?;
+                            check(
+                                integer(&a) || a == Type::Ptr,
+                                "icmp needs integer or pointer operands",
+                            )?;
+                            check(a == read(&env, &xs[1])?, "classical operand types differ")?;
+                            results.push(Type::I(1));
                         }
                         "select" => {
                             check(
@@ -418,6 +427,10 @@ pub fn classical(obj: &Object, f: &Function) -> Result<(), String> {
                     Ok(())
                 })();
                 if let Err(error) = result {
+                    let error = format!(
+                        "{error} at @{} ^{} line {}: {}",
+                        f.name, b.name, ins.line, ins.raw
+                    );
                     if error.contains("undefined classical operand") {
                         unresolved = Some(error);
                     } else {

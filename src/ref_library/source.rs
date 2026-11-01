@@ -40,6 +40,7 @@ struct Source {
     locals: Vec<Instr>,
     computations: BTreeMap<String, Instr>,
     cleanup_sites: BTreeMap<String, usize>,
+    history: Vec<Instr>,
 }
 impl Catalog {
     /// Form a structured source action from resolved classical parameters,
@@ -235,6 +236,7 @@ pub(super) fn action_body(
         locals: vec![],
         computations: BTreeMap::new(),
         cleanup_sites: BTreeMap::new(),
+        history: vec![],
     };
 
     for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -262,6 +264,7 @@ pub(super) fn action_body(
         .iter()
         .flat_map(|b| b.instrs.clone())
         .collect::<Vec<_>>();
+    source.history = instructions.clone();
     source.collect_regions(&instructions)?;
     source.declarations(&instructions)?;
     let mut body = source.sequence(&instructions, adjoint, env)?;
@@ -539,7 +542,16 @@ impl Source {
         adjoint: bool,
         env: &Bindings,
     ) -> Option<Vec<Instr>> {
-        let mut prefix = instructions.iter().collect::<Vec<_>>();
+        // Predicate lowering recurses over a lexical slice, but acquisitions
+        // before that slice still own the exact pre-call target version. Use
+        // the enclosing source history when this call is in that flat domain;
+        // nested loop/branch domains retain their local history obligations.
+        let history = if self.history.iter().any(|i| i.line == compute.line) {
+            self.history.as_slice()
+        } else {
+            instructions
+        };
+        let mut prefix = history.iter().collect::<Vec<_>>();
         if adjoint {
             prefix.reverse();
         }
@@ -583,6 +595,26 @@ impl Source {
                 return None;
             }
             rows.push((*i).clone());
+        }
+        // The prefix can end inside a predicate which contains the call.
+        // Close its captured input-history scope before replay; in a source
+        // adjoint, execution-order qunpred opens the corresponding scope.
+        let (open, close) = if adjoint {
+            ("qunpred", "qpred")
+        } else {
+            ("qpred", "qunpred")
+        };
+        let mut scopes = vec![];
+        for i in &rows {
+            if i.op == open {
+                scopes.push(i.clone());
+            } else if i.op == close {
+                scopes.pop()?;
+            }
+        }
+        for mut scope in scopes.into_iter().rev() {
+            scope.op = close.into();
+            rows.push(scope);
         }
         Some(rows)
     }

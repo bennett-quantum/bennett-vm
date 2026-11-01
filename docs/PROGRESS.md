@@ -1,3 +1,10 @@
+# 47t-c predicate-spanning call inputs — 2026-11-01
+Resume: c IN PROGRESS: mutable-region and remaining cross-scope/general dependency histories, lifted oracle-uncall integration and complete bound-library semantic-call occurrence validation; finish c before d, then b.
+RED: an owned qcopy outside a predicate could not bind a paired call's exact inputs inside it. Input reconstruction now retains enclosing flat source history and balances captured predicate scopes in execution order, including source adjoints; nested loop/branch domains retain their local-history obligations.
+Two new finite-domain regressions cover one/two enclosing predicates, nonzero source versions, effective carrier controls and both source directions; focused cleanup_fresh09 10/0 and strict Clippy green. No allocation-state zero inference or staged-domain widening.
+FINAL GREEN sequential interpreter/JIT each 239/0/0 (before237), differential each18/0; fmt, strict all-target Clippy and whitespace pass. Evidence .tmp/c-cross-scope-final-*.log and totals.json. c remains unclosed; d/b untouched. fw8 closed in 87b1887.
+No new ISA bead/spec edit, fixture change, dependency, conformance edit or push. K80 carrier ownership remains the published contract.
+
 # fw8 shared execution checkpoints — 2026-11-01
 Resume: fw8 CLOSED/green; resume c (mutable-region/cross-scope/general histories, lifted oracle-uncall, bound-library occurrences), followed by d, b.
 Root cause: per-row full env/value-history clones plus whole-env/memory trace scans; launch also cloned retained frames/traces. Private persistent AVL roots/indexed histories and touched-key journals make checkpoints constant-size; updates copy balanced paths. Program-only CLI omits its unobservable trace.

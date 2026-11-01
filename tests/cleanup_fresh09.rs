@@ -349,3 +349,60 @@ fn pre_call_input_reconstruction_keeps_original_predicate_scopes() {
         }
     }
 }
+
+#[test]
+fn paired_calls_reconstruct_owned_inputs_across_enclosing_predicate_boundaries() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in) () () ()\n^entry():\nd = qcopy x\nqpred p\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\nqunpred p\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:2" } else { "entry:3" },
+            adjoint,
+        );
+        assert!(e.cleanup_pairing_complete);
+        assert!(
+            e.cleanups
+                .iter()
+                .any(|c| c.realisation == CleanupRealisation::Recompute)
+        );
+        for bits in 0..8 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                ],
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_predicate_call_history_restores_source_versions_in_both_directions() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in, q:wire in) () () ()\n^entry():\nd = qcopy x\nqpred p\nx d\nqpred q\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\nqunpred q\nx d\nqunpred p\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:4" } else { "entry:5" };
+        let e = recompute(functions, point, adjoint);
+        assert!(e.cleanup_pairing_complete);
+        let carrier = e
+            .cleanups
+            .iter()
+            .find(|c| c.realisation == CleanupRealisation::Recompute)
+            .unwrap();
+        assert_eq!(carrier.address.path.last().unwrap().point, point);
+        assert_eq!(carrier.address.generated, 0);
+        assert_eq!(carrier.controls.len(), 2);
+        for bits in 0..16 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                    ("q[0]", bits & 8 != 0),
+                ],
+            );
+        }
+    }
+}

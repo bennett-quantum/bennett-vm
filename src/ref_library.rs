@@ -839,25 +839,115 @@ impl Catalog {
         Ok(())
     }
 }
+/// Ownership before traversal direction is applied. Kind and the semantic
+/// adjoint bit describe execution direction, so neither is an identity field.
+#[derive(Clone, Copy)]
+struct LifetimeOrigin<'a>(&'a Leaf);
+impl PartialEq for LifetimeOrigin<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for LifetimeOrigin<'_> {}
+impl PartialOrd for LifetimeOrigin<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for LifetimeOrigin<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        type PointKey<'a> = (
+            &'a str,
+            &'a str,
+            &'a [usize],
+            &'a [usize],
+            Option<usize>,
+            Option<(Option<usize>, &'a str)>,
+        );
+        fn point(p: &crate::sched::Point) -> PointKey<'_> {
+            (
+                &p.symbol,
+                &p.point,
+                &p.iteration,
+                &p.instance,
+                p.call_index,
+                p.oracle.as_ref().map(|o| (o.step, o.phase.as_str())),
+            )
+        }
+        let (a, b) = (self.0, other.0);
+        let address = match (&a.address, &b.address) {
+            (Some(a), Some(b)) => a
+                .path
+                .iter()
+                .map(point)
+                .cmp(b.path.iter().map(point))
+                .then_with(|| {
+                    (a.step, &a.phase, a.generated).cmp(&(b.step, &b.phase, b.generated))
+                }),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        address
+            .then_with(|| {
+                a.invocation
+                    .iter()
+                    .map(|c| (&c.closure_hash, c.call_index))
+                    .cmp(b.invocation.iter().map(|c| (&c.closure_hash, c.call_index)))
+            })
+            .then_with(|| a.ordinal.cmp(&b.ordinal))
+    }
+}
+
 fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
     // Raw inverse puts the acquire-side scratch mark on the closing leaf.
     // Pair by declaration identity before assigning physical occurrences.
     let mut open = BTreeMap::new();
     let mut marked = BTreeSet::new();
+    let mut origins = BTreeMap::new();
     for (i, l) in leaves.iter().enumerate() {
         if l.operation == "alloc" {
-            if open.insert(l.allocation.clone(), i).is_some() {
+            let id = l
+                .allocation
+                .as_deref()
+                .ok_or_else(|| err("allocation identity missing"))?;
+            if open.insert(id, i).is_some() {
                 return Err(err("double acquisition"));
             }
         } else if l.operation == "release" {
-            let start = open
-                .remove(&l.allocation)
-                .ok_or_else(|| err("unmatched release"))?;
+            let id = l
+                .allocation
+                .as_deref()
+                .ok_or_else(|| err("release identity missing"))?;
+            let start = open.remove(id).ok_or_else(|| err("unmatched release"))?;
             if l.scratch || leaves[start].scratch {
                 marked.insert(start);
             }
+            // Either endpoint may become the acquire under raw inverse. Their
+            // unordered ownership pair determines the same forward lifetime.
+            let origin = LifetimeOrigin(&leaves[start]).min(LifetimeOrigin(l));
+            if origins.insert((id, origin), start).is_some() {
+                return Err(err("duplicate allocation occurrence origin"));
+            }
         }
     }
+    for (id, start) in open {
+        if origins
+            .insert((id, LifetimeOrigin(&leaves[start])), start)
+            .is_some()
+        {
+            return Err(err("duplicate allocation occurrence origin"));
+        }
+    }
+    // Compact names, sorted by immutable ownership rather than the emitted
+    // traversal order. Keys borrow the trace so large circuits need no copied
+    // source paths or hashes per allocation.
+    let actuals = origins
+        .values()
+        .enumerate()
+        .map(|(rank, &start)| (start, format!("$alloc{rank}")))
+        .collect::<BTreeMap<_, _>>();
+    drop(origins);
 
     let mut wires = BTreeMap::<String, String>::new();
     let mut live = BTreeMap::<String, (String, Option<String>, Option<String>, bool, usize)>::new();
@@ -875,7 +965,7 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
             if leaf.scratch && leaf.state.as_deref() != Some("clean") {
                 return Err(err("library scratch must be clean"));
             }
-            let actual = format!("$alloc{index}");
+            let actual = actuals[&index].clone();
             live.insert(
                 id.clone(),
                 (

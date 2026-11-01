@@ -56,7 +56,7 @@ fn staged(i: &Instr) -> String {
 impl Catalog {
     /// Instantiate source-derived oracle rows and support. The context is K77's
     /// explicit record, separate from declared args; this is not raw descriptor
-    /// admission or a realised schedule. Remaining row adapters fail explicitly.
+    /// admission or a realised schedule.
     #[allow(clippy::too_many_arguments)]
     pub fn lower_oracle_with_cleanup(
         &self,

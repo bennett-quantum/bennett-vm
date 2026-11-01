@@ -1023,9 +1023,7 @@ fn value_row_descriptors_match_the_reference_over_complete_small_inputs() {
     ] {
         cases.push((op.into(), 2, format!("r = lift.{op} a b\nlift.retval r"), 2));
     }
-    for pred in [
-        "eq", "ne", "ult", "ule", "ugt", "uge", "slt", "sle", "sgt", "sge",
-    ] {
+    for pred in ["eq", "ne", "ult", "ule", "slt", "sle"] {
         cases.push((
             format!("icmp.{pred}"),
             1,
@@ -1041,7 +1039,19 @@ fn value_row_descriptors_match_the_reference_over_complete_small_inputs() {
             2,
         ));
     }
-    assert_eq!(cases.len(), 31);
+    assert_eq!(cases.len(), 27);
+    // The ISA spells greater-than comparisons by swapping operands, not by
+    // adding these predicates. Keep their admission guards alongside the table.
+    for pred in ["ugt", "uge", "sgt", "sge"] {
+        let invalid = support::source(&format!(
+            "oracle @root (a:wire[2] in, b:wire[2] in) (t:wire) (f:wire[4]) () ()\nregs {{ r:reg[1] }}\n^entry():\nr = lift.icmp.{pred} a b\nlift.retval r"
+        ));
+        assert!(
+            bennett_vm::load(&invalid, false)
+                .unwrap_err()
+                .contains("unknown icmp predicate")
+        );
+    }
     for (name, width, rows, steps) in cases {
         let text = support::source(&format!(
             "oracle @root (a:wire[2] in, b:wire[2] in, p:wire in) (t:wire[{width}]) (f:wire[4]) () ()\nregs {{ r:reg[{width}], s:reg[2] }}\n^entry():\n{rows}"
@@ -1132,5 +1142,57 @@ fn value_row_descriptors_match_the_reference_over_complete_small_inputs() {
             );
         }
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn fixed_pseudo_values_preserve_complete_integer_pointer_and_f64_bits() {
+    use bennett_vm::{bigint::BigUint, value::Budget};
+    for (ty, width, value, bits) in [
+        (
+            "i128",
+            128,
+            r#""340282366920938463463374607431768211455""#,
+            "340282366920938463463374607431768211455",
+        ),
+        ("ptr", 32, r#""2147483653""#, "2147483653"),
+        ("f64", 64, r#""0x8000000000000000""#, "9223372036854775808"),
+        ("f64", 64, r#""0x7ff8000000000001""#, "9221120237041090561"),
+    ] {
+        let text = support::source(&format!(
+            "oracle @root (x:wire in) (t:wire[{width}]) (f:wire[4]) () (tk:token, v:{ty})\nregs {{ r:reg[{width}] }}\n^entry():\nr = lift.mov v\nlift.retval r"
+        ));
+        let parameters = format!(r#"[["3","0","0","0"],{value}]"#);
+        let (object, _) = bennett_vm::load(&text, false).unwrap();
+        let values = bennett_vm::invocation::decode_args(
+            &json::parse(&parameters).unwrap(),
+            &object.function("root").unwrap().lists[4]
+                .iter()
+                .map(|p| p.ty.clone())
+                .collect::<Vec<_>>(),
+            object.ptr_width,
+        )
+        .unwrap();
+        let outcome = bennett_vm::oracle::run_oracle(
+            &object,
+            "root",
+            &[BigUint::zero()],
+            &mut [],
+            &values,
+            Budget {
+                steps: 2,
+                heap: 0,
+                stack: 0,
+                depth: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.payload,
+            BigUint::parse_decimal(bits).unwrap(),
+            "{ty} {value}"
+        );
+        assert!(outcome.code.is_zero());
+        assert_map(&text, &parameters, [2, 0, 0, 0], &[("x", 1)], 2);
     }
 }

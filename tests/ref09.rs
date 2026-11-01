@@ -169,6 +169,10 @@ fn reacquisition_has_fresh_identity_in_both_traversals() {
     assert_eq!(inverse[0].wires, inverse[1].wires);
     assert_eq!(inverse[2].wires, inverse[3].wires);
     assert_ne!(inverse[0].wires, inverse[2].wires);
+    for (forward, backward) in l.iter().rev().zip(&inverse) {
+        assert_eq!(forward.allocation, backward.allocation);
+        assert_eq!(forward.wires, backward.wires);
+    }
 }
 
 #[test]

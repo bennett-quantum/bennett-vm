@@ -1,3 +1,10 @@
+# K76 public certificate entry-domain guard — 2026-11-01
+Resume: fat CLOSED/green; complete 47t-a automatic resolution/integration and source-wide audit before c, d, hsd, clw. No 47t child closed.
+Public verify_region_claims now independently revalidates source/frame obligations; a region-D identity proof cannot discharge a failed frame-D_F obligation, including library replay.
+RED .tmp/fat-certificate-red.log reproduced Ok([Proof]); GREEN ten frame-domain and ten existing certificate tests. The region-only verify_claim correctly remains Proof for the identity witness.
+Final sequential interpreter/JIT each 170 PASS / 0 FAIL / 0 ignored; differential each 18/0 (baseline each 142/5 and 14/4). fmt/strict Clippy/whitespace green; .tmp/fat-cert-final-{interpreter,jit}.log.
+Guard is a fat follow-up, not hsd/clw work; no dependencies, fixture/test exclusions, foreign implementation reads, pushes or spec text edits.
+
 # 47t split and checked coherent operands / linked admission — 2026-11-01
 Resume: 47t-a IN PROGRESS; finish automatic source resolution/integration and source-wide audit, then c, d, hsd, clw. No child closed.
 Children: 47t-a admission/link; 47t-b catalog BLOCKED on ISA 5xm (not worked); 47t-c K49–K65 addressing; 47t-d schedules/realisation/execution. 47t remains the parent.

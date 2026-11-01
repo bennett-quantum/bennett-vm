@@ -129,3 +129,40 @@ fn local_action_adjoints_resolve_indexed_aliases_and_inherited_controls() {
         + "\n";
     load(&text, true).unwrap();
 }
+
+#[test]
+fn public_region_verification_does_not_waive_the_frame_domain() {
+    use bennett_vm::{
+        certificate::{self, Verdict},
+        json::Json,
+        value::Budget,
+    };
+    let text = source(
+        "c = qalloc any 1\ncx t c\ncx x c\ncx t c\ncx x c\nb = qborrow any 1\ncx c b\nqreturn b\ncx x c\ncx t c\ncx x c\ncx t c\nqfree c",
+    );
+    assert!(load(&text, true).unwrap_err().contains("§5.6"));
+    // Exercise the public checker independently of load admission, as a host
+    // with an unvalidated or modified parsed object can do.
+    let obj = bennett_vm::object::parse(&text).unwrap();
+    let claim = bennett_vm::json::parse(r#"{"kind":"exhaustive","domain":{"bundles":[{"name":"t","width":1,"lo":0,"hi":1},{"name":"x","width":1,"lo":0,"hi":1}],"borrowed":[{"name":"b","width":1,"lo":0,"hi":1}],"regions":[]},"expected":{"table":[[0,0,0],[0,0,1],[0,1,0],[0,1,1],[1,0,0],[1,0,1],[1,1,0],[1,1,1]]}}"#).unwrap();
+    let budget = Budget {
+        steps: 3,
+        heap: 0,
+        stack: 0,
+        depth: 0,
+    };
+    assert_eq!(
+        certificate::verify_claim(&obj, "borrowed", &claim, &[], &budget, &[]).unwrap(),
+        Verdict::Proof
+    );
+    let region = Json::obj(vec![
+        ("claims", Json::Arr(vec![claim])),
+        (
+            "verification",
+            Json::obj(vec![("borrow_frames", Json::Arr(vec![Json::u64(0)]))]),
+        ),
+    ]);
+    let e = certificate::verify_region_claims(&obj, "borrowed", &region, &[], &budget, &[])
+        .unwrap_err();
+    assert!(e.contains("§5.6"), "{e}");
+}

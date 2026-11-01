@@ -786,6 +786,11 @@ pub fn verify_region_claims(
     budget: &Budget,
     libraries: &[Object],
 ) -> Result<Vec<Verdict>, String> {
+    // A T3 region proof ranges over the region's D, not necessarily a frame's
+    // normative D_F. Public callers can supply parsed or modified Objects, so
+    // establish every source/frame obligation independently before using claim
+    // indices (including replayed library claims) as certificate evidence.
+    crate::validate::validate(obj)?;
     let claims = array(field(region, "claims")?)?;
     let mut verdicts = vec![];
     for c in claims {

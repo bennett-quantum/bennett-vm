@@ -6,6 +6,7 @@ use crate::{
     cliargs,
     json::{self, Json},
     object::{FnKind, Instr, Object, Type},
+    persistent::{Map, Seq},
     sha256::{from_hex, sha256_hex, to_hex as hex},
     value::{self, Value},
 };
@@ -28,18 +29,22 @@ struct Handle {
 }
 #[derive(Clone, Debug)]
 struct Data {
-    memory: BTreeMap<BigUint, u8>,
-    table: Vec<Allocation>,
+    memory: Map<BigUint, u8>,
+    table: Map<usize, Allocation>,
+    allocation_index: Map<BigUint, usize>,
+    interval_index: Map<BigUint, usize>,
+    table_sorted: bool,
     bump: BigUint,
-    console: Vec<u8>,
+    console: Seq<u8>,
     clock: u64,
     entropy_pos: usize,
-    block: BTreeMap<u64, Vec<u8>>,
-    tape: Vec<Json>,
-    hosts: Vec<Json>,
-    measurements: Vec<Json>,
-    handles: BTreeMap<u64, Handle>,
+    block: Map<u64, Vec<u8>>,
+    tape: Seq<Json>,
+    hosts: Seq<Json>,
+    measurements: Seq<Json>,
+    handles: Map<u64, Handle>,
     next_handle: u64,
+    writes: BTreeSet<BigUint>,
 }
 #[derive(Clone, Debug, PartialEq)]
 struct Activation {
@@ -53,15 +58,16 @@ struct Activation {
 }
 #[derive(Clone)]
 struct Frame {
-    classes_before: BTreeMap<usize, String>,
-    classes_after: BTreeMap<usize, String>,
+    classes_before: Map<usize, String>,
+    classes_after: Map<usize, String>,
     wire_boundary: usize,
     region: Option<Invocation>,
     definitions: Vec<(Key, usize)>,
     next_activation: u64,
+    memory_keys: BTreeSet<BigUint>,
     data: Option<Data>,
     after: Option<Data>,
-    control: Vec<Activation>,
+    control: Seq<Activation>,
     pure: bool,
     reversed: bool,
     marker: bool,
@@ -79,26 +85,29 @@ struct Segment {
 struct Machine {
     program: Option<std::sync::Arc<crate::jit::Program>>,
     quantum: QuantumState,
-    quantum_events: Vec<Invocation>,
+    quantum_events: Seq<Invocation>,
     pending_region: Option<Invocation>,
     obj: std::sync::Arc<Object>,
     data: Data,
-    env: BTreeMap<Key, Vec<Value>>,
-    stack: Vec<Activation>,
-    history: Vec<Frame>,
-    segments: Vec<Segment>,
-    trace: Vec<Json>,
+    env: Map<Key, Seq<Value>>,
+    stack: Seq<Activation>,
+    history: Seq<Frame>,
+    segments: Seq<Segment>,
+    trace: Seq<Json>,
     next_activation: u64,
     steps: u64,
     fault: Option<u64>,
     results: Vec<Value>,
-    entropy: Vec<u8>,
-    draws: Vec<f64>,
+    entropy: std::sync::Arc<Vec<u8>>,
+    draws: Seq<f64>,
     draw_pos: usize,
-    replies: Vec<Json>,
+    replies: Seq<Json>,
     reply_pos: usize,
     definitions: Vec<(Key, usize)>,
     stateful: bool,
+    register_changes: BTreeMap<Key, Option<Value>>,
+    nan_registers: Map<Key, ()>,
+    trace_enabled: bool,
 }
 fn err(s: impl std::fmt::Display) -> String {
     format!("§3.4: {s}")
@@ -112,8 +121,19 @@ fn strs(xs: &[String]) -> Json {
 fn vals(xs: &[Value]) -> Json {
     Json::Arr(xs.iter().map(Value::to_json).collect())
 }
-fn current(env: &BTreeMap<Key, Vec<Value>>, k: &Key) -> Option<Value> {
+fn current(env: &Map<Key, Seq<Value>>, k: &Key) -> Option<Value> {
+    #[cfg(test)]
+    REGISTER_READS.with(|n| n.set(n.get() + 1));
     env.get(k).and_then(|v| v.last()).cloned()
+}
+fn is_nan(v: &Value) -> bool {
+    matches!(v, Value::F64(f) if f.is_nan())
+}
+fn nan_keys(env: &Map<Key, Seq<Value>>) -> Map<Key, ()> {
+    env.iter()
+        .filter(|(_, vs)| vs.last().is_some_and(is_nan))
+        .map(|(k, _)| (k.clone(), ()))
+        .collect()
 }
 fn pure(op: &str) -> bool {
     matches!(
@@ -155,23 +175,27 @@ impl Data {
             BTreeMap::new()
         };
         let mut d = Self {
-            memory: BTreeMap::new(),
-            table: vec![],
+            memory: Map::new(),
+            table: Map::new(),
+            allocation_index: Map::new(),
+            interval_index: Map::new(),
+            table_sorted: false,
             bump: BigUint::zero(),
-            console: vec![],
+            console: Seq::new(),
             clock: 0,
             entropy_pos: 0,
-            block,
-            tape: vec![],
-            hosts: vec![],
-            measurements: vec![],
-            handles: BTreeMap::new(),
+            block: block.into_iter().collect(),
+            tape: Seq::new(),
+            hosts: Seq::new(),
+            measurements: Seq::new(),
+            handles: Map::new(),
             next_handle: 1,
+            writes: BTreeSet::new(),
         };
         if let Some(l) = &obj.layout {
             d.bump = l.heap_base.clone();
             for (name, g) in &l.globals {
-                d.table.push(Allocation {
+                d.add_allocation(Allocation {
                     base: g.base.clone(),
                     size: g.size.clone(),
                     live: true,
@@ -182,10 +206,46 @@ impl Data {
         }
         Ok(d)
     }
+    fn add_allocation(&mut self, entry: Allocation) {
+        let index = self.table.floor(&usize::MAX).map_or(0, |(i, _)| i + 1);
+        // Zero-sized globals may share a base. Preserve every table entry,
+        // while the interval index selects the entry with maximal extent.
+        if self
+            .allocation_index
+            .get(&entry.base)
+            .is_none_or(|i| self.table[i].size <= entry.size)
+        {
+            self.allocation_index.insert(entry.base.clone(), index);
+        }
+        if !entry.size.is_zero() {
+            self.interval_index.insert(entry.base.clone(), index);
+        }
+        self.table.insert(index, entry);
+    }
+    fn allocation_at_or_before(&self, p: &BigUint) -> Option<&Allocation> {
+        let (_, index) = self.interval_index.floor(p)?;
+        self.table.get(index)
+    }
+    fn ordered_allocations(&self) -> Vec<&Allocation> {
+        let mut entries: Vec<_> = self.table.iter().map(|(_, e)| e).collect();
+        if self.table_sorted {
+            entries.sort_by(|a, b| a.base.cmp(&b.base));
+        }
+        entries
+    }
     fn valid(&self, p: &BigUint, n: &BigUint) -> bool {
-        self.table
-            .iter()
-            .any(|e| e.live && e.base <= *p && p.add(n) <= e.base.add(&e.size))
+        self.allocation_at_or_before(p)
+            .is_some_and(|e| e.live && p.add(n) <= e.base.add(&e.size))
+            || (n.is_zero()
+                && self
+                    .allocation_index
+                    .get(p)
+                    .is_some_and(|i| self.table[i].live))
+            || (n.is_zero()
+                && !p.is_zero()
+                && self
+                    .allocation_at_or_before(&p.sub(&u(1)))
+                    .is_some_and(|e| e.live && *p <= e.base.add(&e.size)))
     }
     fn read(&self, p: &BigUint, n: usize) -> Vec<u8> {
         (0..n)
@@ -195,6 +255,7 @@ impl Data {
     fn write(&mut self, p: &BigUint, bytes: &[u8]) {
         for (i, b) in bytes.iter().enumerate() {
             let a = p.add(&u(i as u64));
+            self.writes.insert(a.clone());
             if *b == 0 {
                 self.memory.remove(&a);
             } else {
@@ -204,9 +265,9 @@ impl Data {
     }
     fn digest(&self) -> String {
         // The spec fixes the memory state, but no digest serialization.
-        let entries = self
-            .table
-            .iter()
+        let ordered = self.ordered_allocations();
+        let entries = ordered
+            .into_iter()
             .map(|e| {
                 Json::obj(vec![
                     ("base", Json::u(&e.base)),
@@ -232,7 +293,9 @@ impl Data {
         )
     }
     fn memory_eq(&self, other: &Self) -> bool {
-        self.bump == other.bump && self.table == other.table && self.memory == other.memory
+        self.bump == other.bump
+            && self.ordered_allocations() == other.ordered_allocations()
+            && self.memory == other.memory
     }
     fn new_handle(&mut self, wires: Vec<usize>, parent: Option<u64>) -> u64 {
         let id = self.next_handle;
@@ -256,6 +319,12 @@ impl Data {
     }
 }
 impl Machine {
+    fn note_register(&mut self, key: &Key) {
+        if !self.register_changes.contains_key(key) {
+            self.register_changes
+                .insert(key.clone(), current(&self.env, key));
+        }
+    }
     fn read(&self, name: &str) -> Result<Value, u64> {
         current(&self.env, &(self.stack.last().unwrap().id, name.into())).ok_or(4)
     }
@@ -267,7 +336,16 @@ impl Machine {
     }
     fn define_at(&mut self, id: u64, name: &str, v: Value) {
         let key = (id, name.into());
-        let vs = self.env.entry(key.clone()).or_default();
+        if is_nan(&v) {
+            self.nan_registers.insert(key.clone(), ());
+        } else {
+            self.nan_registers.remove(&key);
+        }
+        self.note_register(&key);
+        if !self.env.contains_key(&key) {
+            self.env.insert(key.clone(), Seq::new());
+        }
+        let vs = self.env.get_mut(&key).unwrap();
         self.definitions.push((key, vs.len()));
         vs.push(v);
     }
@@ -298,10 +376,18 @@ impl Machine {
         Ok(self.data.handle(id).unwrap().wires.clone())
     }
     fn undo(&mut self, index: usize, control: bool) -> Result<(), String> {
-        let frame = &mut self.history[index];
-        if frame.reversed || frame.marker {
+        if self.history[index].reversed || self.history[index].marker {
             return Ok(());
         }
+        let keys: Vec<_> = self.history[index]
+            .definitions
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in keys {
+            self.note_register(&key);
+        }
+        let frame = &mut self.history[index];
         self.quantum.classical_event()?;
         if let Some(invocation) = &frame.region {
             let inverse = invocation.inverse();
@@ -319,25 +405,33 @@ impl Machine {
                 }
             }
         }
-        if let Some(d) = &frame.data {
-            if let Some(after) = &frame.after {
-                self.data.undo_delta(d, after);
+        for (key, _) in &frame.definitions {
+            if self
+                .env
+                .get(key)
+                .and_then(|vs| vs.last())
+                .is_some_and(is_nan)
+            {
+                self.nan_registers.insert(key.clone(), ());
             } else {
-                self.data = d.clone();
+                self.nan_registers.remove(key);
             }
         }
-        for key in frame
-            .classes_before
-            .keys()
-            .chain(frame.classes_after.keys())
-            .collect::<BTreeSet<_>>()
-        {
-            if frame.classes_before.get(key) != frame.classes_after.get(key) {
-                if let Some(class) = frame.classes_before.get(key) {
-                    self.quantum.wire_classes.insert(*key, class.clone());
-                } else {
-                    self.quantum.wire_classes.remove(key);
-                }
+        if let Some(d) = &frame.data {
+            if let Some(after) = &frame.after {
+                self.data.undo_delta(d, after, &frame.memory_keys);
+            } else {
+                let mut writes = std::mem::take(&mut self.data.writes);
+                writes.extend(frame.memory_keys.iter().cloned());
+                self.data = d.clone();
+                self.data.writes = writes;
+            }
+        }
+        for key in frame.classes_before.changed_keys(&frame.classes_after) {
+            if let Some(class) = frame.classes_before.get(&key) {
+                self.quantum.wire_classes.insert(key, class.clone());
+            } else {
+                self.quantum.wire_classes.remove(&key);
             }
         }
         if control {
@@ -407,7 +501,8 @@ impl Machine {
         let wire_boundary = self.quantum.wire_count();
         self.pending_region = None;
         let classes_before = self.quantum.wire_classes.clone();
-        let env_before = self.env.clone();
+        self.register_changes.clear();
+        self.data.writes.clear();
         let control = self.stack.clone();
         let next_activation = self.next_activation;
         self.definitions.clear();
@@ -419,67 +514,68 @@ impl Machine {
             self.fault = Some(code);
             self.results.clear();
         }
-        let mut keys: BTreeSet<Key> = self.definitions.iter().map(|(k, _)| k.clone()).collect();
-        keys.extend(
-            env_before
-                .keys()
-                .chain(self.env.keys())
-                .filter(|k| current(&env_before, k) != current(&self.env, k))
-                .cloned(),
-        );
-        let regs = keys
-            .into_iter()
-            .map(|k| {
-                Json::obj(vec![
-                    ("activation", Json::u64(k.0)),
-                    ("name", Json::Str(k.1.clone())),
-                    (
-                        "pre",
-                        current(&env_before, &k)
-                            .map(|v| v.to_json())
-                            .unwrap_or(Json::Null),
-                    ),
-                    (
-                        "post",
-                        current(&self.env, &k)
-                            .map(|v| v.to_json())
-                            .unwrap_or(Json::Null),
-                    ),
-                ])
-            })
-            .collect();
-        let addresses: BTreeSet<_> = before
-            .memory
-            .keys()
-            .chain(self.data.memory.keys())
-            .cloned()
-            .collect();
-        let mem = addresses
-            .into_iter()
-            .filter_map(|a| {
-                let p = *before.memory.get(&a).unwrap_or(&0);
-                let q = *self.data.memory.get(&a).unwrap_or(&0);
-                (p != q).then(|| {
+        let addresses = self.data.writes.clone();
+        if self.trace_enabled {
+            let mut keys: BTreeSet<Key> = self.definitions.iter().map(|(k, _)| k.clone()).collect();
+            keys.extend(
+                self.register_changes
+                    .iter()
+                    .filter(|(k, pre)| **pre != current(&self.env, k))
+                    .map(|(k, _)| k.clone()),
+            );
+            keys.extend(self.nan_registers.keys().cloned());
+            let regs = keys
+                .into_iter()
+                .map(|k| {
                     Json::obj(vec![
-                        ("address", Json::u(&a)),
-                        ("pre", Json::u64(p as u64)),
-                        ("post", Json::u64(q as u64)),
+                        ("activation", Json::u64(k.0)),
+                        ("name", Json::Str(k.1.clone())),
+                        (
+                            "pre",
+                            self.register_changes
+                                .get(&k)
+                                .cloned()
+                                .unwrap_or_else(|| current(&self.env, &k))
+                                .map(|v| v.to_json())
+                                .unwrap_or(Json::Null),
+                        ),
+                        (
+                            "post",
+                            current(&self.env, &k)
+                                .map(|v| v.to_json())
+                                .unwrap_or(Json::Null),
+                        ),
                     ])
                 })
-            })
-            .collect();
-        self.trace.push(Json::obj(vec![
-            ("step", Json::u64(self.steps)),
-            ("function", Json::Str(a.function)),
-            ("block", Json::Str(block.name.clone())),
-            ("index", Json::u64(a.index as u64)),
-            ("line", Json::u64(ins.line as u64)),
-            ("op", Json::Str(ins.op.clone())),
-            ("lhs", strs(&ins.lhs)),
-            ("operands", strs(&ins.operands)),
-            ("registers", Json::Arr(regs)),
-            ("memory", Json::Arr(mem)),
-        ]));
+                .collect();
+            let mem = addresses
+                .iter()
+                .cloned()
+                .filter_map(|a| {
+                    let p = *before.memory.get(&a).unwrap_or(&0);
+                    let q = *self.data.memory.get(&a).unwrap_or(&0);
+                    (p != q).then(|| {
+                        Json::obj(vec![
+                            ("address", Json::u(&a)),
+                            ("pre", Json::u64(p as u64)),
+                            ("post", Json::u64(q as u64)),
+                        ])
+                    })
+                })
+                .collect();
+            self.trace.push(Json::obj(vec![
+                ("step", Json::u64(self.steps)),
+                ("function", Json::Str(a.function)),
+                ("block", Json::Str(block.name.clone())),
+                ("index", Json::u64(a.index as u64)),
+                ("line", Json::u64(ins.line as u64)),
+                ("op", Json::Str(ins.op.clone())),
+                ("lhs", strs(&ins.lhs)),
+                ("operands", strs(&ins.operands)),
+                ("registers", Json::Arr(regs)),
+                ("memory", Json::Arr(mem)),
+            ]));
+        }
         self.history.push(Frame {
             classes_before,
             classes_after: self.quantum.wire_classes.clone(),
@@ -487,6 +583,7 @@ impl Machine {
             region: self.pending_region.take(),
             definitions: self.definitions.clone(),
             next_activation,
+            memory_keys: addresses,
             data: (!pure(&ins.op)).then_some(before),
             after: self.stateful.then(|| self.data.clone()),
             control,
@@ -605,7 +702,7 @@ impl Machine {
                 }
                 let p = self.data.bump.clone();
                 self.data.bump = end;
-                self.data.table.push(Allocation {
+                self.data.add_allocation(Allocation {
                     base: p.clone(),
                     size: n,
                     live: true,
@@ -615,11 +712,10 @@ impl Machine {
             }
             "free" => {
                 let p = get!(self.bits(&xs[0]));
-                let Some(e) = self
-                    .data
-                    .table
-                    .iter_mut()
-                    .find(|e| e.base == p && e.live && !e.pinned)
+                let index = self.data.allocation_index.get(&p).copied();
+                let Some(e) = index
+                    .and_then(|i| self.data.table.get_mut(&i))
+                    .filter(|e| e.live && !e.pinned)
                 else {
                     return Ok(Some(7));
                 };
@@ -703,8 +799,13 @@ impl Machine {
                 if seg.name != xs[0].trim_start_matches('@')
                     || seg.args != av
                     || seg.results != rv
-                    || self.history[seg.end + 1..].iter().any(|f| !f.pure)
-                    || self.history[seg.start..=seg.end].iter().any(|f| f.measured)
+                    || self.history.iter().skip(seg.end + 1).any(|f| !f.pure)
+                    || self
+                        .history
+                        .iter()
+                        .skip(seg.start)
+                        .take(seg.end - seg.start + 1)
+                        .any(|f| f.measured)
                 {
                     return Ok(Some(4));
                 }
@@ -857,7 +958,7 @@ impl Machine {
         let bytes = match (dev, op) {
             ("console", "write") => {
                 let bs = self.data.read(&u(p), n);
-                self.data.console.extend(&bs);
+                self.data.console.extend(bs.iter().copied());
                 bs
             }
             ("clock", "read") => {
@@ -1035,7 +1136,7 @@ impl Invocation {
         inverse
     }
 }
-fn record_quantum(events: &mut Vec<Invocation>, invocation: Invocation) {
+fn record_quantum(events: &mut Seq<Invocation>, invocation: Invocation) {
     // An exact symbolic identity witness for snapshot comparison, independent
     // of roundoff in the Born-probability amplitude cache. No amplitudes are
     // stored or restored by a run-history frame.
@@ -1043,7 +1144,7 @@ fn record_quantum(events: &mut Vec<Invocation>, invocation: Invocation) {
         .last()
         .is_some_and(|last| *last == invocation.inverse())
     {
-        events.pop();
+        events.truncate(events.len() - 1);
     } else {
         events.push(invocation);
     }
@@ -1276,20 +1377,21 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             _ => return Err("§10: replies must be a JSON array".into()),
         },
     };
-    let env: BTreeMap<_, _> = f.lists[0]
+    let env: Map<_, _> = f.lists[0]
         .iter()
         .zip(&values)
-        .map(|(p, v)| ((0, p.name.clone()), vec![v.clone()]))
+        .map(|(p, v)| ((0, p.name.clone()), std::iter::once(v.clone()).collect()))
         .collect();
     let entry_data = data.clone();
     let entry_env = env.clone();
     let mut m = Machine {
         program: crate::jit::for_object(&obj)?,
         quantum,
-        quantum_events: vec![],
+        quantum_events: Seq::new(),
         pending_region: None,
         obj: std::sync::Arc::new(obj.clone()),
         data,
+        nan_registers: nan_keys(&env),
         env,
         stack: vec![Activation {
             id: 0,
@@ -1299,21 +1401,25 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             dest: vec![],
             call_start: None,
             args: values,
-        }],
-        history: vec![],
-        segments: vec![],
-        trace: vec![],
+        }]
+        .into_iter()
+        .collect(),
+        history: Seq::new(),
+        segments: Seq::new(),
+        trace: Seq::new(),
         next_activation: 1,
         steps: 0,
         fault: None,
         results: vec![],
-        entropy,
-        draws,
+        entropy: std::sync::Arc::new(entropy),
+        draws: draws.into_iter().collect(),
         draw_pos: 0,
-        replies,
+        replies: replies.into_iter().collect(),
         reply_pos: 0,
         definitions: vec![],
         stateful: false,
+        register_changes: BTreeMap::new(),
+        trace_enabled: mode != Mode::Program,
     };
     let entry_stack = m.stack.clone();
     let limit = opts
@@ -1349,8 +1455,8 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                     .collect(),
             ),
         ),
-        ("tape", Json::Arr(m.data.tape.clone())),
-        ("host_requests", Json::Arr(m.data.hosts.clone())),
+        ("tape", Json::Arr(m.data.tape.to_vec())),
+        ("host_requests", Json::Arr(m.data.hosts.to_vec())),
     ];
     let reversing = mode == Mode::Reverse || opts.flags.contains("reverse");
     if reversing {
@@ -1377,12 +1483,12 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     out.extend(vec![
         (
             "console",
-            String::from_utf8(m.data.console.clone())
+            String::from_utf8(m.data.console.to_vec())
                 .ok()
                 .map(Json::Str)
                 .unwrap_or(Json::Null),
         ),
-        ("console_hex", Json::Str(hex(&m.data.console))),
+        ("console_hex", Json::Str(hex(&m.data.console.to_vec()))),
         ("clock", Json::u64(m.data.clock)),
         ("effect_tape_length", Json::u64(m.data.tape.len() as u64)),
         ("memory_digest", Json::Str(m.data.digest())),
@@ -1400,8 +1506,8 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                     .into(),
                 ),
             ),
-            ("measurements", Json::Arr(m.data.measurements)),
-            ("trace", Json::Arr(m.trace)),
+            ("measurements", Json::Arr(m.data.measurements.to_vec())),
+            ("trace", Json::Arr(m.trace.to_vec())),
         ]);
     } else {
         out.extend(vec![
@@ -1433,7 +1539,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             out.extend(vec![
                 ("run_state", Json::Str("CLOSED".into())),
                 ("reversed", Json::Bool(reversing)),
-                ("measurements", Json::Arr(m.data.measurements)),
+                ("measurements", Json::Arr(m.data.measurements.to_vec())),
             ]);
         }
     }
@@ -1449,12 +1555,12 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
 }
 #[allow(clippy::too_many_arguments)]
 fn first_difference(
-    a: &BTreeMap<Key, Vec<Value>>,
-    b: &BTreeMap<Key, Vec<Value>>,
+    a: &Map<Key, Seq<Value>>,
+    b: &Map<Key, Seq<Value>>,
     da: &Data,
     db: &Data,
-    entry_stack: &[Activation],
-    stack: &[Activation],
+    entry_stack: &Seq<Activation>,
+    stack: &Seq<Activation>,
     next_activation: u64,
     quantum_identity: bool,
 ) -> Option<String> {
@@ -1503,39 +1609,49 @@ fn first_difference(
 // Stateful launch adapter. Resources are exchanged only at instruction boundaries;
 // history contains classical deltas and resolved inverse invocations, never Q snapshots.
 impl Data {
-    fn undo_delta(&mut self, before: &Self, after: &Self) {
+    fn undo_delta(&mut self, before: &Self, after: &Self, memory_keys: &BTreeSet<BigUint>) {
         fn restore<K: Ord + Clone, V: PartialEq + Clone>(
-            now: &mut BTreeMap<K, V>,
-            before: &BTreeMap<K, V>,
-            after: &BTreeMap<K, V>,
+            now: &mut Map<K, V>,
+            before: &Map<K, V>,
+            after: &Map<K, V>,
         ) {
-            for k in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
-                if before.get(k) != after.get(k) {
-                    if let Some(v) = before.get(k) {
-                        now.insert(k.clone(), v.clone());
-                    } else {
-                        now.remove(k);
-                    }
+            for k in before.changed_keys(after) {
+                if let Some(v) = before.get(&k) {
+                    now.insert(k, v.clone());
+                } else {
+                    now.remove(&k);
                 }
             }
         }
-        restore(&mut self.memory, &before.memory, &after.memory);
+        for k in memory_keys {
+            if before.memory.get(k) != after.memory.get(k) {
+                self.writes.insert(k.clone());
+                if let Some(v) = before.memory.get(k) {
+                    self.memory.insert(k.clone(), *v);
+                } else {
+                    self.memory.remove(k);
+                }
+            }
+        }
         restore(&mut self.block, &before.block, &after.block);
         restore(&mut self.handles, &before.handles, &after.handles);
         if before.bump != after.bump {
             self.bump = before.bump.clone();
         }
-        for entry in &after.table {
-            let previous = before.table.iter().find(|e| e.base == entry.base);
-            if previous != Some(entry) {
-                self.table.retain(|e| e.base != entry.base);
-                if let Some(previous) = previous {
-                    self.table.push(previous.clone());
-                }
-            }
-        }
-        self.table.sort_by(|a, b| a.base.cmp(&b.base));
-        if before.console != after.console {
+        restore(&mut self.table, &before.table, &after.table);
+        restore(
+            &mut self.allocation_index,
+            &before.allocation_index,
+            &after.allocation_index,
+        );
+        restore(
+            &mut self.interval_index,
+            &before.interval_index,
+            &after.interval_index,
+        );
+        // The launch adapter historically canonicalises table order on undo.
+        self.table_sorted = true;
+        if !before.console.same_root(&after.console) && before.console != after.console {
             self.console = before.console.clone();
         }
         if before.clock != after.clock {
@@ -1544,13 +1660,15 @@ impl Data {
         if before.entropy_pos != after.entropy_pos {
             self.entropy_pos = before.entropy_pos;
         }
-        if before.tape != after.tape {
+        if !before.tape.same_root(&after.tape) && before.tape != after.tape {
             self.tape = before.tape.clone();
         }
-        if before.hosts != after.hosts {
+        if !before.hosts.same_root(&after.hosts) && before.hosts != after.hosts {
             self.hosts = before.hosts.clone();
         }
-        if before.measurements != after.measurements {
+        if !before.measurements.same_root(&after.measurements)
+            && before.measurements != after.measurements
+        {
             self.measurements = before.measurements.clone();
         }
         // Handle IDs are never recycled across host-visible calls.
@@ -1630,16 +1748,17 @@ impl RuntimeRun {
         let env = f.lists[0]
             .iter()
             .zip(&args)
-            .map(|(p, v)| ((0, p.name.clone()), vec![v.clone()]))
+            .map(|(p, v)| ((0, p.name.clone()), std::iter::once(v.clone()).collect()))
             .collect();
         Ok(Self {
             machine: Machine {
                 program,
                 quantum: resources.quantum.clone(),
-                quantum_events: vec![],
+                quantum_events: Seq::new(),
                 pending_region: None,
                 obj,
                 data: resources.data.clone(),
+                nan_registers: nan_keys(&env),
                 env,
                 stack: vec![Activation {
                     id: 0,
@@ -1649,21 +1768,25 @@ impl RuntimeRun {
                     dest: vec![],
                     call_start: None,
                     args,
-                }],
-                history: vec![],
-                segments: vec![],
-                trace: vec![],
+                }]
+                .into_iter()
+                .collect(),
+                history: Seq::new(),
+                segments: Seq::new(),
+                trace: Seq::new(),
                 next_activation: 1,
                 steps: 0,
                 fault: None,
                 results: vec![],
-                entropy,
-                draws: vec![],
+                entropy: std::sync::Arc::new(entropy),
+                draws: Seq::new(),
                 draw_pos: 0,
-                replies: vec![],
+                replies: Seq::new(),
                 reply_pos: 0,
                 definitions: vec![],
                 stateful: true,
+                register_changes: BTreeMap::new(),
+                trace_enabled: true,
             },
         })
     }
@@ -1685,14 +1808,18 @@ impl RuntimeRun {
         r.data.measurements.clear();
         r.quantum = self.machine.quantum.clone();
     }
-    fn records(&self, field: fn(&Data) -> &Vec<Json>) -> Vec<Json> {
+    fn records(&self, field: fn(&Data) -> &Seq<Json>) -> Vec<Json> {
         self.machine
             .history
             .iter()
             .filter(|f| !f.reversed && !f.marker)
             .flat_map(|f| match (&f.data, &f.after) {
                 (Some(before), Some(after)) if field(after).len() > field(before).len() => {
-                    field(after)[field(before).len()..].to_vec()
+                    field(after)
+                        .iter()
+                        .skip(field(before).len())
+                        .cloned()
+                        .collect()
                 }
                 _ => vec![],
             })
@@ -1704,11 +1831,11 @@ impl RuntimeRun {
             .last()
             .and_then(|f| f.data.as_ref().zip(f.after.as_ref()))
             .map(|(before, after)| {
-                after
+                before
                     .handles
-                    .keys()
-                    .filter(|q| !before.handles.contains_key(q))
-                    .copied()
+                    .changed_keys(&after.handles)
+                    .into_iter()
+                    .filter(|q| !before.handles.contains_key(q) && after.handles.contains_key(q))
                     .collect()
             })
             .unwrap_or_default()
@@ -1759,7 +1886,11 @@ impl RuntimeRun {
             }
             "free" => {
                 if let Ok(p) = m.bits(&i.operands[0])
-                    && let Some(e) = m.data.table.iter().find(|e| e.base == p)
+                    && let Some(e) = m
+                        .data
+                        .allocation_index
+                        .get(&p)
+                        .and_then(|i| m.data.table.get(i))
                 {
                     memory.push(ResourceKey::Memory(p.clone(), p.add(&e.size)));
                     memory.push(ResourceKey::Entry(p));
@@ -1806,9 +1937,8 @@ impl RuntimeRun {
             .filter_map(|key| {
                 if let ResourceKey::Memory(p, end) = key {
                     m.data
-                        .table
-                        .iter()
-                        .find(|e| e.live && e.base <= *p && *end <= e.base.add(&e.size))
+                        .allocation_at_or_before(p)
+                        .filter(|e| e.live && *end <= e.base.add(&e.size))
                         .map(|e| ResourceKey::Entry(e.base.clone()))
                 } else {
                     None
@@ -1870,7 +2000,7 @@ impl RuntimeRun {
         if n > self.machine.history.len() {
             return Err("§7.4: history index beyond current prefix".into());
         }
-        if self.machine.history[n..].iter().any(|f| f.measured) {
+        if self.machine.history.iter().skip(n).any(|f| f.measured) {
             return Err("§10: E_NOT_REVERSIBLE: measure".into());
         }
         // Reject a cut through a retired segment: its control checkpoint refers
@@ -1912,7 +2042,7 @@ impl RuntimeRun {
                             Json::obj(vec![
                                 ("activation", Json::u64(*id)),
                                 ("name", Json::Str(name.clone())),
-                                ("values", vals(values)),
+                                ("values", vals(&values.to_vec())),
                             ])
                         })
                         .collect(),
@@ -1937,7 +2067,10 @@ impl RuntimeRun {
                         .collect(),
                 ),
             ),
-            ("console_hex", Json::Str(hex(&self.machine.data.console))),
+            (
+                "console_hex",
+                Json::Str(hex(&self.machine.data.console.to_vec())),
+            ),
             ("clock", Json::u64(self.machine.data.clock)),
             (
                 "entropy_position",
@@ -1945,7 +2078,7 @@ impl RuntimeRun {
             ),
             ("history_length", Json::u64(self.history_len() as u64)),
             ("memory_digest", Json::Str(self.machine.data.digest())),
-            ("trace", Json::Arr(self.machine.trace.clone())),
+            ("trace", Json::Arr(self.machine.trace.to_vec())),
             ("tape", Json::Arr(self.tape())),
             ("host_requests", Json::Arr(self.records(|d| &d.hosts))),
         ];
@@ -1960,5 +2093,164 @@ impl RuntimeRun {
             ));
         }
         Ok(Json::obj(out))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static REGISTER_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod scaling_tests {
+    use super::*;
+
+    fn run_for(body: &str) -> RuntimeRun {
+        let source = format!(
+            "bennett-object isa=0.8 object=0.8 launch=0.8 sched=0.8 cert=0.8 coverage=0.8 target=0.8 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\nfn cc @main () () () () ()\n^entry():\n{body}\n"
+        );
+        let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
+        let resources = Resources::new(&obj).unwrap();
+        RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap()
+    }
+
+    #[test]
+    fn diagnostic_rolls_back_control_registers_trace_and_history_exactly() {
+        let mut run = run_for("n = const.i64 1\nbr malformed");
+        run.step().unwrap();
+        let snapshot = run.snapshot("RUNNING").unwrap();
+        let control = run.machine.stack.clone();
+        for _ in 0..2 {
+            assert!(run.step().unwrap_err().contains("bad branch"));
+            assert_eq!(run.snapshot("RUNNING").unwrap(), snapshot);
+            assert_eq!(run.machine.stack, control);
+        }
+        run.reverse_to(0).unwrap();
+        assert!(run.machine.env.is_empty());
+    }
+
+    #[test]
+    fn repeated_definitions_share_tails_and_reverse_all_forty_thousand_rows() {
+        let mut run = run_for("n = const.i64 1\nbr ^entry()");
+        run.machine.trace_enabled = false;
+        for end in [20000, 40000] {
+            REGISTER_READS.with(|n| n.set(0));
+            run.machine.drive(Some(end), end).unwrap();
+            let reads = REGISTER_READS.with(|n| n.get());
+            assert!(reads <= 2 * 20000, "{reads} reads in a 20k prefix");
+        }
+        assert_eq!(run.machine.env[&(0, "n".into())].len(), 20000);
+        run.reverse_to(0).unwrap();
+        assert!(run.machine.env.is_empty());
+        assert_eq!(run.machine.stack.last().unwrap().index, 0);
+    }
+
+    #[test]
+    fn zero_length_memory_access_keeps_live_predecessor_boundary() {
+        let mut run = run_for("ret");
+        for (base, size, live) in [(16, 4, true), (20, 0, false)] {
+            run.machine.data.add_allocation(Allocation {
+                base: u(base),
+                size: u(size),
+                live,
+                pinned: false,
+            });
+        }
+        assert!(run.machine.data.valid(&u(20), &u(0)));
+        assert!(!run.machine.data.valid(&u(20), &u(1)));
+    }
+
+    #[test]
+    fn allocation_index_preserves_insertion_order_and_duplicate_zero_globals() {
+        let mut run = run_for("ret");
+        for (base, size) in [(24, 0), (16, 4), (24, 0), (24, 3), (17, 0)] {
+            run.machine.data.add_allocation(Allocation {
+                base: u(base),
+                size: u(size),
+                live: true,
+                pinned: true,
+            });
+        }
+        assert_eq!(run.machine.data.table.len(), 5);
+        assert_eq!(
+            run.machine
+                .data
+                .ordered_allocations()
+                .iter()
+                .map(|a| a.base.to_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [24, 16, 24, 24, 17]
+        );
+        assert!(run.machine.data.valid(&u(26), &u(1)));
+        assert!(run.machine.data.valid(&u(18), &u(1)));
+        assert!(run.machine.data.valid(&u(24), &u(0)));
+        assert!(run.machine.data.valid(&u(20), &u(0)));
+        let before = run.machine.data.clone();
+        let after = run.machine.data.clone();
+        run.machine
+            .data
+            .undo_delta(&before, &after, &BTreeSet::new());
+        assert_eq!(
+            run.machine
+                .data
+                .ordered_allocations()
+                .iter()
+                .map(|a| a.base.to_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [16, 17, 24, 24, 24]
+        );
+    }
+
+    #[test]
+    fn uncall_trace_omits_displaced_versions_with_identical_current_values() {
+        let mut run = run_for(
+            "r = const.i64 1\nr = call @value\nuncall @value () (r)\nret\nfn cc @value () (x:i64) () () ()\n^entry():\nq = const.i64 1\nret q",
+        );
+        while !run.terminal() {
+            run.step().unwrap();
+        }
+        let registers = run.machine.trace[4].get("registers").unwrap();
+        let Json::Arr(entries) = registers else {
+            panic!("expected register array")
+        };
+        assert_eq!(entries.len(), 1, "{registers:?}");
+        assert_eq!(entries[0].get("name").unwrap().as_str(), Some("q"));
+    }
+
+    #[test]
+    #[should_panic(expected = "RFC 8785: nonfinite JSON number")]
+    fn nan_registers_keep_the_existing_per_row_trace_diagnostic() {
+        let mut run = run_for("n = const.i64 1\nret");
+        run.machine.define_at(0, "f", Value::F64(f64::NAN));
+        // The former full-map comparison sees NaN != NaN and attempts to
+        // serialize it even on an unrelated row. Preserve that diagnostic.
+        run.step().unwrap();
+    }
+
+    #[test]
+    fn straight_line_checkpoint_and_trace_work_is_bounded_per_row() {
+        let mut body = String::new();
+        for n in 0..2000 {
+            body.push_str(&format!("v{n} = const.i64 {n}\n"));
+        }
+        let source = format!(
+            "bennett-object isa=0.8 object=0.8 launch=0.8 sched=0.8 cert=0.8 coverage=0.8 target=0.8 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\nfn cc @main () (result:i64) () () ()\n^entry():\n{body}ret v1999\n"
+        );
+        let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
+        let resources = Resources::new(&obj).unwrap();
+        let mut run = RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap();
+        REGISTER_READS.with(|n| n.set(0));
+        while !run.terminal() {
+            run.step().unwrap();
+        }
+        let reads = REGISTER_READS.with(|n| n.get());
+        assert!(
+            reads <= 4 * 2001,
+            "{reads} register reads for 2001 rows: checkpoint/trace scanned retained state"
+        );
+        assert_eq!(run.values(), &[Value::int(64, u(1999))]);
+        run.reverse_to(0).unwrap();
+        assert!(run.machine.env.is_empty());
+        assert_eq!(run.machine.next_activation, 1);
     }
 }

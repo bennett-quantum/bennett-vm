@@ -66,3 +66,5 @@ mod tests {
         assert!(!super::version().is_empty());
     }
 }
+
+mod persistent;

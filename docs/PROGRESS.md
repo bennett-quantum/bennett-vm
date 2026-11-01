@@ -1,3 +1,10 @@
+# fw8 shared execution checkpoints — 2026-11-01
+Resume: fw8 CLOSED/green; resume c (mutable-region/cross-scope/general histories, lifted oracle-uncall, bound-library occurrences), followed by d, b.
+Root cause: per-row full env/value-history clones plus whole-env/memory trace scans; launch also cloned retained frames/traces. Private persistent AVL roots/indexed histories and touched-key journals make checkpoints constant-size; updates copy balanced paths. Program-only CLI omits its unobservable trace.
+RED 2,001 straight-line rows: 8,012,001 register reads; GREEN bounded reads, zero-value-clone checkpoints at 20k/40k, repeated-tail reversal, shared-subtree difference bounds, exact diagnostic rollback, allocation boundaries/order and uncall/NaN trace compatibility (10 new tests).
+Final binaries: 20k/40k seconds debug interpreter 0.244/0.477, JIT 0.411/0.782; release interpreter 0.101/0.180, JIT 0.224/0.408 (before debug 55.9/>120; release 18.0/95.3). Full release n=0/1000 interpreter 1.795/3.689 s, JIT 2.791/4.848 s; debug 3.284/7.457 s and 6.908/27.215 s. All native matches, n=1000 full reversals exact; debug fits 300 s comfortably.
+FINAL GREEN interpreter/JIT each 237/0/0, differential each 18/0; fmt/strict all-target Clippy/whitespace pass. Evidence .tmp/fw8-{red,trace-red,nan-red}.log, fw8-unit-final5.log, fw8-final6-*.log, fw8-final-measurements.json and fw8-final-binaries/sha256.txt; no dependency/spec/fixture/conformance change or push. K80 is published; c/d/b remain unclosed.
+
 # 47t-c exact call inputs and fresh cleanup spaces — 2026-11-01
 Resume: c IN PROGRESS: finish mutable-region/cross-scope/general input histories, lifted oracle-uncall integration and complete bound-library occurrence validation; then d, b, hsd, clw. a still waits on ISA 7js.
 Eight RED/GREEN cleanup_fresh09 tests cover exact nonzero/multiple pre-call targets and their predicate scopes, multirow copy/load pairs, nested literal-loop/qif inverses, fresh call indices and caller ordinals, with finite-domain clean-state replay in both source directions.

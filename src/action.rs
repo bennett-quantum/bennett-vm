@@ -31,7 +31,7 @@ pub struct QuantumState {
     exact: BTreeMap<BigUint, Exact>,
     next_wire: usize,
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
-    pub(crate) wire_classes: BTreeMap<usize, String>,
+    pub(crate) wire_classes: crate::persistent::Map<usize, String>,
     pub emitted: Vec<crate::target::Leaf>,
     events: Vec<crate::target::Event>,
     live: Vec<crate::target::LiveInterval>,
@@ -50,7 +50,7 @@ impl QuantumState {
             exact: BTreeMap::from([(BigUint::zero(), Exact::one())]),
             next_wire: 0,
             target: None,
-            wire_classes: BTreeMap::new(),
+            wire_classes: crate::persistent::Map::new(),
             emitted: vec![],
             events: vec![],
             live: vec![],
@@ -2060,7 +2060,7 @@ impl QuantumState {
         let end = self.time.add(&duration);
         // Slice each live wire at event boundaries. Borrowing replaces its
         // owner's rate in this slice; it never allocates a second physical wire.
-        for (w, class) in &self.wire_classes {
+        for (w, class) in self.wire_classes.iter() {
             self.live.push(crate::target::LiveInterval {
                 wire: *w,
                 class: class.clone(),

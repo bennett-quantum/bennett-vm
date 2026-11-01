@@ -374,21 +374,40 @@ impl DenseState {
             #[cfg(not(target_arch = "x86_64"))]
             unreachable!("dense: AVX2 detected on a non-x86_64 target");
         } else {
+            // Scalar kernel over contiguous runs (the lower half of
+            // each 2*stride block, paired with the upper half). Only
+            // valid as a run loop when no control sits below the
+            // target (then the control test is constant per run);
+            // otherwise test per pair.
+            let high_controls_only = controls.iter().all(|&cw| cw > target);
             run_ranges(pairs, threads, move |lo, hi| {
-                for p in lo..hi {
-                    let i0 = pair_index(p, stride);
-                    if i0 & cmask != cmask {
-                        continue;
+                if high_controls_only && stride > 1 {
+                    let mut p = lo;
+                    while p < hi {
+                        let cnt = (stride - (p & (stride - 1))).min(hi - p);
+                        let i0 = pair_index(p, stride);
+                        if i0 & cmask == cmask {
+                            // SAFETY: pairs in [lo,hi) are disjoint.
+                            unsafe { apply1_run(re, im, i0, stride, cnt, a, b, c, d) };
+                        }
+                        p += cnt;
                     }
-                    let i1 = i0 | stride;
-                    // SAFETY: amplitude pairs are disjoint by partition.
-                    unsafe {
-                        let (x0, x1) = (re.get(i0), im.get(i0));
-                        let (y0, y1) = (re.get(i1), im.get(i1));
-                        re.set(i0, a.re * x0 - a.im * x1 + b.re * y0 - b.im * y1);
-                        im.set(i0, a.re * x1 + a.im * x0 + b.re * y1 + b.im * y0);
-                        re.set(i1, c.re * x0 - c.im * x1 + d.re * y0 - d.im * y1);
-                        im.set(i1, c.re * x1 + c.im * x0 + d.re * y1 + d.im * y0);
+                } else {
+                    for p in lo..hi {
+                        let i0 = pair_index(p, stride);
+                        if i0 & cmask != cmask {
+                            continue;
+                        }
+                        let i1 = i0 | stride;
+                        // SAFETY: amplitude pairs are disjoint.
+                        unsafe {
+                            let (x0, x1) = (re.get(i0), im.get(i0));
+                            let (y0, y1) = (re.get(i1), im.get(i1));
+                            re.set(i0, a.re * x0 - a.im * x1 + b.re * y0 - b.im * y1);
+                            im.set(i0, a.re * x1 + a.im * x0 + b.re * y1 + b.im * y0);
+                            re.set(i1, c.re * x0 - c.im * x1 + d.re * y0 - d.im * y1);
+                            im.set(i1, c.re * x1 + c.im * x0 + d.re * y1 + d.im * y0);
+                        }
                     }
                 }
             });
@@ -944,6 +963,7 @@ impl DenseState {
             }
         }
         let free: Vec<usize> = (0..self.n).filter(|w| !wires.contains(w)).collect();
+        let contiguous = wires.iter().enumerate().all(|(i, &w)| w == i);
         let outer_count = self.len() >> k;
         let (re, im) = self.ptrs();
         run_ranges(outer_count, self.threads, move |lo, hi| {
@@ -951,9 +971,13 @@ impl DenseState {
             let mut vin = vec![Complex::ZERO; dim];
             for o in lo..hi {
                 let mut base = 0usize;
-                for (b, &w) in free.iter().enumerate() {
-                    if (o >> b) & 1 == 1 {
-                        base |= 1usize << w;
+                if contiguous {
+                    base = o << k;
+                } else {
+                    for (b, &w) in free.iter().enumerate() {
+                        if (o >> b) & 1 == 1 {
+                            base |= 1usize << w;
+                        }
                     }
                 }
                 for l in 0..dim {
@@ -965,7 +989,10 @@ impl DenseState {
                 for r in 0..dim {
                     let mut acc = Complex::ZERO;
                     for c in 0..dim {
-                        acc = acc + u[r * dim + c] * vin[c];
+                        let e = u[r * dim + c];
+                        if e != Complex::ZERO {
+                            acc = acc + e * vin[c];
+                        }
                     }
                     // SAFETY: disjoint fused blocks (above).
                     unsafe {
@@ -1024,6 +1051,48 @@ fn apply_gate_local(v: &mut [Complex], g: &Gate, pos: &impl Fn(usize) -> usize) 
                 }
             }
         }
+    }
+}
+
+/// Scalar 1-qubit gate over `cnt` consecutive pairs starting at
+/// `i0` (lower run) and `i0 + stride` (upper run). Written over
+/// slices so the optimiser sees unit-stride streams.
+///
+/// # Safety
+/// The `2 * cnt` amplitudes in the two runs must be in bounds and
+/// exclusively owned by this call.
+#[allow(clippy::too_many_arguments)]
+unsafe fn apply1_run(
+    re: Ptr,
+    im: Ptr,
+    i0: usize,
+    stride: usize,
+    cnt: usize,
+    a: Complex,
+    b: Complex,
+    c: Complex,
+    d: Complex,
+) {
+    // SAFETY: per function contract.
+    let (xr, xi, yr, yi) = unsafe {
+        (
+            std::slice::from_raw_parts_mut(re.0.add(i0), cnt),
+            std::slice::from_raw_parts_mut(im.0.add(i0), cnt),
+            std::slice::from_raw_parts_mut(re.0.add(i0 + stride), cnt),
+            std::slice::from_raw_parts_mut(im.0.add(i0 + stride), cnt),
+        )
+    };
+    for (((xr, xi), yr), yi) in xr
+        .iter_mut()
+        .zip(xi.iter_mut())
+        .zip(yr.iter_mut())
+        .zip(yi.iter_mut())
+    {
+        let (x0, x1, y0, y1) = (*xr, *xi, *yr, *yi);
+        *xr = a.re * x0 - a.im * x1 + b.re * y0 - b.im * y1;
+        *xi = a.re * x1 + a.im * x0 + b.re * y1 + b.im * y0;
+        *yr = c.re * x0 - c.im * x1 + d.re * y0 - d.im * y1;
+        *yi = c.re * x1 + c.im * x0 + d.re * y1 + d.im * y0;
     }
 }
 

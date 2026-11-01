@@ -409,6 +409,35 @@ fn fused_groups_match_sequential_and_slow_oracle() {
     assert_close(&d2, &s2, "fused oversized fallback");
 }
 #[test]
+fn fused_contiguous_low_wires_match_slow_oracle() {
+    let mut d = seeded_state(6, 31337);
+    let mut s = Slow::from_dense(&d);
+    let group: Vec<Gate> = (0..8)
+        .map(|i| Gate::One {
+            target: i % 4,
+            controls: if i % 3 == 0 {
+                vec![(i + 1) % 4]
+            } else {
+                vec![]
+            },
+            m: u(0.13 * i as f64, 0.5),
+        })
+        .collect();
+    d.apply_fused(&group);
+    for g in &group {
+        if let Gate::One {
+            target,
+            controls,
+            m,
+        } = g
+        {
+            s.apply1(*target, controls, cc(*m));
+        }
+    }
+    assert_close(&d, &s, "fused contiguous");
+}
+
+#[test]
 fn measurement_probabilities_collapse_and_reset() {
     // Bell state on 2 qubits: measuring both wires gives 00 or 11.
     for (draw, want_val, want_bits) in [(0.25f64, 0usize, "00"), (0.75, 3, "11")] {

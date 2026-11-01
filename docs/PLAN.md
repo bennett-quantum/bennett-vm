@@ -89,6 +89,18 @@ frames, never re-execution.
    Logical budgets, activation/history boundaries, object identities and
    observable label values remain reference-defined. Other hosts fail explicitly;
    native execution is opt-in via `BENNETT_VM_ENGINE=jit`.
+6. **Performance: dense state-vector engine (standalone implemented 2026-11-01,
+   bead bennett-vm-bjm; engine-selection wiring pending).** A qHiPSTER-style
+   dense simulator in `src/dense/` alongside the exact sparse engine: SoA
+   binary64 amplitudes (16 bytes/amplitude, one state vector + O(1) scratch),
+   in-place blocked pair kernels, gate fusion, diagonal/permutation fast paths,
+   XOR-oracle branch enumeration, measurement with collapse, `std::thread`
+   static partitioning and AVX2/FMA with a tested scalar fallback. Evidence is
+   always kind `numerical` with an accumulated floating-point bound, never
+   `exhaustive` (design: `docs/design/dense-engine.md`; benchmarks:
+   `examples/dense_bench.rs`, numbers recorded in the design doc). Remaining:
+   selection via `BENNETT_VM_ENGINE=dense` in the Q-action/CC paths and the
+   full action corpus differential, a later stage after rhc lands.
 
 ## ISA 0.9 watch list (draft, not accepted; build stays on 0.8)
 

@@ -82,9 +82,12 @@ has size `k ≤ 6`. It builds the group's `2^k × 2^k` unitary once
 gates to the identity, then applies it to the state in ONE pass: for
 each setting of the outside bits, gather the `2^k` amplitudes whose
 indices vary over the fused wires, multiply, scatter back. Fused
-wires are expected to be low (that is where fusion pays: the gather
-set lies in one or a few cache lines / one L1 block); correctness
-does not depend on it. If the union exceeds 6 wires the group is
+wires are expected to be low (the gather set then lies in one or a
+few cache lines / one L1 block); correctness does not depend on it.
+Measured reality on this machine: fusion currently does not beat
+sequential application (see Results); it bounds memory passes at
+one per group, which is the property the later integration relies
+on, and its speed is a filed follow-up. If the union exceeds 6 wires the group is
 applied sequentially — a documented fallback, identical result, more
 passes. Fusion is the single-node form of Häner–Steiger scheduling:
 reorder/group work so data already in cache is reused before any new
@@ -241,5 +244,59 @@ cargo run --release -j4 --example dense_bench -- --qubits 20,24,28
 ```
 
 <!-- RESULTS:BEGIN -->
-_pending_
+
+Measured 2026-11-01 on the development machine (Intel i7-1365U,
+12 hardware threads, AVX2+FMA, no AVX-512; rustc 1.99.1,
+`cargo run --release -j4 --offline --example dense_bench`). The
+machine was heavily shared throughout (~15 concurrent jobs; load
+average 20–40 during every run, printed by the harness), so absolute
+rates are depressed and multithreaded scaling is understated; treat
+ratios between rows measured in the same run as the signal. All rows
+report 16 bytes/amplitude and norm2 = 1.000000000000 after every
+batch (asserted by the harness). Full raw outputs were kept in the
+job directory (`.tmp/bjm/bench24.txt`, `bench28.txt`).
+
+Single-qubit gate, high target (`t = n-1` unless noted), gates/s:
+
+| n | naive AoS 1T | dense scalar 1T | dense AVX2 1T | dense AVX2 12T |
+|---:|---:|---:|---:|---:|
+| 20 | 136.7 | 315.0 | 438.3 | 228.0 |
+| 24 | 7.78 | 13.69 | 12.59 (t=12: 21.00) | 18.98 (t=12: 22.16) |
+| 28 | 0.34 | 0.65 | 0.62 (t=14: 0.58) | 1.10 (t=14: 1.13) |
+
+Fused group of 8 gates on qubits 0–3 (counted as 8 gates) vs the
+same gates sequentially, gates/s:
+
+| n | fused 1T | seq 1T | fused 12T | seq 12T |
+|---:|---:|---:|---:|---:|
+| 20 | 91.0 | 147.8 | 133.0 | 122.9 |
+| 24 | 4.46 | 9.29 | 11.59 | 11.78 |
+| 28 | 0.27 | 0.46 | 0.87 | 0.91 |
+
+Readings (honest, including the negative ones):
+
+- Memory is exactly 16 bytes/amplitude at every size (256 MiB at
+  n = 24, 4096 MiB at n = 28), as required.
+- AVX2 wins where the state is cache-resident or semi-resident
+  (n = 20: 1.4x over the run-scalar kernel, 3.2x over naive). At
+  n = 28 the kernel is purely bandwidth-bound under load and
+  scalar-run ≈ AVX2 single-threaded (0.65 vs 0.62); SIMD is not the
+  bottleneck there, memory is — consistent with qHiPSTER's
+  bandwidth-bound abstract claim.
+- Threading helps once a gate's work dwarfs spawn cost (n = 28:
+  1.8x; n = 24 high target: 1.5x) and hurts at n = 20 under this
+  load. With load ≈ 30 on 12 threads there were rarely free cores;
+  unloaded scaling remains unmeasured.
+- Kernel iteration driven by these benchmarks: replacing the
+  per-pair index arithmetic scalar kernel with contiguous-run slice
+  loops took n = 20 high-target scalar from 111 to 315 gates/s.
+- Fusion does NOT yet pay on this machine: the fused 16×16 matvec
+  is scalar-arithmetic-bound, while the sequential low-qubit gates
+  use the AVX2/run kernels, so fused ≤ sequential at every size
+  (closest at 12 threads). Fusion is implemented and tested
+  correct; making it fast needs a contraction-order or SIMD fused
+  kernel. Filed as follow-up bead `bennett-vm-1x1`; the design
+  claim is narrowed accordingly: fusion currently bounds memory
+  passes, it does not yet win time.
+
 <!-- RESULTS:END -->

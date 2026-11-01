@@ -4,7 +4,7 @@ use crate::sched::{Coordinate, Point};
 #[derive(Clone, Debug)]
 pub(super) struct OracleAddress {
     symbol: String,
-    rows: Vec<Point>,
+    pub(super) rows: Vec<Point>,
     name: String,
     registry: Rc<Registry>,
 }

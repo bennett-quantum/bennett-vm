@@ -1,0 +1,546 @@
+//! Source-built constructor adapter. Raw catalog descriptors never enter here.
+use super::*;
+use crate::object::{FnKind, Instr, Object, Type};
+fn s(x: impl Into<String>) -> Json {
+    Json::Str(x.into())
+}
+fn n(x: usize) -> Json {
+    Json::u64(x as u64)
+}
+fn invoke(kind: &str, args: Vec<Json>) -> Json {
+    Json::obj(vec![("invoke", s(kind)), ("args", Json::Arr(args))])
+}
+fn inv(body: Vec<Json>) -> Json {
+    Json::obj(vec![
+        ("inverse", Json::Bool(true)),
+        ("body", Json::Arr(body)),
+    ])
+}
+fn under(control: Json, body: Vec<Json>) -> Json {
+    Json::obj(vec![("under", control), ("body", Json::Arr(body))])
+}
+fn flip(w: Json) -> Json {
+    Json::obj(vec![("gate", s("x")), ("wires", Json::Arr(vec![w]))])
+}
+fn range(name: &str, from: usize, width: usize) -> Json {
+    Json::obj(vec![
+        ("range", s(name)),
+        ("from", n(from)),
+        ("to", n(from + width)),
+    ])
+}
+fn xor(width: usize, a: Json, b: Json) -> Json {
+    invoke("bind.qxor", vec![n(width), a, b])
+}
+fn literal(width: usize, value: Json, target: Json) -> Json {
+    invoke("value.literal", vec![n(width), value, target])
+}
+fn integer(value: String, env: &mut Bindings) -> Result<Json, String> {
+    let name = format!("$oracle.integer{}", env.values.len());
+    env.values
+        .insert(name.clone(), Bound::Integer(value.parse::<R>()?));
+    Ok(s(name))
+}
+fn staged(i: &Instr) -> String {
+    err(format!(
+        "unavailable.reason: source oracle row {} line {} requires the remaining bennett-vm-47t-c2 constructor adapter",
+        i.op, i.line
+    ))
+}
+impl Catalog {
+    /// Instantiate source-derived oracle rows and support. The context is K77's
+    /// explicit record, separate from declared args; this is not raw descriptor
+    /// admission or a realised schedule. Remaining row adapters fail explicitly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lower_oracle_with_cleanup(
+        &self,
+        object: &Object,
+        name: &str,
+        params: &Json,
+        oracle_invocation: &Json,
+        inherited_controls: usize,
+        entries: &[CleanupEntry],
+    ) -> Result<ActionExpansion, String> {
+        let mut env = Bindings::new();
+        env.link(object)?;
+        let registry = env.registry.clone().unwrap();
+        let object = &registry.object;
+        let f = object
+            .function(name)
+            .ok_or_else(|| err("unresolved source oracle"))?;
+        if f.kind != FnKind::Oracle {
+            return Err(err("source is not an oracle"));
+        }
+        let types = f.lists[4].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
+        let values = crate::invocation::decode_args(params, &types, object.ptr_width)?;
+        for value in values {
+            if let crate::value::Value::Token(b) = value {
+                crate::cliargs::validate_budget(object, &b)?;
+            }
+        }
+        for p in f.lists[0].iter().chain(&f.lists[1]).chain(&f.lists[2]) {
+            let Type::Wire(width) = p.ty else {
+                return Err(err("non-wire oracle interface"));
+            };
+            env.wire(&p.name, width);
+        }
+        for (p, value) in f.lists[4].iter().zip(arr(params)?) {
+            let ty = if p.ty == Type::Ptr {
+                Json::obj(vec![("ptr", n(object.ptr_width))])
+            } else {
+                s(p.ty.signature_text())
+            };
+            env.values
+                .insert(p.name.clone(), Bound::Value(value.clone(), ty));
+        }
+        env.oracle_invocation = Some(oracle_invocation.clone());
+        env.cleanup.entries = Rc::new(entries.to_vec());
+        env.wire("$controls", inherited_controls);
+        env.add_controls(wires(&s("$controls"), &env)?);
+        let body = body(object, name, &mut env)?;
+        let leaves = self.expand("adj", &[body], &env)?;
+        let cleanups = env.cleanup.carriers.borrow().clone();
+        Ok(ActionExpansion {
+            leaves,
+            cleanups,
+            cleanup_pairing_complete: !env.cleanup.incomplete.get(),
+        })
+    }
+}
+
+pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Json, String> {
+    let context = env
+        .oracle_invocation
+        .as_ref()
+        .ok_or_else(|| err("missing oracle_invocation source context"))?;
+    keys(context, &["token"])?;
+    let budget = crate::invocation::decode_budget(field(context, "token")?)?;
+    crate::cliargs::validate_budget(object, &budget)?;
+    let f = object
+        .function(name)
+        .ok_or_else(|| err("source oracle missing"))?;
+    if f.kind != FnKind::Oracle {
+        return Err(err("source is not an oracle"));
+    }
+    if !f.lists[3].is_empty()
+        || object
+            .layout
+            .as_ref()
+            .is_some_and(|l| !l.globals.is_empty())
+    {
+        return Err(err(
+            "unavailable.reason: oracle memory State/row construction remains in bennett-vm-47t-c2",
+        ));
+    }
+    if let Some(i) = f
+        .blocks
+        .iter()
+        .flat_map(|b| &b.instrs)
+        .find(|i| i.op == "lift.call")
+    {
+        return Err(staged(i));
+    }
+    env.source_formed = true;
+    env.address_oracle(object, name)?;
+    // Proof is source-derived and completed before any expansion or selection.
+    let pairs = oracle_cleanup::pairs(f)?;
+    let rows = f.blocks.iter().flat_map(|b| &b.instrs).collect::<Vec<_>>();
+    let count = rows.len();
+    let p = (usize::BITS - count.leading_zeros()) as usize;
+    let sig = crate::validate::oracle_sig(object, name)?;
+    let mut widths: BTreeMap<String, usize> =
+        crate::oracle::location_widths(f).into_iter().collect();
+    for param in &f.lists[0] {
+        let Type::Wire(width) = param.ty else {
+            return Err(err("non-wire oracle input"));
+        };
+        widths.insert(param.name.clone(), width);
+    }
+    let mut labels = BTreeMap::new();
+    let mut offset = 0;
+    for block in &f.blocks {
+        labels.insert(format!("^{}", block.name), offset);
+        offset += block.instrs.len();
+    }
+    let mut slots = vec![];
+    for i in &rows {
+        for (j, name) in i.lhs.iter().enumerate() {
+            if slots.len() <= j {
+                slots.resize(j + 1, 0);
+            }
+            slots[j] = slots[j].max(widths[name]);
+        }
+    }
+    let q = 2 * p + slots.iter().sum::<usize>() + 1;
+    let frame_slots = slots
+        .iter()
+        .scan(p, |pos, width| {
+            let result = range("$frame", *pos, *width);
+            *pos += width;
+            Some(result)
+        })
+        .collect::<Vec<_>>();
+    let succ = range("$frame", q - p, p);
+    let steps = usize::try_from(budget.steps).map_err(|_| err("host limit: oracle frames"))?;
+    let mut declarations = vec![];
+    let mut state = vec![];
+    let mut add_state = |name: String, width: usize, initial: Json| {
+        declarations.push((name.clone(), width));
+        state.push(Json::obj(vec![
+            ("width", n(width)),
+            ("initial", initial),
+            ("I", s("")),
+            ("storage", s(name)),
+        ]));
+    };
+    for (name, width) in [
+        ("$oracle.pc", p),
+        ("$oracle.next", p),
+        ("$oracle.faulted", 1),
+        ("$oracle.code", sig.fault),
+        ("$oracle.result", sig.tgt),
+    ] {
+        add_state(name.into(), width, n(0));
+    }
+    for (name, width) in crate::oracle::location_widths(f) {
+        add_state(name, width, n(0));
+    }
+    for param in &f.lists[4] {
+        if param.ty == Type::Token {
+            continue;
+        }
+        let Some(Bound::Value(value, _)) = env.values.get(&param.name).cloned() else {
+            return Err(err("unbound oracle classical argument"));
+        };
+        let (width, initial) = match param.ty {
+            Type::I(w) => (
+                w,
+                integer(crate::invocation::unsigned(&value)?.to_decimal(), env)?,
+            ),
+            Type::Ptr => (
+                object.ptr_width,
+                integer(crate::invocation::unsigned(&value)?.to_decimal(), env)?,
+            ),
+            Type::F64 => (
+                64,
+                integer(
+                    u64::from_str_radix(string(&value)?.trim_start_matches("0x"), 16)
+                        .map_err(err)?
+                        .to_string(),
+                    env,
+                )?,
+            ),
+            _ => return Err(err("invalid oracle argument")),
+        };
+        widths.insert(param.name.clone(), width);
+        let alias = format!("$oracle.value.{}", param.name);
+        widths.insert(alias.clone(), width);
+        add_state(alias, width, initial);
+    }
+    let frames = (0..steps)
+        .map(|t| {
+            let name = format!("$oracle.frame{t}");
+            add_state(name.clone(), q, n(0));
+            Json::obj(vec![("index", n(t)), ("frame", s(name))])
+        })
+        .collect();
+    let instantiated = rows
+        .iter()
+        .map(|i| {
+            let mut i = (*i).clone();
+            let wire = |name: &str| {
+                if f.lists[4]
+                    .iter()
+                    .any(|p| p.name == name && p.ty != Type::Token)
+                {
+                    format!("$oracle.value.{name}")
+                } else {
+                    name.to_string()
+                }
+            };
+            let list_index = match i.op.as_str() {
+                "lift.oracle_call" | "lift.oracle_uncall" => Some(2),
+                "lift.parmov" => Some(0),
+                _ => None,
+            };
+            if let Some(index) = list_index {
+                i.operands[index] = format!(
+                    "({})",
+                    crate::validate::list_operand(&i.operands[index])?
+                        .iter()
+                        .map(|name| wire(name))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            } else {
+                for operand in &mut i.operands {
+                    *operand = wire(operand);
+                }
+            }
+            Ok(i)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let rows = instantiated.iter().collect::<Vec<_>>();
+    let mut templates = vec![];
+    let mut successors = vec![];
+    for (k, i) in rows.iter().enumerate() {
+        let mut row = vec![];
+        let mut next = vec![literal(p, n(k + 1), s("$next"))];
+        match i.op.as_str() {
+            "lift.oracle_call" | "lift.oracle_uncall" => {
+                let emitted_call = call(object, i, env)?;
+                if let Some(&open) = pairs.get(&k) {
+                    let targets = i.operands[3..5].iter().map(s).collect();
+                    let allocations = i.operands[3..5]
+                        .iter()
+                        .map(|name| {
+                            Json::obj(vec![
+                                ("name", s(name)),
+                                ("width", n(widths[name])),
+                                ("class", s("any")),
+                            ])
+                        })
+                        .collect();
+                    let point = env
+                        .oracle_cleanup_pairs()?
+                        .into_iter()
+                        .find(|pair| {
+                            pair.cleanup_point == env.oracle_address.as_ref().unwrap().rows[k]
+                        })
+                        .ok_or_else(|| err("missing source cleanup pair"))?;
+                    let computing = vec![call(object, rows[open], env)?];
+                    let pair = Json::obj(vec![
+                        ("point", s(point.computing_point.point)),
+                        ("perm", Json::Bool(true)),
+                        ("target", s("")),
+                        ("targets", Json::Arr(targets)),
+                        ("allocations", Json::Arr(allocations)),
+                        (
+                            "initialising",
+                            Json::Arr(
+                                i.operands[3..5]
+                                    .iter()
+                                    .map(|name| Json::obj(vec![("acquire", s(name))]))
+                                    .collect(),
+                            ),
+                        ),
+                        (
+                            "uninitialising",
+                            Json::Arr(
+                                i.operands[3..5]
+                                    .iter()
+                                    .rev()
+                                    .map(|name| Json::obj(vec![("relinquish", s(name))]))
+                                    .collect(),
+                            ),
+                        ),
+                        ("computing", Json::Arr(computing.clone())),
+                        ("uncomputing", Json::Arr(vec![inv(computing)])),
+                    ]);
+                    row.push(Json::obj(vec![
+                        ("$cleanup", pair),
+                        ("body", Json::Arr(vec![emitted_call])),
+                    ]));
+                } else {
+                    row.push(emitted_call);
+                }
+            }
+            "lift.retval" => {
+                row.push(xor(sig.tgt, s(&i.operands[0]), s("$oracle.result")));
+                next = vec![literal(p, n(count), s("$next"))];
+            }
+            "qjump" => next = vec![literal(p, n(labels[&i.operands[0]]), s("$next"))],
+            "qbranch" => {
+                let control = s(&i.operands[0]);
+                row = vec![
+                    under(
+                        control.clone(),
+                        vec![literal(p, n(labels[&i.operands[1]]), succ.clone())],
+                    ),
+                    flip(control.clone()),
+                    under(
+                        control.clone(),
+                        vec![literal(p, n(labels[&i.operands[2]]), succ.clone())],
+                    ),
+                    flip(control),
+                ];
+                next = vec![xor(p, succ.clone(), s("$next"))];
+            }
+            _ if !i.lhs.is_empty() => {
+                let operands = &i.operands;
+                let base = i.op.strip_prefix("lift.").ok_or_else(|| staged(i))?;
+                let op = base.split('.').next().unwrap();
+                let width = widths[&i.lhs[0]];
+                let slot = range("$frame", p, width);
+                let args = match op {
+                    "const" => vec![
+                        n(width),
+                        integer(
+                            crate::oracle::parse_const(&operands[0], width)?.to_decimal(),
+                            env,
+                        )?,
+                        slot,
+                    ],
+                    "label" => vec![n(width), n(labels[&operands[0]]), slot],
+                    "mov" => vec![n(width), s(&operands[0]), slot],
+                    "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr" => {
+                        vec![n(width), s(&operands[0]), s(&operands[1]), slot]
+                    }
+                    "icmp" => vec![
+                        n(widths[&operands[0]]),
+                        s(&operands[0]),
+                        s(&operands[1]),
+                        slot,
+                    ],
+                    "zext" | "sext" | "trunc" => vec![],
+                    "select" => vec![
+                        n(width),
+                        s(&operands[1]),
+                        s(&operands[2]),
+                        s(&operands[0]),
+                        slot,
+                    ],
+                    "parmov" => vec![],
+                    _ => return Err(staged(i)),
+                };
+                if matches!(op, "zext" | "sext" | "trunc") {
+                    let input_width = widths[&operands[0]];
+                    for bit in 0..width.min(input_width) {
+                        row.push(xor(
+                            1,
+                            range(&operands[0], bit, 1),
+                            range("$frame", p + bit, 1),
+                        ));
+                    }
+                    if op == "sext" {
+                        for bit in input_width..width {
+                            row.push(xor(
+                                1,
+                                range(&operands[0], input_width - 1, 1),
+                                range("$frame", p + bit, 1),
+                            ));
+                        }
+                    }
+                } else if op == "parmov" {
+                    for ((name, input), slot) in i
+                        .lhs
+                        .iter()
+                        .zip(crate::validate::list_operand(&operands[0])?)
+                        .zip(&frame_slots)
+                    {
+                        let from = field(slot, "from")?.as_usize().unwrap();
+                        row.push(xor(
+                            widths[name],
+                            s(input),
+                            range("$frame", from, widths[name]),
+                        ));
+                    }
+                } else {
+                    let recipe = match op {
+                        "const" | "label" => "value.literal".to_string(),
+                        "mov" => "bind.qxor".into(),
+                        "icmp" => format!("bind.value.{base}"),
+                        _ => format!("bind.value.{op}"),
+                    };
+                    row.push(invoke(&recipe, args));
+                }
+                for (name, slot) in i.lhs.iter().zip(&frame_slots) {
+                    // A shared slot may be wider than this row's destination.
+                    let slot = field(slot, "from")?.as_usize().unwrap();
+                    row.push(invoke(
+                        "bind.qexch",
+                        vec![
+                            n(widths[name]),
+                            range("$frame", slot, widths[name]),
+                            s(name),
+                        ],
+                    ));
+                }
+            }
+            _ => return Err(staged(i)),
+        }
+        let parameters = vec![Json::obj(vec![
+            ("name", s("$frame")),
+            ("type", s("wire")),
+            ("width", n(q)),
+        ])];
+        templates.push(Json::obj(vec![
+            ("parameters", Json::Arr(parameters.clone())),
+            ("body", Json::Arr(row)),
+        ]));
+        let mut parameters = parameters;
+        parameters.push(Json::obj(vec![
+            ("name", s("$next")),
+            ("type", s("wire")),
+            ("width", n(p)),
+        ]));
+        successors.push(Json::obj(vec![
+            ("parameters", Json::Arr(parameters)),
+            ("body", Json::Arr(next)),
+        ]));
+    }
+    let mut result = Json::Arr(vec![invoke(
+        "oracle.construct",
+        vec![
+            n(p),
+            n(count),
+            n(q),
+            n(steps),
+            n(sig.fault),
+            n(sig.tgt),
+            s("$oracle.pc"),
+            s("$oracle.next"),
+            s("$oracle.faulted"),
+            s("$oracle.code"),
+            s("$oracle.result"),
+            s(&f.lists[1][0].name),
+            s(&f.lists[2][0].name),
+            Json::Arr(state),
+            Json::Arr(frames),
+            Json::Arr(templates),
+            Json::Arr(successors),
+        ],
+    )]);
+    result = Json::Arr(vec![Json::obj(vec![
+        (
+            "$oracle_storage",
+            Json::Arr(
+                declarations
+                    .into_iter()
+                    .map(|(name, width)| Json::obj(vec![("name", s(name)), ("width", n(width))]))
+                    .collect(),
+            ),
+        ),
+        ("body", result),
+    ])]);
+    Ok(result)
+}
+fn call(object: &Object, i: &Instr, env: &Bindings) -> Result<Json, String> {
+    let name = i.operands[0].trim_start_matches('@');
+    let hash = env.registry.as_ref().unwrap().identities.closure[name]
+        .as_ref()
+        .ok_or_else(|| err("unresolved nested oracle"))?;
+    let mut actuals = crate::validate::list_operand(&i.operands[2])?
+        .into_iter()
+        .map(s)
+        .collect::<Vec<_>>();
+    actuals.extend(i.operands[3..5].iter().map(s));
+    actuals.extend(
+        crate::validate::list_operand(&i.operands[5])?
+            .into_iter()
+            .map(s),
+    );
+    actuals.extend(
+        crate::validate::list_operand(&i.operands[6])?
+            .into_iter()
+            .map(s),
+    );
+    let _ = crate::validate::oracle_sig(object, name)?;
+    Ok(Json::obj(vec![
+        ("$oracle_invocation", s(&i.operands[1])),
+        (
+            "body",
+            Json::Arr(vec![invoke(&i.op, vec![s(hash), Json::Arr(actuals)])]),
+        ),
+    ]))
+}

@@ -3,6 +3,7 @@
 mod address;
 mod cleanup;
 mod oracle_cleanup;
+mod oracle_source;
 pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
 pub use oracle_cleanup::OracleCleanupPair;
 mod source;
@@ -95,6 +96,7 @@ pub struct Bindings {
     source_history: Option<Rc<source::Source>>,
     replaying_cleanup: bool,
     oracle_address: Option<Rc<address::OracleAddress>>,
+    oracle_invocation: Option<Json>,
     row_spaces: Vec<address::RowSpace>,
     coordinate: crate::sched::Coordinate,
     cleanup: cleanup::CleanupContext,
@@ -322,6 +324,39 @@ impl Catalog {
                 local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
                 local.call_index = Rc::new(Cell::new(0));
                 local.source_next = Rc::new(Cell::new(0));
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if let Some(storage) = c.get("$oracle_storage") {
+                let mut local = env.clone();
+                for entry in arr(storage)? {
+                    let name = string(field(entry, "name")?)?;
+                    let width = field(entry, "width")?
+                        .as_usize()
+                        .ok_or_else(|| err("invalid source storage width"))?;
+                    let id = env.declarations.get();
+                    env.declarations.set(id + 1);
+                    local.values.insert(
+                        name.into(),
+                        Bound::Allocation(Rc::new(RefCell::new(Allocation {
+                            identity: format!("$decl{id}.{name}"),
+                            width,
+                            wires: (0..width)
+                                .map(|i| format!("$decl{id}.{name}[{i}]"))
+                                .collect(),
+                            class: "any".into(),
+                            state: "clean".into(),
+                        }))),
+                    );
+                }
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if let Some(token) = c.get("$oracle_invocation") {
+                let Some(Bound::Value(value, ty)) = env.values.get(string(token)?) else {
+                    return Err(err("unbound oracle_invocation source token"));
+                };
+                if ty.as_str() != Some("token") {
+                    return Err(err("ill-typed oracle_invocation source token"));
+                }
+                let mut local = env.clone();
+                local.oracle_invocation = Some(Json::obj(vec![("token", value.clone())]));
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
             } else if c.get("$cleanup_pending").is_some() {
                 self.walk_pending_cleanup(c, env, out, next, active)?;
@@ -707,6 +742,7 @@ impl Catalog {
                     bind_formals(&formals, arr(args)?, env, &Bindings::new())?
                 };
                 callee.registry = Some(registry.clone());
+                callee.oracle_invocation = env.oracle_invocation.clone();
                 callee.coordinate = env.coordinate.clone();
                 callee.cleanup = env.cleanup.clone();
                 if let Some(caller) = &env.source_point {
@@ -876,10 +912,12 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
         } else {
             let resolve = |wire: &String| -> Result<String, String> {
                 if wire.starts_with("$decl") {
-                    wires
-                        .get(wire)
-                        .cloned()
-                        .ok_or_else(|| err("inactive allocation wire use"))
+                    wires.get(wire).cloned().ok_or_else(|| {
+                        err(format!(
+                            "inactive allocation wire use: {wire} at leaf {index} {}",
+                            leaf.operation
+                        ))
+                    })
                 } else {
                     Ok(wire.clone())
                 }
@@ -1463,6 +1501,24 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
             ("acquire", &["acquire"]),
             ("relinquish", &["relinquish"]),
         ];
+        if source_formed && c.get("$oracle_storage").is_some() {
+            keys(c, &["$oracle_storage", "body"])?;
+            for entry in arr(field(c, "$oracle_storage")?)? {
+                keys(entry, &["name", "width"])?;
+                string(field(entry, "name")?)?;
+                field(entry, "width")?
+                    .as_usize()
+                    .ok_or_else(|| err("invalid source storage width"))?;
+            }
+            syntax_inner(field(c, "body")?, source_formed)?;
+            continue;
+        }
+        if source_formed && c.get("$oracle_invocation").is_some() {
+            keys(c, &["$oracle_invocation", "body"])?;
+            string(field(c, "$oracle_invocation")?)?;
+            syntax_inner(field(c, "body")?, source_formed)?;
+            continue;
+        }
         if source_formed && c.get("$source").is_some() {
             keys(c, &["$source", "body"])?;
             syntax_inner(field(c, "body")?, true)?;

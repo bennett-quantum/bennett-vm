@@ -3,6 +3,8 @@ use super::*;
 use crate::object::{FnKind, Instr, Object, Type};
 #[path = "oracle_memory.rs"]
 mod memory;
+#[path = "oracle_procedures.rs"]
+mod procedures;
 fn s(x: impl Into<String>) -> Json {
     Json::Str(x.into())
 }
@@ -146,36 +148,24 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
     if f.kind != FnKind::Oracle {
         return Err(err("source is not an oracle"));
     }
-    if let Some(i) = f
-        .blocks
-        .iter()
-        .flat_map(|b| &b.instrs)
-        .find(|i| i.op == "lift.call")
-    {
-        return Err(staged(i));
-    }
     env.source_formed = true;
     env.address_oracle(object, name)?;
     // Proof is source-derived and completed before any expansion or selection.
-    let pairs = oracle_cleanup::pairs(f)?;
-    let rows = f.blocks.iter().flat_map(|b| &b.instrs).collect::<Vec<_>>();
+    let program = procedures::Program::new(object, name)?;
+    let pairs = &program.pairs;
+    let rows = program.rows.iter().collect::<Vec<_>>();
     let count = rows.len();
     let p = (usize::BITS - count.leading_zeros()) as usize;
     let sig = crate::validate::oracle_sig(object, name)?;
-    let mut widths: BTreeMap<String, usize> =
-        crate::oracle::location_widths(f).into_iter().collect();
+    let mut widths = program.widths.clone();
     for param in &f.lists[0] {
         let Type::Wire(width) = param.ty else {
             return Err(err("non-wire oracle input"));
         };
         widths.insert(param.name.clone(), width);
     }
-    let mut labels = BTreeMap::new();
-    let mut offset = 0;
-    for block in &f.blocks {
-        labels.insert(format!("^{}", block.name), offset);
-        offset += block.instrs.len();
-    }
+    let labels = &program.labels;
+    let stack = procedures::Stack::new(object, &program, p, &budget, env)?;
     let mut slots = vec![];
     for i in &rows {
         for (j, name) in i.lhs.iter().enumerate() {
@@ -186,6 +176,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         }
     }
     memory::slots(object, &rows, &mut slots)?;
+    stack.slots(&program, &mut slots)?;
     let q = 2 * p + slots.iter().sum::<usize>() + 1;
     let frame_slots = slots
         .iter()
@@ -217,9 +208,10 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
     ] {
         add_state(name.into(), width, n(0));
     }
-    for (name, width) in crate::oracle::location_widths(f) {
-        add_state(name, width, n(0));
+    for (name, width) in &program.locations {
+        add_state(name.clone(), *width, n(0));
     }
+    stack.state(&mut add_state)?;
     let mut constants = vec![];
     for param in &f.lists[4] {
         if param.ty == Type::Token {
@@ -284,13 +276,20 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         "$oracle.result".into(),
     ];
     if memory.is_some() {
-        order.extend(["$oracle.used", "$oracle.atop", "$oracle.memory"].map(str::to_string));
+        order.extend(
+            [
+                "$oracle.used",
+                "$oracle.atop",
+                "$oracle.sp",
+                "$oracle.fp",
+                "$oracle.depth",
+                "$oracle.memory",
+                "$oracle.stack",
+            ]
+            .map(str::to_string),
+        );
     }
-    order.extend(
-        crate::oracle::location_widths(f)
-            .into_iter()
-            .map(|(name, _)| name),
-    );
+    order.extend(program.locations.iter().map(|(name, _)| name.clone()));
     if memory.is_some() {
         order.push("$oracle.table".into());
     }
@@ -318,6 +317,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
             let list_index = match i.op.as_str() {
                 "lift.oracle_call" | "lift.oracle_uncall" => Some(2),
                 "lift.parmov" => Some(0),
+                "lift.call" => Some(1),
                 _ => None,
             };
             if let Some(index) = list_index {
@@ -344,6 +344,32 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         let mut row = vec![];
         let mut next = vec![literal(p, n(k + 1), s("$next"))];
         let flag = range("$frame", q - p - 1, 1);
+        if let Some((effect, success)) = stack.row(
+            &program,
+            i,
+            k,
+            p,
+            sig.fault,
+            &frame_slots,
+            &slots,
+            &widths,
+            flag.clone(),
+            succ.clone(),
+        )? {
+            templates.push(template(q, effect));
+            let next = if i.op == "lift.ret" {
+                vec![
+                    under(flag.clone(), vec![literal(p, n(count), s("$next"))]),
+                    flip(flag.clone()),
+                    under(flag.clone(), vec![xor(p, succ.clone(), s("$next"))]),
+                    flip(flag),
+                ]
+            } else {
+                fault_next(p, count, success, flag)
+            };
+            successors.push(next_template(q, p, next));
+            continue;
+        }
         if let Some(memory) = &memory
             && let Some(effect) =
                 memory.row(i, &widths, &frame_slots, flag.clone(), sig.fault, env)?

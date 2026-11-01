@@ -603,3 +603,122 @@ fn mapped_memory_lifted_cleanup_preserves_interface_cells_for_both_choices() {
         }
     }
 }
+
+fn stack_layout(text: &str) -> String {
+    let layout=json::parse(r#"{"ptr_width":2,"H":2,"A_tab":0,"S_cells":4,"null_size":1,"heap_base":2,"heap_limit_max":0,"globals":{},"interface_regions":{}}"#).unwrap();
+    support::sign(&format!(
+        "{}\nsection layout\n{}\n",
+        text.replace("ptr_width=32", "ptr_width=2"),
+        layout.to_jcs()
+    ))
+}
+#[test]
+fn fixed_lproc_instances_capture_arguments_and_restore_call_return_counters() {
+    let text = stack_layout(&support::source(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:i1, b:i1)\nregs { r:reg[1], s:reg[1] }\n^entry():\nr = lift.call @work (x) () (a) ()\ns = lift.call @work (r) () (b) ()\nlift.retval s\nlproc @work (x:reg[1]) (r:reg[1]) () (a:i1) ()\n^entry():\nr = lift.xor x a\nlift.ret r",
+    ));
+    for steps in [1, 3, 7] {
+        assert_map(&text, r#"["1","0"]"#, [steps, 0, 16, 2], &[("x", 1)], 2);
+    }
+    for (stack, depth) in [(0, 2), (16, 0)] {
+        assert_map(&text, r#"["1","0"]"#, [8, 0, stack, depth], &[("x", 1)], 2);
+    }
+}
+#[test]
+fn recursive_lproc_capture_and_return_restore_self_aliases_and_budget_faults() {
+    let text = stack_layout(&support::source(
+        "oracle @root (x:wire[2] in) (t:wire[2]) (f:wire[4]) () ()\nregs { r:reg[2] }\n^entry():\nr = lift.call @walk (x)\nlift.retval r\nlproc @walk (x:reg[2]) (r:reg[2]) () () ()\nregs { zero:reg[2], one:reg[2], p:reg[1] }\n^entry():\np = lift.icmp.eq x zero\nqbranch p ^done ^again\n^again():\none = lift.const.i2 1\nx = lift.sub x one\nr = lift.call @walk (x)\nlift.ret r\n^done():\nlift.ret x",
+    ));
+    for steps in [1, 9, 14] {
+        assert_map(&text, "[]", [steps, 0, 16, 2], &[("x", 2)], 4);
+    }
+}
+
+#[test]
+fn lproc_lifted_uncall_carriers_keep_fixed_instance_keys_for_both_choices() {
+    let text = stack_layout(&support::source(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, a:i1, b:i1)\nregs { r:reg[1], s:reg[1] }\n^entry():\nr = lift.call @work (x) (tk) (a) ()\ns = lift.call @work (r) (tk) (b) ()\nlift.retval s\nlproc @work (x:reg[1]) (r:reg[1]) (tk:token) (a:i1) ()\nregs { fr:reg[4] }\n^entry():\nlift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nr = lift.xor x a\nlift.ret r\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x",
+    ));
+    let (obj, ids) = bennett_vm::load(&text, false).unwrap();
+    let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","instance":[0,1],"iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["work"])).unwrap();
+    for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+        let e = Catalog::published()
+            .unwrap()
+            .lower_oracle_with_cleanup(
+                &obj,
+                "root",
+                &json::parse(r#"[["1","0","0","0"],"1","0"]"#).unwrap(),
+                &json::parse(r#"{"token":["11","0","16","2"]}"#).unwrap(),
+                0,
+                &[CleanupEntry {
+                    selector: Selector::parse(&selector).unwrap(),
+                    realisation: choice,
+                }],
+            )
+            .unwrap();
+        assert!(e.cleanup_pairing_complete);
+        for key in [vec![0, 1], vec![0, 2]] {
+            let carriers = e
+                .cleanups
+                .iter()
+                .filter(|c| c.address.path[0].instance == key)
+                .collect::<Vec<_>>();
+            assert_eq!(carriers.len(), 22);
+            for c in carriers {
+                assert_eq!(
+                    c.realisation,
+                    if key == vec![0, 1] {
+                        choice
+                    } else {
+                        CleanupRealisation::Reverse
+                    }
+                );
+            }
+        }
+        for x in [false, true] {
+            let state = std::collections::BTreeMap::from([
+                ("x[0]".into(), x),
+                ("t[0]".into(), false),
+                ("f[0]".into(), false),
+                ("f[1]".into(), false),
+                ("f[2]".into(), false),
+                ("f[3]".into(), false),
+            ]);
+            let mut expected = state.clone();
+            expected.insert("t[0]".into(), !x);
+            assert_eq!(replay(&e.leaves, state), expected);
+        }
+    }
+}
+
+#[test]
+fn source_global_image_and_pinned_entry_survive_store_load_and_fault_reversal() {
+    for rows in [
+        "p = lift.addr @seed\nlift.store.i8 p x\nr = lift.load.i8 p\nlift.retval r",
+        "p = lift.addr @seed\nr = lift.load.i8 p\nlift.free p\nlift.retval r",
+    ] {
+        let raw = support::source(&format!(
+            "oracle @root (x:wire[8] in) (t:wire[8]) (f:wire[4]) () ()\nregs {{ p:reg[2], r:reg[8] }}\n^entry():\n{rows}"
+        ));
+        let mut lines = raw
+            .replace("ptr_width=32", "ptr_width=2")
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let symbol_line = lines.iter().position(|l| l == "section symbols").unwrap() + 1;
+        let json::Json::Obj(ref mut symbols) = json::parse(&lines[symbol_line]).unwrap() else {
+            panic!()
+        };
+        symbols.insert("1".into(),json::parse(r#"{"name":"seed","kind":"data","signature":{"abi":"0.9","kind":"data","size":1,"tier":"-"},"interface_hash":"0000000000000000000000000000000000000000000000000000000000000000"}"#).unwrap());
+        lines[symbol_line] = json::Json::Obj(symbols.clone()).to_jcs();
+        let layout=json::parse(r#"{"ptr_width":2,"H":2,"A_tab":1,"S_cells":3,"null_size":1,"heap_base":2,"heap_limit_max":1,"globals":{"seed":{"base":1,"size":1,"image":"seed"}},"interface_regions":{}}"#).unwrap();
+        let text = support::sign(&format!(
+            "{}\n\nsection data\nseed 81\n\nsection layout\n{}\n",
+            lines.join("\n"),
+            layout.to_jcs()
+        ));
+        for steps in [2, 3, 4] {
+            assert_map(&text, "[]", [steps, 1, 0, 0], &[("x", 8)], 4);
+        }
+    }
+}

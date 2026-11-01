@@ -546,10 +546,15 @@ pub fn parse(text: &str) -> Result<Object, String> {
             "devices" => obj.devices = Some(parse_json_section(name, body)?),
             "layout" => obj.layout = Some(parse_layout(body)?),
             "schedule" => {
-                metadata_keys(
+                metadata_fields(
                     name,
                     &parse_json_section(name, body)?,
                     &["bindings", "entries"],
+                    if obj.isa == "0.9" {
+                        &["interface_vertices"]
+                    } else {
+                        &[]
+                    },
                 )?;
                 obj.has_schedule = true;
             }
@@ -1187,11 +1192,19 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
 // §9.1: metadata is not an extension bag. Semantic schedule/certificate
 // consumers remain staged, but their top-level envelope is checked now.
 fn metadata_keys(name: &str, value: &Json, fields: &[&str]) -> Result<(), String> {
+    metadata_fields(name, value, fields, &[])
+}
+fn metadata_fields(
+    name: &str,
+    value: &Json,
+    fields: &[&str],
+    optional: &[&str],
+) -> Result<(), String> {
     let object = value
         .as_obj()
         .ok_or_else(|| format!("§9.1: {name} must be an object"))?;
     for field in object.keys() {
-        if !fields.contains(&field.as_str()) {
+        if !fields.contains(&field.as_str()) && !optional.contains(&field.as_str()) {
             return Err(format!("§9.1: unknown {name} field {field:?}"));
         }
     }

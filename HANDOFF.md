@@ -1,5 +1,5 @@
-State 2026-11-01 09:19:16 UTC: fat CLOSED; ISA 0.9 remains a partial consumer.
-Resume: split 47t into a admission/link, b catalog (BLOCKED ISA 5xm), c K49–K65 addresses, d schedule admission/realisation/execution. Work a, c, d in order, each with its own gate/commit; then hsd and clw. Never push.
+State 2026-11-01 09:39:02 UTC: admission step green; 47t-a still IN PROGRESS, task NOT complete.
+Resume: finish public frame-certificate guard audit under fat, then complete 47t-a before c, d, hsd, clw. Catalog b remains blocked; never push.
 
 fat implements normative K76 constants plus causal exact adjoint pops on every operand, including readers; connected histories are invalidated at lifetime boundaries and unresolved actions. Frame domains retain only admitted allocated-local constants. Interfaces, borrowed wires and unknown locals range independently. Exact reasoning inside the frame is separate from entry facts. Bounded loop visits and separate overlapping borrowed lifetimes are checked; local action bodies resolve aliases and inherited controls.
 
@@ -7,6 +7,16 @@ Four r9 objects now admit. Final sequential interpreter/JIT gates each 156 PASS 
 
 Published pin: spec/Bennett-ISA-Spec-0.9.md at 9df1541; accepted-0.8 erratum 6182d7c. Ref envelope unchanged, 219 recipes. ISA clarification b-isa-spec-9eq asks whether exact gate identity retains opcode spelling or resolves X-family arities; public reference accepts CX and one-control MCX pairing, and this implementation uses resolved X-family identity. The provisional opcode-specific draft test was corrected before commit to that public behavior; the required polynomial-prefix negative remains unchanged. ISA issues-only commit d5119e6. No foreign implementation source read or copied; only reference tests and public CLI used. Concurrent ISA working-tree changes were untouched.
 
-47t remains the umbrella. General 0.9 source/type/link admission is not complete; complete source-checked oracle descriptors are blocked by b-isa-spec-5xm invocation-token binding. K49–K65 contexts and full schedule admission/realisation/execution/matrices remain. Admitted CC/R syntax still needs dynamic-qreg/budget.mint/typed-fault/full-qinplace runtime integration. No complete 0.9 executor is claimed. hsd: launch 0.9 estimate ABI, owned resolved request/token validity, padded/default realisation, bound estimate certificate/reconstruction. clw: object/launch certificate dispatch, controlled/scheduled/structural/inverse replay, K74 reports and K75 host-limit outcomes.
+47t is now split into parent-child beads (all still open):
+- bennett-vm-47t-a IN PROGRESS: general 0.9 source/type admission and link integration. This step adds checked coherent calls/qinplace, exact token/classical types, memory shapes/roles and control/alias checking; f64/canonical rotation angles; controlled-adjoint grammar and cycle edges; optional interface_vertices envelope; link::admit verifies externally resolved canonical source provenance, metadata/data merges, all five import groups, pinned closures and duplicates, then repeats full fixed-instance/row-space checks. It does not automatically resolve/assemble input objects or compose certificates. Complete source-wide audit and actual resolution/assembly/integration remain; do not close a on this helper alone.
+- bennett-vm-47t-b BLOCKED: complete source-checked catalog descriptors for every oracle row/activation/step/construction; external dependency b-isa-spec-5xm invocation-token binding. Do not work b or invent a token channel.
+- bennett-vm-47t-c OPEN, depends on a: K49–K65 complete source invocation/iteration/instance/call-index addresses, reserved support points and non-emitting cleanup carriers.
+- bennett-vm-47t-d OPEN, depends on c and b: complete schedule admission/K55 staging, target realisation/execution, realised matrices and certificate contexts; includes remaining admitted CC/R dynamic-qreg/budget.mint/typed-fault/full-qinplace runtime mechanics.
+Parent 47t remains open. No child closed. c/d/hsd/clw have not been worked out of order.
+
+Current sequential gates after the admission step: interpreter/JIT each 169 PASS / 0 FAIL / 0 ignored, differential each 18/0. Before step each 156/0. Thirteen new tests (8 coherent, 4 linked admission, 1 placement envelope). All ten published 0.9 stored hashes verify; previous 8,192 fixed-instance complete-state witnesses remain. fmt/strict Clippy/whitespace green. Logs .tmp/47t-a-final-{interpreter,jit}.log and totals JSON; red logs .tmp/47t-a-{coherent,link,wrappers,placement}-red.log.
+
+hsd remains unchanged: launch 0.9 estimate ABI, owned resolved request/token validity, padded/default realisation, bound estimate certificate/reconstruction. clw remains unchanged: object/launch certificate dispatch, controlled/scheduled/structural/inverse replay, K74 reports and K75 host-limit outcomes.
+
 
 SPEC_VERSIONS.toml remains ISA/object/launch/sched/cert/coverage/target 0.8 with independent partial 0.9 capability pin. No dependencies, pushes, Dolt sync or sibling spec text changed. Prior backup origin/wip/m5-2026-10-31 retained. Implementation sub-agent: orchestrator owns session worklog.

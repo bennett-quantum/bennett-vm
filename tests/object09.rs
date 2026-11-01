@@ -416,3 +416,14 @@ fn separate_instance_locations_and_canonical_call_ranges() {
     }
     assert_eq!(m.state, initial);
 }
+
+#[test]
+fn schedule_envelope_accepts_optional_interface_placements() {
+    let prefix = "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n{}\n\nsection schedule\n";
+    let text = format!(
+        "{prefix}{{\"bindings\":{{}},\"entries\":[],\"interface_vertices\":[[0],[1,2]]}}\n"
+    );
+    object::parse(&text).unwrap();
+    assert!(object::parse(&text.replace("interface_vertices", "unknown_vertices")).is_err());
+    assert!(object::parse(&text.replace("\"entries\":[],", "")).is_err());
+}

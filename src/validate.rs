@@ -29,6 +29,9 @@ pub fn validate(obj: &Object) -> Result<(), String> {
     for f in &obj.functions {
         validate_function(obj, f)?;
         crate::typing::classical(obj, f)?;
+        if obj.isa == "0.9" {
+            crate::coherent_typing::function(obj, f)?;
+        }
         if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
             crate::lifted_typing::function(obj, f)?;
         } else {
@@ -1294,7 +1297,13 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
     let op = ins.op.as_str();
     // Adj/ctl wrap one region call.
     if op == "adj" || op == "ctl" {
-        let (call_idx, _) = if op == "adj" { (0, 0) } else { (1, 0) };
+        let call_idx = if op == "adj" {
+            0
+        } else if ins.operands.get(1).is_some_and(|s| s == "adj") {
+            2
+        } else {
+            1
+        };
         let inner = ins
             .operands
             .get(call_idx)
@@ -2102,20 +2111,14 @@ fn validate_action_acyclic(obj: &Object) -> Result<(), String> {
         let mut flat = Vec::new();
         f.flat_instrs(&mut flat);
         for ins in flat {
-            let callee_tok: Option<&String> = match ins.op.as_str() {
-                "action_call" => ins.operands.first(),
-                "adj" => ins.operands.get(1),
-                "ctl" => ins.operands.get(2),
-                _ => None,
-            };
-            if let Some(tok) = callee_tok
-                && let Some(name) = at_name(tok)
-                && matches!(
-                    kind_of(obj, name).as_deref(),
-                    Some("action") | Some("perm_action")
-                )
-            {
-                edges.push(name.to_string());
+            if matches!(
+                ins.op.as_str(),
+                "action_call" | "oracle_call" | "adj" | "ctl"
+            ) {
+                let (_, _, op, operands) = crate::action::normalize_call(ins)?;
+                if op == "action_call" {
+                    edges.push(operands[0].trim_start_matches('@').to_string());
+                }
             }
         }
         graph.insert(f.name.clone(), edges);

@@ -1,3 +1,10 @@
+# 47t split and checked coherent operands / linked admission — 2026-11-01
+Resume: 47t-a IN PROGRESS; finish automatic source resolution/integration and source-wide audit, then c, d, hsd, clw. No child closed.
+Children: 47t-a admission/link; 47t-b catalog BLOCKED on ISA 5xm (not worked); 47t-c K49–K65 addressing; 47t-d schedules/realisation/execution. 47t remains the parent.
+Adds exact coherent-call/qinplace operands and region roles, f64/canonical angles, controlled-adjoint cycle checks, optional interface placements and source-preserving link::admit with signature/pin/metadata/post-link instance checks.
+Sequential interpreter/JIT each 169 PASS / 0 FAIL / 0 ignored; differential each 18/0. 13 new regressions; fmt/strict Clippy green. Logs .tmp/47t-a-final-{interpreter,jit}.log.
+link::admit consumes externally resolved source; automatic resolution/assembly and certificate composition are not claimed. hsd/clw unchanged; no push, dependencies or foreign implementation reads.
+
 # K76 frame-entry domain — 2026-11-01
 Resume: fat CLOSED/green; split 47t and work a, c, d before hsd/clw; catalog b blocked on ISA 5xm.
 Implements normative constants + all-operand causal adjoint pops; D_F retains only admitted allocated-local constants and frees every interface/borrowed/unknown component independently.

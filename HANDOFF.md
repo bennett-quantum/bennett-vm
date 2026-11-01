@@ -1,71 +1,12 @@
-State 2026-11-01 08:55:44 UTC: partial ISA 0.9 consumer; task NOT complete; no bead closed.
-Resume bennett-vm-47t before hsd, then clw. fat / qvalidate.rs remains frozen.
-Top-level SPEC_VERSIONS.toml remains 0.8 with isa_0_9 partial-consumer status;
-admission of 0.9 objects does not claim complete 0.9 launch/schedule execution.
-Published source pin: spec/Bennett-ISA-Spec-0.9.md at
-b77cbed2989d94b164d734563743c1a4191a4820 (pin-only commit e834e9b).
-Authenticated ref@0.9: 219 recipes, envelope
-5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197.
+State 2026-11-01 09:19:16 UTC: fat CLOSED; ISA 0.9 remains a partial consumer.
+Resume: split 47t into a admission/link, b catalog (BLOCKED ISA 5xm), c K49–K65 addresses, d schedule admission/realisation/execution. Work a, c, d in order, each with its own gate/commit; then hsd and clw. Never push.
 
-47t implemented: typed catalog values/records/regions/classes/allocation arguments,
-events/images, templates, closure-bound arguments and authenticated symbol bodies.
-Inverse expansion validates allocation lifetimes after traversal; zero-width identities,
-clean scratch LIFO, stable first-occurrence controls and primitive action source lowering
-are retained. Semantic action calls preserve callee ordinals and occurrence metadata.
+fat implements normative K76 constants plus causal exact adjoint pops on every operand, including readers; connected histories are invalidated at lifetime boundaries and unresolved actions. Frame domains retain only admitted allocated-local constants. Interfaces, borrowed wires and unknown locals range independently. Exact reasoning inside the frame is separate from entry facts. Bounded loop visits and separate overlapping borrowed lifetimes are checked; local action bodies resolve aliases and inherited controls.
 
-0.9 admission now accepts consistent versioned headers/signatures and verifies all ten
-published objects' stored hashes. K46/K47 layout selection uses structured key paths,
-rendered as injective JCS arrays only after selecting original owners. Lproc signatures
-have mandatory tokens/args/mem arrays; fixed bindings close transitively by root entry
-positions, retaining distinct equal-valued keys. Both oracle engines and the reversible
-step machine use per-instance locations, canonical row ranges, typed pseudo-locations and
-mapped regions. Private execution aliases never affect source or closure identities.
-Lifted schemas enforce destination/read/address/cast/literal widths and typed immutable
-semantic-call arguments/regions. Fault-code widths are checked against each containing
-oracle; label/jumpr widths use the complete resolved fixed-instance index space. Exact
-unresolved-import row spaces still need rechecking in the complete link integration.
-qvalidate.rs has no changes.
+Four r9 objects now admit. Final sequential interpreter/JIT gates each 156 PASS / 0 FAIL / 0 ignored; before each 142/5/0. Differential each 18/0, before 14/4. Nine frame-domain tests added. fmt, strict Clippy and whitespace green. Logs .tmp/fat-final-{interpreter,jit,fmt,clippy}.log and .tmp/fat-final-totals.json. Initial red evidence .tmp/fat-red.log; extra lifetime red .tmp/fat-lifetimes-red.log. No fixture/test removed, weakened or excluded.
 
-47t remainder, in order: finish general 0.9 source/type/link admission; complete source-
-checked catalog descriptors for every oracle row, activation, step and construction;
-complete source invocation edges/iterations/instances/call indices and K49-K65 support/
-cleanup addresses; schedule admission, target realisation/execution, realised matrices
-and certificate contexts. sched::consume still refuses unrealised schedules. Admitted
-0.9 CC/R syntax is not a complete executor: dynamic-qreg, budget.mint, typed CC/R faults
-and full qinplace runtime dispatch still need integration. No full catalog executor claimed.
+Published pin: spec/Bennett-ISA-Spec-0.9.md at 9df1541; accepted-0.8 erratum 6182d7c. Ref envelope unchanged, 219 recipes. ISA clarification b-isa-spec-9eq asks whether exact gate identity retains opcode spelling or resolves X-family arities; public reference accepts CX and one-control MCX pairing, and this implementation uses resolved X-family identity. The provisional opcode-specific draft test was corrected before commit to that public behavior; the required polynomial-prefix negative remains unchanged. ISA issues-only commit d5119e6. No foreign implementation source read or copied; only reference tests and public CLI used. Concurrent ISA working-tree changes were untouched.
 
-ISA b-isa-spec-5xm is OPEN (consumer,isa,vm), committed only as .beads/issues.jsonl
-in ISA commit bbb758d. Section 11.1 requires the linked symbol's own formal order and
-no implicit bindings/defaults, but oracle_call/lift.oracle_call recipes take only S/A
-while the invocation token is outside the oracle's declared header interface. Reading A
-adds an explicit token formal (position/name undefined); reading B supplies source-call
-invocation context outside A (channel/propagation undefined). The same oracle closure
-and declared operands under B=2/B=3 need different constructions. This blocks complete
-semantic oracle-call construction; no private token channel/default was invented.
+47t remains the umbrella. General 0.9 source/type/link admission is not complete; complete source-checked oracle descriptors are blocked by b-isa-spec-5xm invocation-token binding. K49–K65 contexts and full schedule admission/realisation/execution/matrices remain. Admitted CC/R syntax still needs dynamic-qreg/budget.mint/typed-fault/full-qinplace runtime integration. No complete 0.9 executor is claimed. hsd: launch 0.9 estimate ABI, owned resolved request/token validity, padded/default realisation, bound estimate certificate/reconstruction. clw: object/launch certificate dispatch, controlled/scheduled/structural/inverse replay, K74 reports and K75 host-limit outcomes.
 
-hsd remains OPEN/unchanged: launch 0.9 estimate ABI/request ownership/token validity,
-full padded realisation/default effective schedule, bound estimate certificate and
-independent reconstruction. clw remains OPEN/unchanged: scheduled/controlled/universal
-replay contexts, object/launch certificate dispatch, inverse/structural bindings,
-K74 report serialization and K75 unchecked-host-limit outcomes. Their complete remainders
-remain in the beads. fat / ISA b-isa-spec-73y ruling is pending; no frame admission edit.
-
-Final sequential gate: interpreter and JIT each 142 PASS / 5 FAIL / 0 ignored (147).
-Before each 131 PASS / 5 FAIL / 0 ignored (136); original JIT baseline rebuilt from
-archived 93368f0 under .tmp/baseline. Differential remains 14 PASS / 4 FAIL in each.
-All 11 added tests pass in both engines. The exhaustive forwarding witness covers all
-8,192 configurations and checks expected results/faults plus complete step/inverse state;
-separate binding positions retain distinct locations and canonical ranges.
-Only the five known fat failures: coherent::every_reached_row_inverse_restores_complete_pre_step_tuple
-and differential::{check_and_hash_byte_identical_on_every_fixture,
-action_basis_measurements_differential, every_fixture_symbol_executes_through_cli,
-coherent_commands_on_every_fixture}. No fixture/test removed, weakened or excluded.
-fmt, strict Clippy and diff whitespace checks pass. Evidence:
-.tmp/47t-final-{interpreter,jit}.log, .tmp/47t-final-totals.json,
-.tmp/47t-next-{before-interpreter,baseline-jit}.log, and focused red/green logs.
-Interim parallel-gate totals are invalid due shared C executable/binary replacement races;
-only the final sequential gates count. Details/gotchas are in the top worklog session.
-
-Local implementation commits: e834e9b, 501b9c1, cb5821c, 2fcb413, 27e79d1.
-No dependency changes, sibling spec-text edits, push or Dolt sync. Main remains local
-while the gate is red; prior backup is origin/wip/m5-2026-10-31.
+SPEC_VERSIONS.toml remains ISA/object/launch/sched/cert/coverage/target 0.8 with independent partial 0.9 capability pin. No dependencies, pushes, Dolt sync or sibling spec text changed. Prior backup origin/wip/m5-2026-10-31 retained. Implementation sub-agent: orchestrator owns session worklog.

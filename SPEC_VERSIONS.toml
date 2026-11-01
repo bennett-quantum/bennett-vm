@@ -14,10 +14,14 @@ target = "0.8"
 version = "0.9"
 status = "partial-consumer"
 source = "spec/Bennett-ISA-Spec-0.9.md"
-commit = "b77cbed2989d94b164d734563743c1a4191a4820"
+commit = "9df154193a956d56a07f2ae2edd1fe637cc450d1"
 ref_envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
 
 [isa_0_8]
 version = "0.8"
 source = "spec/Bennett-ISA-Spec.md"
 commit = "ec1a44384136fab507859d94f9aa64200c6032da"
+
+# Binding accepted-0.8 interpretation of §5.6; no 0.8 spec-text change.
+frame_domain_erratum = "spec/errata-0.8.md"
+frame_domain_erratum_commit = "6182d7c"

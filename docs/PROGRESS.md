@@ -1,3 +1,10 @@
+# K76 frame-entry domain — 2026-11-01
+Resume: fat CLOSED/green; split 47t and work a, c, d before hsd/clw; catalog b blocked on ISA 5xm.
+Implements normative constants + all-operand causal adjoint pops; D_F retains only admitted allocated-local constants and frees every interface/borrowed/unknown component independently.
+Nine frame-domain regressions: four r9 admissions, interleaved-prefix rejection and resolved X-family identity, correlations, connected lifetime barriers, overlapping lifetimes, repeated visits, local controlled adjoints.
+Final interpreter/JIT each 156 PASS / 0 FAIL / 0 ignored (before 142/5); differential each 18/0 (before 14/4); fmt/strict Clippy green.
+Source pin 9df1541 plus 0.8 erratum 6182d7c. ISA 9eq (resolved gate identity) filed in d5119e6; no spec-text/fixture/dependency changes, push or Dolt sync.
+
 # ISA 0.9 admission and fixed instances — 2026-11-01
 Resume: 47t in progress; finish catalog oracle construction (ISA b-isa-spec-5xm token binding) then schedule realisation before hsd/clw; fat untouched.
 Published pin e834e9b: spec/Bennett-ISA-Spec-0.9.md at b77cbed; ref envelope unchanged (219 recipes).

@@ -1404,7 +1404,7 @@ pub fn xor_into(key: &mut BigUint, wires: &[usize], value: &BigUint) {
 }
 
 /// (`adjoint`, control token, call op, call operands)
-fn normalize_call(ins: &Instr) -> Result<NormalizedCall<'_>, String> {
+pub(crate) fn normalize_call(ins: &Instr) -> Result<NormalizedCall<'_>, String> {
     match ins.op.as_str() {
         "oracle_call" | "action_call" => Ok((false, None, ins.op.as_str(), ins.operands.clone())),
         "adj" => {
@@ -1663,7 +1663,7 @@ fn collect_qregions(ins: &Instr, out: &mut impl FnMut(&Instr)) {
 
 /// Static bundle widths of an action body, for adjoint alloc/free swaps.
 // Width plus declared class: inverse allocation must retain both (§5.3).
-fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, (usize, String)> {
+pub(crate) fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, (usize, String)> {
     let mut widths = HashMap::new();
     for list in [&f.lists[0], &f.lists[1]] {
         for p in list.iter() {
@@ -1704,7 +1704,10 @@ fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, (usize, String)
 }
 
 /// Adjoint of an instruction list (§5.3 table).
-fn adjoint_list(instrs: &[Instr], widths: &HashMap<String, (usize, String)>) -> Vec<Instr> {
+pub(crate) fn adjoint_list(
+    instrs: &[Instr],
+    widths: &HashMap<String, (usize, String)>,
+) -> Vec<Instr> {
     let mut out = Vec::new();
     for ins in instrs.iter().rev() {
         out.push(adjoint_instr(ins, widths));

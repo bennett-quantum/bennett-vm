@@ -1,6 +1,6 @@
 # bennett-vm
 
-Independent, std-only Rust implementation of the accepted Bennett ISA 0.8.
+Independent, std-only Rust implementation of the accepted Bennett ISA 0.8 (ISA 0.9 partially consumed; see below).
 Milestones 1–3 provide object loading/validation and identities, the bounded
 oracle interpreter, CC/R execution with retained history and tapes, region
 calls, one-shot launch, and a stateful C library. It consumes published specs, never the reference
@@ -41,8 +41,8 @@ binary and published fixtures. Override their locations with
 `BENNETT_ISA_REF` and `BENNETT_FIXTURES`; absence is a test failure. The spec
 examples are independently extracted from the sibling published spec.
 Set `BENNETT_HARNESS_COUNTS=1` and add `-- --nocapture` to print comparison counts.
-Milestone 1's gate is 17 passing tests and 577 agreeing comparisons over all
-12 fixtures, both spec examples and generated boundary cases.
+Milestone 1's gate compared the first 12 fixtures, both spec examples and generated
+boundary cases (counts have grown since; see PROGRESS).
 
 [Architecture and milestones](docs/PLAN.md) · [Verified evidence and divergences](docs/PROGRESS.md)
 
@@ -54,14 +54,16 @@ synchronization; execution advances at `wait` or `run_step`. VM extensions add
 immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
 [tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
 
-The current gate has **80 passing Rust tests**, **160 launch C checks**, a
-scheduler C consumer calling all **15** published exports, **1,235 agreeing CLI
-comparisons per pass and JIT mode** and **21,888 one-row inverse checks**. Published conformance is
-**445 pass / 0 fail / 46 unavailable**, 491 cases (exit 2). See PROGRESS for the
-per-suite report, comparison limits and unchanged unavailable classifications.
+The gate is the full `cargo test --offline --release` run, sequential per engine
+(`BENNETT_VM_ENGINE=interpreter`, then `jit`; C ABI paths are shared), plus the C launch
+and scheduler consumers. Current pass counts and the published-conformance tally are
+recorded in [HANDOFF.md](HANDOFF.md) and [PROGRESS](docs/PROGRESS.md), not duplicated
+here. Object execution is ISA 0.8; ISA 0.9 is consumed only as a partial capability
+(`SPEC_VERSIONS.toml`, section `isa_0_9`), with the remaining slices tracked in beads.
 
-Milestone 4 remains **partial and blocked** on the unpublished §11 `ref` expansion
-library and undefined `eps_decade` indexing. Target-backed structured actions and
+Milestone 4 remains **partial and blocked**: ISA 0.8 never published its §11 `ref`
+expansion library (ISA 0.9 publishes ref-0.9; consuming it is tracked under
+`bennett-vm-47t`) and `eps_decade` indexing is undefined (`cxg`). Target-backed structured actions and
 native QRAM execute actual native operations. Designated dirty pools, explicit
 accuracy-request batches, class capacities and actual sequential event accounting
 are implemented. Target-backed CLI output and immutable launch snapshots expose
@@ -84,9 +86,7 @@ runtime row helpers and emits nine host integer arithmetic kernels; arbitrary
 widths and complex rows use runtime helpers. Unsupported hosts fail explicitly.
 `BENNETT_JIT_AUDIT=1` prints native execution counters to stderr.
 
-The differential gate compares all 75 object images in the recorded corpus
-through each pass, their composition, and JIT mode against the interpreter and
-the CLI reference: **1,235 agree / 0 diverge per mode**. Of these, **718
-invocations on 68 images enter native segments**; identity, validation, pure Q
-and literal debug commands are also compared. Published JIT conformance is
-**445/0/46**. See PROGRESS for precise comparison and counting limits.
+The differential gate compares every object image in the recorded corpus through each
+pass, their composition, and JIT mode against the interpreter and the CLI reference;
+identity, validation, pure Q and literal debug commands are also compared. See PROGRESS
+for the counts and their limits.

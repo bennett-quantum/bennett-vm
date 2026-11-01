@@ -223,6 +223,7 @@ pub struct Layout {
 
 #[derive(Clone, Debug)]
 pub struct Object {
+    pub isa: String,
     pub text: String,
     pub ptr_width: usize,
     /// Symbols by name.
@@ -482,8 +483,9 @@ pub fn parse(text: &str) -> Result<Object, String> {
             ));
         }
     }
-    let ptr_width = parse_header(lines[0])?;
+    let (isa, ptr_width) = parse_header(lines[0])?;
     let mut obj = Object {
+        isa,
         text: text.to_string(),
         ptr_width,
         symbols: BTreeMap::new(),
@@ -565,7 +567,7 @@ pub fn parse(text: &str) -> Result<Object, String> {
     Ok(obj)
 }
 
-fn parse_header(line: &str) -> Result<usize, String> {
+fn parse_header(line: &str) -> Result<(String, usize), String> {
     let toks = split_tokens(line).map_err(|_| err("16.2", "malformed object header"))?;
     let keys = [
         "isa", "object", "launch", "sched", "cert", "coverage", "target",
@@ -573,14 +575,18 @@ fn parse_header(line: &str) -> Result<usize, String> {
     if toks.len() != 9 || toks[0] != "bennett-object" {
         return Err(err("16.2", "malformed object header"));
     }
+    let isa = toks[1]
+        .strip_prefix("isa=")
+        .filter(|v| matches!(*v, "0.8" | "0.9"))
+        .ok_or_else(|| err("1", "unsupported ISA version"))?;
     for (i, k) in keys.iter().enumerate() {
-        let want = format!("{k}=0.8");
+        let want = format!("{k}={isa}");
         if toks[1 + i] != want {
             if toks[1 + i].starts_with(&format!("{k}=")) {
                 return Err(err(
                     "1",
                     format!(
-                        "unsupported {k} version in header {:?}; this implementation is 0.8",
+                        "unsupported {k} version in header {:?}; versions must agree with isa",
                         toks[1 + i]
                     ),
                 ));
@@ -591,7 +597,10 @@ fn parse_header(line: &str) -> Result<usize, String> {
     let pw = toks[8]
         .strip_prefix("ptr_width=")
         .ok_or_else(|| err("16.2", "malformed object header"))?;
-    parse_usize(pw).map_err(|_| err("16.2", "malformed object header"))
+    Ok((
+        isa.into(),
+        parse_usize(pw).map_err(|_| err("16.2", "malformed object header"))?,
+    ))
 }
 
 fn parse_json_section(name: &str, body: &[&str]) -> Result<Json, String> {

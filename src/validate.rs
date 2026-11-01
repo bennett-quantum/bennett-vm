@@ -61,7 +61,7 @@ fn validate_symbols(obj: &Object) -> Result<(), String> {
                 ),
             ));
         }
-        validate_signature_schema(&sym.signature, &sym.kind)?;
+        validate_signature_schema(&sym.signature, &sym.kind, &obj.isa)?;
         if obj.imports.contains_key(&sym.name) {
             return Err(err(
                 "9.3",
@@ -81,7 +81,7 @@ fn validate_symbols(obj: &Object) -> Result<(), String> {
                 format!("unknown kind {kind:?} in import {name:?} signature"),
             ));
         }
-        validate_signature_schema(&imp.signature, kind)?;
+        validate_signature_schema(&imp.signature, kind, &obj.isa)?;
         if let Some(p) = &imp.pinned_closure_hash
             && (p.len() != 64
                 || !p
@@ -140,7 +140,7 @@ fn sig_fields(sig: &Json, want: &[&str], kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_signature_schema(sig: &Json, kind: &str) -> Result<(), String> {
+fn validate_signature_schema(sig: &Json, kind: &str, isa: &str) -> Result<(), String> {
     match kind {
         "oracle" => {
             sig_fields(
@@ -149,7 +149,7 @@ fn validate_signature_schema(sig: &Json, kind: &str) -> Result<(), String> {
                 kind,
             )?;
             expect(sig, "tier", "q")?;
-            expect(sig, "abi", "0.8")?;
+            expect(sig, "abi", isa)?;
             widths(sig, "in")?;
             sig.get("tgt")
                 .and_then(|v| v.as_usize())
@@ -171,7 +171,7 @@ fn validate_signature_schema(sig: &Json, kind: &str) -> Result<(), String> {
                 kind,
             )?;
             expect(sig, "tier", "q")?;
-            expect(sig, "abi", "0.8")?;
+            expect(sig, "abi", isa)?;
             widths(sig, "mut")?;
             widths(sig, "in")?;
             mem_entries(sig)?;
@@ -179,9 +179,29 @@ fn validate_signature_schema(sig: &Json, kind: &str) -> Result<(), String> {
             widths(sig, "bounds")?;
         }
         "lproc" => {
-            sig_fields(sig, &["tier", "kind", "params", "result", "abi"], kind)?;
+            if isa == "0.9" {
+                sig_fields(
+                    sig,
+                    &[
+                        "tier", "kind", "params", "result", "tokens", "args", "mem", "abi",
+                    ],
+                    kind,
+                )?;
+                if type_strings(sig, "tokens")?
+                    .iter()
+                    .any(|t| *t != Type::Token)
+                    || type_strings(sig, "args")?
+                        .iter()
+                        .any(|t| !matches!(t, Type::I(1..=128) | Type::Ptr | Type::F64))
+                    || mem_entries(sig)?.iter().any(|(_, _, r)| r != "in")
+                {
+                    return Err(err("3.7", "invalid lproc parameter groups"));
+                }
+            } else {
+                sig_fields(sig, &["tier", "kind", "params", "result", "abi"], kind)?;
+            }
             expect(sig, "tier", "q")?;
-            expect(sig, "abi", "0.8")?;
+            expect(sig, "abi", isa)?;
             widths(sig, "params")?;
             sig.get("result")
                 .and_then(|v| v.as_usize())
@@ -190,14 +210,14 @@ fn validate_signature_schema(sig: &Json, kind: &str) -> Result<(), String> {
         "cc" | "r" => {
             sig_fields(sig, &["tier", "kind", "params", "results", "abi"], kind)?;
             expect(sig, "tier", kind)?;
-            expect(sig, "abi", "0.8")?;
+            expect(sig, "abi", isa)?;
             type_strings(sig, "params")?;
             type_strings(sig, "results")?;
         }
         "data" => {
             sig_fields(sig, &["tier", "kind", "size", "abi"], kind)?;
             expect(sig, "tier", "-")?;
-            expect(sig, "abi", "0.8")?;
+            expect(sig, "abi", isa)?;
             sig.get("size")
                 .and_then(|v| v.as_big())
                 .ok_or_else(|| err("9.1", "data size must be an integer"))?;
@@ -310,7 +330,7 @@ pub fn derived_signature(obj: &Object, name: &str) -> Result<Json, String> {
             .get(name)
             .ok_or_else(|| err("9.1", format!("data symbol @{name} has no data line")))?;
         return Ok(Json::obj(vec![
-            ("abi", Json::Str("0.8".into())),
+            ("abi", Json::Str(obj.isa.clone())),
             ("kind", Json::Str("data".into())),
             ("size", Json::u64((hex.len() / 2) as u64)),
             ("tier", Json::Str("-".into())),
@@ -394,7 +414,7 @@ pub fn derived_signature(obj: &Object, name: &str) -> Result<Json, String> {
     };
     match f.kind {
         FnKind::Oracle => Ok(Json::obj(vec![
-            ("abi", Json::Str("0.8".into())),
+            ("abi", Json::Str(obj.isa.clone())),
             ("args", args(&f.lists[4])),
             (
                 "fault",
@@ -412,7 +432,7 @@ pub fn derived_signature(obj: &Object, name: &str) -> Result<Json, String> {
         FnKind::Action | FnKind::PermAction => {
             empty_from(4)?;
             Ok(Json::obj(vec![
-                ("abi", Json::Str("0.8".into())),
+                ("abi", Json::Str(obj.isa.clone())),
                 ("args", args(&f.lists[3])),
                 (
                     "bounds",
@@ -426,9 +446,11 @@ pub fn derived_signature(obj: &Object, name: &str) -> Result<Json, String> {
             ]))
         }
         FnKind::Lproc => {
-            empty_from(2)?;
-            Ok(Json::obj(vec![
-                ("abi", Json::Str("0.8".into())),
+            if obj.isa == "0.8" {
+                empty_from(2)?;
+            }
+            let mut fields = vec![
+                ("abi", Json::Str(obj.isa.clone())),
                 ("kind", Json::Str("lproc".into())),
                 ("params", Json::Arr(wlist(&f.lists[0])?)),
                 (
@@ -436,12 +458,20 @@ pub fn derived_signature(obj: &Object, name: &str) -> Result<Json, String> {
                     Json::u64(one_width(&f.lists[1], "result")? as u64),
                 ),
                 ("tier", Json::Str("q".into())),
-            ]))
+            ];
+            if obj.isa == "0.9" {
+                fields.extend([
+                    ("tokens", args(&f.lists[2])),
+                    ("args", args(&f.lists[3])),
+                    ("mem", mem(&f.lists[4])?),
+                ]);
+            }
+            Ok(Json::obj(fields))
         }
         FnKind::Cc | FnKind::R => {
             empty_from(2)?;
             Ok(Json::obj(vec![
-                ("abi", Json::Str("0.8".into())),
+                ("abi", Json::Str(obj.isa.clone())),
                 ("kind", Json::Str(f.kind.kind_str().into())),
                 ("params", args(&f.lists[0])),
                 ("results", args(&f.lists[1])),
@@ -712,10 +742,10 @@ fn validate_devices(obj: &Object) -> Result<(), String> {
                         format!("devices.{part}.{name} needs a version string"),
                     )
                 })?;
-            if part == "models" && v != "0.8" {
+            if part == "models" && v != obj.isa {
                 return Err(err(
                     "9.1",
-                    format!("device model {name:?} version must be \"0.8\", got {v:?}"),
+                    format!("device model {name:?} version must match ISA, got {v:?}"),
                 ));
             }
         }

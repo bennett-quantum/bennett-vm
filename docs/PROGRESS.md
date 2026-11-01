@@ -1,3 +1,10 @@
+# ISA 0.9 object admission — 2026-11-01
+Resume: 47t in progress; finish lproc fixed bindings, oracle construction, schedule realisation before hsd/clw; fat untouched.
+Published pin e834e9b: spec/Bennett-ISA-Spec-0.9.md at b77cbed; ref envelope unchanged (219 recipes).
+Pass 1: versioned headers/signatures/envelopes, mandatory empty lproc arrays, structured K46/K47 paths and closure selection.
+RED .tmp/47t-object-red.log; GREEN two object09 tests per engine (published inc8/sum_db stored hashes, path collision).
+Strict Clippy passes; full before gate in progress. Admission does not claim complete 0.9 execution.
+
 # ISA 0.9 remainder implementation — 2026-10-31
 Resume: 47t in progress; oracle source/addressing and full schedule realisation precede hsd/clw; no bead closed; fat untouched.
 Passes 1–4 a5e3d90/151f1ba/dd60e57/eeee430: typed expansion, inverse identities, scratch LIFO, primitive source actions/stable controls.

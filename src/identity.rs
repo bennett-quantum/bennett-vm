@@ -168,13 +168,12 @@ fn utf8_len(first: u8) -> usize {
     }
 }
 
-/// Layout leaves of §9.2 as (dotted path, JCS value text), path-sorted.
-pub fn layout_leaves(obj: &Object) -> Vec<(String, String)> {
-    let mut leaves: Vec<(String, String)> = Vec::new();
+/// Structured layout leaves preserve original keys before version-specific encoding.
+fn structured_leaves(obj: &Object) -> Vec<(Vec<String>, String)> {
+    let mut leaves = Vec::new();
     let Some(layout) = &obj.layout else {
         return leaves;
     };
-    let j = &layout.json;
     for key in [
         "ptr_width",
         "H",
@@ -183,86 +182,97 @@ pub fn layout_leaves(obj: &Object) -> Vec<(String, String)> {
         "null_size",
         "heap_base",
         "heap_limit_max",
+        "block_image",
     ] {
-        if let Some(v) = j.get(key) {
-            leaves.push((key.to_string(), v.to_jcs()));
+        if let Some(v) = layout.json.get(key) {
+            leaves.push((vec![key.into()], v.to_jcs()));
         }
     }
-    if let Some(g) = j.get("globals").and_then(|v| v.as_obj()) {
-        for (name, v) in g {
-            leaves.push((format!("globals.{name}"), v.to_jcs()));
+    for (name, g) in &layout.globals {
+        let _ = g;
+        leaves.push((
+            vec!["globals".into(), name.clone()],
+            layout
+                .json
+                .get("globals")
+                .unwrap()
+                .get(name)
+                .unwrap()
+                .to_jcs(),
+        ));
+    }
+    for (oracle, regions) in &layout.interface_regions {
+        for region in regions.keys() {
+            leaves.push((
+                vec!["interface_regions".into(), oracle.clone(), region.clone()],
+                layout
+                    .json
+                    .get("interface_regions")
+                    .unwrap()
+                    .get(oracle)
+                    .unwrap()
+                    .get(region)
+                    .unwrap()
+                    .to_jcs(),
+            ));
         }
     }
-    if let Some(ir) = j.get("interface_regions").and_then(|v| v.as_obj()) {
-        for (oracle, regions) in ir {
-            if let Some(regions) = regions.as_obj() {
-                for (region, v) in regions {
-                    leaves.push((format!("interface_regions.{oracle}.{region}"), v.to_jcs()));
-                }
-            }
-        }
-    }
-    if let Some(v) = j.get("block_image") {
-        leaves.push(("block_image".to_string(), v.to_jcs()));
-    }
-    leaves.sort();
     leaves
 }
-
-/// Closure set of §9.2 for one symbol: (layout leaves, data names).
+fn render_path(obj: &Object, path: &[String]) -> String {
+    if obj.isa == "0.8" {
+        path.join(".")
+    } else {
+        Json::Arr(path.iter().cloned().map(Json::Str).collect()).to_jcs()
+    }
+}
+/// Layout leaves in the version's wire encoding, sorted by encoded path bytes.
+pub fn layout_leaves(obj: &Object) -> Vec<(String, String)> {
+    let mut leaves = structured_leaves(obj)
+        .into_iter()
+        .map(|(p, v)| (render_path(obj, &p), v))
+        .collect::<Vec<_>>();
+    leaves.sort_by(|a, b| a.0.cmp(&b.0));
+    leaves
+}
 fn closure_set(obj: &Object, name: &str) -> (Vec<(String, String)>, Vec<String>) {
     let Some(sym) = obj.symbols.get(name) else {
-        return (Vec::new(), Vec::new());
+        return (vec![], vec![]);
     };
-    let all = layout_leaves(obj);
-    let leaves: Vec<(String, String)> = match sym.kind.as_str() {
-        "oracle" => all
-            .into_iter()
-            .filter(|(path, _)| match path.strip_prefix("interface_regions.") {
-                Some(rest) => rest.split('.').next() == Some(name),
-                None => true,
-            })
-            .collect(),
-        "cc" | "r" => all,
-        "lproc" => {
-            let mut wanted: BTreeSet<String> = BTreeSet::new();
-            if let Some(f) = obj.function(name) {
-                let mut flat = Vec::new();
-                f.flat_instrs(&mut flat);
-                for ins in flat {
-                    if ins.op == "lift.addr"
-                        && let Some(tok) = ins.operands.first()
-                        && let Some(g) = tok.strip_prefix('@')
-                        && obj
-                            .layout
-                            .as_ref()
-                            .is_some_and(|l| l.globals.contains_key(g))
-                    {
-                        wanted.insert(format!("globals.{g}"));
-                    }
-                }
-            }
-            all.into_iter()
-                .filter(|(p, _)| wanted.contains(p))
-                .collect()
-        }
-        _ => Vec::new(),
-    };
-    // Every data image those leaves name.
-    let mut data: BTreeSet<String> = BTreeSet::new();
-    if let Some(layout) = &obj.layout {
-        for (path, _) in &leaves {
-            if let Some(gname) = path.strip_prefix("globals.") {
-                if let Some(g) = layout.globals.get(gname) {
-                    data.insert(g.image.clone());
-                }
-            } else if path == "block_image"
-                && let Some(img) = &layout.block_image
+    let mut wanted = BTreeSet::new();
+    if let Some(f) = obj.function(name) {
+        let mut flat = vec![];
+        f.flat_instrs(&mut flat);
+        for ins in flat {
+            if ins.op == "lift.addr"
+                && let Some(g) = ins.operands.first().and_then(|t| t.strip_prefix('@'))
             {
-                data.insert(img.clone());
+                wanted.insert(g.to_string());
             }
         }
     }
+    let mut leaves = vec![];
+    let mut data = BTreeSet::new();
+    for (path, v) in structured_leaves(obj) {
+        let keep = match sym.kind.as_str() {
+            "oracle" => path[0] != "interface_regions" || path[1] == name,
+            "cc" | "r" => true,
+            "lproc" => path[0] == "globals" && wanted.contains(&path[1]),
+            _ => false,
+        };
+        if !keep {
+            continue;
+        }
+        if let Some(layout) = &obj.layout {
+            if path[0] == "globals" {
+                data.insert(layout.globals[&path[1]].image.clone());
+            } else if path[0] == "block_image" {
+                data.insert(layout.block_image.clone().unwrap());
+            }
+        }
+        leaves.push((render_path(obj, &path), v));
+    }
+    leaves.sort_by(|a, b| a.0.cmp(&b.0));
     (leaves, data.into_iter().collect())
 }
 
@@ -493,7 +503,7 @@ fn build_envelope(
         }
     }
     let mut env = String::new();
-    env.push_str("isa=0.8\n");
+    env.push_str(&format!("isa={}\n", obj.isa));
     env.push_str(&format!("ptr_width={}\n", obj.ptr_width));
     env.push_str(&sym.signature.to_jcs());
     env.push('\n');

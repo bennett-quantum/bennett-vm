@@ -1,3 +1,9 @@
+# 47t-c2 lifted oracle source-pair proof (partial) — 2026-11-01
+Resume: c2 IN PROGRESS; finish source-checked construction/support carriers and both cleanup choices before c3, c5, d, b, hsd, clw. c4 skipped as directed (ISA9hv pass); c1/u8m CLOSED. Never push.
+Added source-derived K64 row/instance pair metadata: independent LIFO operand identities, balanced CFG paths/cycles, unique call ownership at joins, successor targets and intervening input-write checks; memory stores remain permitted by §5.5. Captured source registries survive relinking.
+RED missing source-pair API; focused oracle_address09 GREEN 9/0 (before2/0). FINAL GREEN stable-source sequential .tmp/c2-source-*: interpreter/JIT each268/0/0 (before261/0/0), differential each18/0/0; fmt/strict all-target Clippy/whitespace pass. Totals .tmp/c2-source-totals.json.
+This is a source-proof prerequisite only: no K65 support/carrier execution integration, recompute implementation or new oracle_invocation binding. Indirect qjumpr path proofs remain explicit unavailable obligations; existing raw annotation is unchanged. c2 remains open; later beads untouched.
+
 # 47t-c1 generated fixed-loop/qif input histories — 2026-11-01
 Resume: u8m CLOSED at35bc619; c1 CLOSED. Next c2 lifted oracle-uncall, then c3 bound-library occurrences; c4 pair partition BLOCKED on ISA9hv, c5 general bounded-while/cross-domain histories OPEN. Parent c remains open through these children; d,b,hsd,clw queued after. Never push.
 RED/GREEN six regressions cover exact outer/inner acquisitions across six nested iteration coordinates, prior nonzero versions, contiguous fresh ordinals, both qif arms/source directions, conditional histories without extra carriers, independent-branch raw-policy isolation, and temporarily inverted predicate rejection with unchanged default traces. Focused cleanup_fresh09 24/0.

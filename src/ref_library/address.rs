@@ -5,6 +5,8 @@ use crate::sched::{Coordinate, Point};
 pub(super) struct OracleAddress {
     symbol: String,
     rows: Vec<Point>,
+    name: String,
+    registry: Rc<Registry>,
 }
 #[derive(Clone, Debug, Default)]
 pub(super) struct RowSpace {
@@ -43,9 +45,34 @@ impl Bindings {
         self.oracle_address = Some(Rc::new(OracleAddress {
             symbol: registry.identities.interface[name].clone(),
             rows,
+            name: name.into(),
+            registry: registry.clone(),
         }));
         Ok(())
     }
+    /// Source-matched pairs in K64 row order. These are proof inputs to the
+    /// descriptor builder, not admission of the caller's raw row templates.
+    pub fn oracle_cleanup_pairs(&self) -> Result<Vec<OracleCleanupPair>, String> {
+        let oracle = self
+            .oracle_address
+            .as_ref()
+            .ok_or_else(|| err("oracle source address is not bound"))?;
+        let object = &oracle.registry.object;
+        let mut pairs = vec![];
+        let mut first = 0;
+        for instance in crate::instances::for_oracle(object, &oracle.name)? {
+            let f = object.function(&instance.symbol).unwrap();
+            for (cleanup, computing) in oracle_cleanup::pairs(f)? {
+                pairs.push(OracleCleanupPair {
+                    computing_point: oracle.rows[first + computing].clone(),
+                    cleanup_point: oracle.rows[first + cleanup].clone(),
+                });
+            }
+            first += f.blocks.iter().map(|b| b.instrs.len()).sum::<usize>();
+        }
+        Ok(pairs)
+    }
+
     fn support(&mut self, point: &str) {
         self.source_point = Some(Point {
             symbol: self.oracle_address.as_ref().unwrap().symbol.clone(),

@@ -2,7 +2,9 @@
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
 mod address;
 mod cleanup;
+mod oracle_cleanup;
 pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
+pub use oracle_cleanup::OracleCleanupPair;
 mod source;
 use crate::{
     json::{self, Json},

@@ -161,3 +161,144 @@ fn k64_step_support_excludes_rows_and_rows_next_share_ordinals() {
         assert_eq!(Some(a), r.address);
     }
 }
+
+fn paired_source(rows: &str) -> bennett_vm::object::Object {
+    let text = support::source(&format!(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, other:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4], fs:reg[4], pc:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+    ));
+    bennett_vm::load(&text, false).unwrap().0
+}
+
+#[test]
+fn lifted_uncall_source_pairing_is_lifo_and_keeps_exact_target_locations() {
+    let object = paired_source(
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+    );
+    let mut env = Bindings::new();
+    env.address_oracle(&object, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0].computing_point.point, "entry:1");
+    assert_eq!(pairs[0].cleanup_point.point, "entry:2");
+    assert_eq!(pairs[1].computing_point.point, "entry:0");
+    assert_eq!(pairs[1].cleanup_point.point, "entry:3");
+    for pair in pairs {
+        assert_eq!(pair.computing_point.symbol, pair.cleanup_point.symbol);
+        assert!(pair.cleanup_point.instance.is_empty());
+        assert!(pair.cleanup_point.call_index.is_none());
+    }
+    let bad = paired_source(
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+    );
+    env.address_oracle(&bad, "root").unwrap();
+    assert!(
+        env.oracle_cleanup_pairs()
+            .unwrap_err()
+            .contains("successor targets")
+    );
+}
+
+#[test]
+fn lifted_uncall_source_pairing_rejects_missing_or_changed_invocation_inputs() {
+    for rows in [
+        "lift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id other (x) r fr () ()\nlift.retval r",
+        "s = lift.mov x\nlift.oracle_call @id tk (s) r fr () ()\ns = lift.mov x\nlift.oracle_uncall @id tk (s) r fr () ()\nlift.retval r",
+    ] {
+        let mut env = Bindings::new();
+        env.address_oracle(&paired_source(rows), "root").unwrap();
+        let error = env.oracle_cleanup_pairs().unwrap_err();
+        assert!(error.contains("§5.5"), "{error}");
+    }
+}
+
+#[test]
+fn lifted_uncall_source_pairing_joins_cfg_paths_without_inventing_a_call() {
+    let prefix = "lift.oracle_call @id tk (x) r fr () ()\nqbranch x ^left ^right\n^left():\nqjump ^join\n^right():\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r";
+    let mut env = Bindings::new();
+    env.address_oracle(&paired_source(prefix), "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].computing_point.point, "entry:0");
+    assert_eq!(pairs[0].cleanup_point.point, "join:0");
+    for rows in [
+        "qbranch x ^left ^right\n^left():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^right():\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "qbranch x ^left ^right\n^left():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^right():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+    ] {
+        env.address_oracle(&paired_source(rows), "root").unwrap();
+        assert!(env.oracle_cleanup_pairs().unwrap_err().contains("§5.5"));
+    }
+}
+
+#[test]
+fn lifted_uncall_source_pairing_handles_balanced_cycles_and_detects_underflow_cycles() {
+    let rows = "lift.oracle_call @id tk (x) r fr () ()\nqjump ^body\n^body():\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nqbranch x ^body ^done\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r";
+    let mut env = Bindings::new();
+    env.address_oracle(&paired_source(rows), "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0].computing_point.point, "body:0");
+    assert_eq!(pairs[0].cleanup_point.point, "body:1");
+    assert_eq!(pairs[1].computing_point.point, "entry:0");
+    assert_eq!(pairs[1].cleanup_point.point, "done:0");
+    let rows = "lift.oracle_call @id tk (x) r fr () ()\nqjump ^body\n^body():\nlift.oracle_uncall @id tk (x) r fr () ()\nqbranch x ^body ^done\n^done():\nlift.retval r";
+    env.address_oracle(&paired_source(rows), "root").unwrap();
+    assert!(
+        env.oracle_cleanup_pairs()
+            .unwrap_err()
+            .contains("no matching call")
+    );
+}
+
+#[test]
+fn lifted_uncall_source_pairing_preserves_lproc_instance_ownership() {
+    let text = support::source(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) (db:region[0,8] in) (tk:token, a:i1, b:i1)\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x) (tk) (a) ()\nr = lift.call @worker (x) (tk) (b) ()\nlift.retval r\nlproc @worker (u:reg[1]) (r:reg[1]) (k:token token) (v:i1 classical) ()\nregs { fr:reg[4] }\n^entry():\nlift.oracle_call @id k (u) r fr () (v)\nlift.oracle_uncall @id k (u) r fr () (v)\nlift.ret r\noracle @id (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\n^entry():\nlift.retval x",
+    );
+    let (object, ids) = bennett_vm::load(&text, false).unwrap();
+    let mut env = Bindings::new();
+    env.address_oracle(&object, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 2);
+    for (pair, instance) in pairs.iter().zip([vec![0, 1], vec![0, 2]]) {
+        assert_eq!(pair.computing_point.symbol, ids.interface["worker"]);
+        assert_eq!(pair.cleanup_point.symbol, ids.interface["worker"]);
+        assert_eq!(pair.computing_point.instance, instance);
+        assert_eq!(pair.cleanup_point.instance, instance);
+        assert_eq!(pair.computing_point.point, "entry:0");
+        assert_eq!(pair.cleanup_point.point, "entry:1");
+    }
+    // Relinking another object must not retarget a previously captured proof.
+    env.link(&paired_source("lift.retval x")).unwrap();
+    assert_eq!(env.oracle_cleanup_pairs().unwrap(), pairs);
+}
+
+#[test]
+fn lifted_uncall_source_pairing_allows_intervening_memory_writes() {
+    // §5.5 permits this source pair; it does not promise to clear fr after
+    // changing the cells. §6 window/realisation checks remain separate.
+    let text = support::source(
+        "oracle @root (x:wire in) (t:wire) (f:wire[4]) (db:region[0,8] in) (tk:token)\nregs { r:reg[1], fr:reg[4], p:reg[32], v:reg[8] }\n^entry():\np = lift.const.i32 16\nv = lift.const.i8 1\nlift.oracle_call @id tk (x) r fr (db) ()\nlift.store.i8 p v\nlift.oracle_uncall @id tk (x) r fr (db) ()\nlift.retval r\noracle @id (x:wire in) (t:wire) (f:wire[4]) (db:region[0,8] in) ()\n^entry():\nlift.retval x",
+    );
+    let (object, _) = bennett_vm::load(&text, false).unwrap();
+    let mut env = Bindings::new();
+    env.address_oracle(&object, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].computing_point.point, "entry:2");
+    assert_eq!(pairs[0].cleanup_point.point, "entry:4");
+}
+
+#[test]
+fn lifted_uncall_indirect_proof_obligation_does_not_remove_raw_provenance() {
+    let object = paired_source(
+        "pc = lift.label ^entry\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nqjumpr pc",
+    );
+    let mut env = Bindings::new();
+    env.address_oracle(&object, "root").unwrap();
+    assert!(
+        env.oracle_cleanup_pairs()
+            .unwrap_err()
+            .contains("unavailable.reason: indirect")
+    );
+}

@@ -1267,34 +1267,18 @@ fn apply_invocation(
             controls,
         } => {
             let sig = crate::validate::oracle_sig(obj, name)?;
-            let mut next = BTreeMap::new();
-            for (key, amp) in &state.amps {
-                let mut nk = key.clone();
-                if controls.iter().all(|w| key.bit(*w)) {
-                    let values = inputs
-                        .iter()
-                        .map(|ws| QuantumState::extract(key, ws))
-                        .collect::<Vec<_>>();
-                    let mut cells = mem
-                        .iter()
-                        .zip(&sig.mem)
-                        .map(|(ws, (_, w, _))| {
-                            ws.chunks(*w)
-                                .map(|cell| QuantumState::extract(key, cell))
-                                .collect()
-                        })
-                        .collect::<Vec<Vec<_>>>();
-                    let out =
-                        crate::oracle::run_oracle(obj, name, &values, &mut cells, args, *budget)?;
-                    action::xor_into(&mut nk, target, &out.payload);
-                    action::xor_into(&mut nk, fault, &out.code);
-                }
-                let e = next.entry(nk).or_insert((0.0, 0.0));
-                e.0 += amp.0;
-                e.1 += amp.1;
-            }
-            state.amps = next;
-            Ok(())
+            let regions = mem
+                .iter()
+                .zip(&sig.mem)
+                .map(|(ws, (a, w, _))| RegionWires {
+                    cells: ws.chunks(*w).map(|cell| cell.to_vec()).collect(),
+                    a: *a,
+                    w: *w,
+                })
+                .collect::<Vec<_>>();
+            action::execute_oracle_inner(
+                obj, state, name, inputs, target, fault, &regions, args, *budget, controls,
+            )
         }
     }
 }

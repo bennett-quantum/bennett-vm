@@ -280,6 +280,73 @@ pub struct RegionWires {
     pub w: usize,
 }
 
+/// Apply the oracle XOR to the authoritative exact state in either calling tier.
+/// Outcomes depend only on projected inputs and memory, so superpositions of
+/// target/fault/control spectators reuse the same bounded oracle execution.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_oracle_inner(
+    obj: &Object,
+    state: &mut QuantumState,
+    callee: &str,
+    in_bundles: &[Vec<usize>],
+    target: &[usize],
+    fault: &[usize],
+    mem_regions: &[RegionWires],
+    args: &[Value],
+    budget: Budget,
+    pred: &[usize],
+) -> Result<(), String> {
+    let mut first_error: Option<String> = None;
+    let mut outcomes: OutcomeCache = Default::default();
+    state.map_basis(|k| {
+        if first_error.is_some() {
+            return k.clone();
+        }
+        let mut nk = k.clone();
+        if !pred.iter().all(|p| k.bit(*p)) {
+            return nk;
+        }
+        let inputs: Vec<BigUint> = in_bundles
+            .iter()
+            .map(|b| QuantumState::extract(k, b))
+            .collect();
+        let mem_cells: Vec<Vec<BigUint>> = mem_regions
+            .iter()
+            .map(|r| {
+                r.cells
+                    .iter()
+                    .map(|c| QuantumState::extract(k, c))
+                    .collect()
+            })
+            .collect();
+        let key = (inputs.clone(), mem_cells.clone());
+        let outcome = match outcomes.get(&key) {
+            Some(o) => o.clone(),
+            None => {
+                let mut mem = mem_cells.clone();
+                match crate::oracle::run_oracle(obj, callee, &inputs, &mut mem, args, budget) {
+                    Ok(o) => {
+                        let pair = (o.payload.clone(), o.code.clone());
+                        outcomes.insert(key, pair.clone());
+                        pair
+                    }
+                    Err(e) => {
+                        first_error = Some(e);
+                        return nk;
+                    }
+                }
+            }
+        };
+        xor_into(&mut nk, target, &outcome.0);
+        xor_into(&mut nk, fault, &outcome.1);
+        nk
+    });
+    if let Some(e) = first_error {
+        return Err(e);
+    }
+    Ok(())
+}
+
 pub struct Exec<'o> {
     obj: &'o Object,
     state: &'o mut QuantumState,
@@ -1246,58 +1313,18 @@ impl<'o> Exec<'o> {
             .iter()
             .map(|n| self.region(n))
             .collect::<Result<_, _>>()?;
-        let obj = self.obj;
-        let pred = self.pred.clone();
-        let mut first_error: Option<String> = None;
-        let mut outcomes: OutcomeCache = Default::default();
-        self.state.map_basis(|k| {
-            if first_error.is_some() {
-                return k.clone();
-            }
-            let mut nk = k.clone();
-            if !pred.iter().all(|p| k.bit(*p)) {
-                return nk;
-            }
-            let inputs: Vec<BigUint> = in_bundles
-                .iter()
-                .map(|b| QuantumState::extract(k, b))
-                .collect();
-            let mem_cells: Vec<Vec<BigUint>> = mem_regions
-                .iter()
-                .map(|r| {
-                    r.cells
-                        .iter()
-                        .map(|c| QuantumState::extract(k, c))
-                        .collect()
-                })
-                .collect();
-            let key = (inputs.clone(), mem_cells.clone());
-            let outcome = match outcomes.get(&key) {
-                Some(o) => o.clone(),
-                None => {
-                    let mut mem = mem_cells.clone();
-                    match crate::oracle::run_oracle(obj, &callee, &inputs, &mut mem, &args, budget)
-                    {
-                        Ok(o) => {
-                            let pair = (o.payload.clone(), o.code.clone());
-                            outcomes.insert(key, pair.clone());
-                            pair
-                        }
-                        Err(e) => {
-                            first_error = Some(e);
-                            return nk;
-                        }
-                    }
-                }
-            };
-            xor_into(&mut nk, &tgt, &outcome.0);
-            xor_into(&mut nk, &fr, &outcome.1);
-            nk
-        });
-        if let Some(e) = first_error {
-            return Err(e);
-        }
-        Ok(())
+        execute_oracle_inner(
+            self.obj,
+            self.state,
+            &callee,
+            &in_bundles,
+            &tgt,
+            &fr,
+            &mem_regions,
+            &args,
+            budget,
+            &self.pred,
+        )
     }
 
     fn exec_action_call(&mut self, operands: &[String], adjoint: bool) -> Result<(), String> {

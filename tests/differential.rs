@@ -1058,6 +1058,103 @@ fn oracle_interface_memory_is_restored() {
 }
 
 #[test]
+fn cc_oracle_then_gate_preserves_xor_interpreter() {
+    cc_oracle_then_gate_preserves_xor("interpreter");
+}
+
+#[test]
+fn cc_oracle_then_gate_preserves_xor_jit() {
+    cc_oracle_then_gate_preserves_xor("jit");
+}
+
+fn cc_oracle_then_gate_object(label: &str) -> String {
+    use bennett_vm::json::Json;
+    let text = std::fs::read_to_string(fixtures().join("inc8.bisa")).unwrap();
+    let mut lines = text.lines().map(String::from).collect::<Vec<_>>();
+    let i = lines.iter().position(|l| l == "section symbols").unwrap() + 1;
+    let Json::Obj(mut symbols) = bennett_vm::json::parse(&lines[i]).unwrap() else {
+        panic!("symbols must be an object")
+    };
+    for name in ["mix", "flip"] {
+        symbols.insert(
+            symbols.len().to_string(),
+            Json::obj(vec![
+                ("interface_hash", Json::Str("0".repeat(64))),
+                ("kind", Json::Str("action".into())),
+                ("name", Json::Str(name.into())),
+                ("signature", bennett_vm::json::parse(r#"{"abi":"0.8","args":[],"bounds":[],"in":[],"kind":"action","mem":[],"mut":[8],"tier":"q"}"#).unwrap()),
+            ]),
+        );
+    }
+    lines[i] = Json::Obj(symbols).to_jcs();
+    let text = lines.join("\n")
+        + "\naction @mix (q:wire[8] mut) () () () ()\n^entry():\nh q[0]\n"
+        + "action @flip (q:wire[8] mut) () () () ()\n^entry():\nx q[0]\n";
+    let text = add_cc(
+        &text,
+        "oracle_then_gate",
+        "tk:token",
+        vec!["token"],
+        "a:i8, b:i8, c:i4",
+        vec!["i8", "i8", "i4"],
+        "x = qreg.new any 8\nt = qreg.new any 8\nf = qreg.new any 4\naction_call @mix (x) () () ()\noracle_call @inc8 tk (x) t f () ()\naction_call @flip (t) () () ()\na = measure x\nb = measure t\nc = measure f\nret a b c",
+    );
+    temp_object(label, &text)
+}
+
+fn cc_oracle_then_gate_preserves_xor(engine: &str) {
+    let path = cc_oracle_then_gate_object(&format!("oracle-then-gate-{engine}"));
+    for (draw, expected) in [("0.1", ["0", "0", "0"]), ("0.9", ["1", "3", "0"])] {
+        let args = s(&[
+            "run-program",
+            &path,
+            "oracle_then_gate",
+            "--arg",
+            "token:3",
+            "--draws",
+            draw,
+        ]);
+        let out = raw_run(Path::new(vm()), &args, engine);
+        assert!(out.status.success(), "{engine}: {}", show(&out));
+        let json =
+            bennett_vm::json::parse(std::str::from_utf8(&out.stdout).unwrap().trim()).unwrap();
+        let actual = json
+            .get("results")
+            .unwrap()
+            .as_arr()
+            .unwrap()
+            .iter()
+            .map(|v| v.get("value").unwrap().as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "{engine} draw={draw}: oracle XOR must survive the following gate"
+        );
+    }
+}
+
+#[test]
+fn cc_oracle_then_gate_differential() {
+    let path = cc_oracle_then_gate_object("oracle-then-gate-differential");
+    for budget in ["0", "2", "3"] {
+        for draw in ["0.1", "0.9"] {
+            assert_outcome(
+                "CC oracle XOR followed by action gate",
+                &s(&[
+                    "run-program",
+                    &path,
+                    "oracle_then_gate",
+                    "--arg",
+                    &format!("token:{budget}"),
+                    "--draws",
+                    draw,
+                ]),
+            );
+        }
+    }
+}
+
+#[test]
 fn cc_oracle_xor_budgets_controls_and_arguments() {
     let text = std::fs::read_to_string(fixtures().join("inc8.bisa")).unwrap();
     let text = add_cc(

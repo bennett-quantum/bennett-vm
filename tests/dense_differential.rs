@@ -2,7 +2,7 @@
 //! The exact engine is the semantic reference (epsilon = 0); the dense
 //! engine must agree within its own stated floating-point bound.
 use bennett_vm::action::QuantumState;
-use bennett_vm::dense::{Complex, DenseState};
+use bennett_vm::dense::{Complex, DenseState, Gate};
 use std::collections::BTreeMap;
 
 type Amp = (f64, f64);
@@ -24,10 +24,15 @@ fn exact_amps(q: &QuantumState, n: usize) -> BTreeMap<usize, Amp> {
 
 fn assert_agree(d: &DenseState, q: &QuantumState, n: usize, ctx: &str) {
     let ex = exact_amps(q, n);
-    let tol = 1e-12_f64.max(1000.0 * d.error_bound());
+    // Account only for the exact engine's final f64 projection here;
+    // the dense engine must supply its own forward-error allowance.
+    let projection = 8.0 * f64::EPSILON;
+    let tol = d.error_bound() + projection;
+    let mut distance2 = 0.0;
     for i in 0..1usize << n {
         let z = d.amplitude(i);
         let e = ex[&i];
+        distance2 += (z.re - e.0).powi(2) + (z.im - e.1).powi(2);
         assert!(
             (z.re - e.0).abs() <= tol && (z.im - e.1).abs() <= tol,
             "{ctx} amp[{i}]: dense=({},{}) exact=({},{}) bound={:e}",
@@ -38,6 +43,12 @@ fn assert_agree(d: &DenseState, q: &QuantumState, n: usize, ctx: &str) {
             d.error_bound()
         );
     }
+    assert!(
+        distance2.sqrt() <= d.error_bound() + projection * (d.len() as f64).sqrt(),
+        "{ctx}: 2-norm distance {} exceeds numerical bound {} plus projection allowance",
+        distance2.sqrt(),
+        d.error_bound()
+    );
 }
 
 #[test]
@@ -147,4 +158,100 @@ fn grover_two_qubit_marks_target_like_exact_engine() {
     q.apply1(0, &[], h_amp());
     q.apply1(1, &[], h_amp());
     assert_agree(&d, &q, 2, "grover");
+}
+
+#[test]
+fn longer_fused_and_scalar_sequences_stay_within_reported_bound() {
+    let n = 4;
+    let mut exact = QuantumState::new();
+    exact.alloc_wires(n);
+    let mut fused = DenseState::with_threads(n, 1);
+    let mut scalar = fused.clone();
+    scalar.set_simd_enabled(false);
+    let mut group = Vec::new();
+    for step in 0..128 {
+        let target = (step / 3 + step) % n;
+        let control = (target + 1) % n;
+        let gate = match step % 8 {
+            0 | 1 => Gate::One {
+                target,
+                controls: vec![],
+                m: h_c(),
+            },
+            2 => Gate::Flip {
+                target,
+                controls: vec![control],
+            },
+            3 => Gate::Diagonal {
+                target,
+                controls: vec![],
+                d: [
+                    Complex::ONE,
+                    Complex::new(
+                        std::f64::consts::FRAC_1_SQRT_2,
+                        -std::f64::consts::FRAC_1_SQRT_2,
+                    ),
+                ],
+            },
+            4 => Gate::One {
+                target,
+                controls: vec![control],
+                m: h_c(),
+            },
+            5 => Gate::Diagonal {
+                target,
+                controls: vec![control],
+                d: [Complex::I, Complex::ONE],
+            },
+            6 => Gate::One {
+                target,
+                controls: vec![],
+                m: [[Complex::ZERO, -Complex::I], [Complex::I, Complex::ZERO]],
+            },
+            _ => Gate::One {
+                target,
+                controls: vec![],
+                m: [
+                    [Complex::new(0.6, 0.0), Complex::new(-0.8, 0.0)],
+                    [Complex::new(0.8, 0.0), Complex::new(0.6, 0.0)],
+                ],
+            },
+        };
+        match &gate {
+            Gate::One {
+                target,
+                controls,
+                m,
+            } => {
+                exact.apply1(*target, controls, m.map(|r| r.map(|z| (z.re, z.im))));
+                scalar.apply1(*target, controls, *m);
+            }
+            Gate::Diagonal {
+                target,
+                controls,
+                d,
+            } => {
+                exact.apply1(
+                    *target,
+                    controls,
+                    [
+                        [(d[0].re, d[0].im), (0.0, 0.0)],
+                        [(0.0, 0.0), (d[1].re, d[1].im)],
+                    ],
+                );
+                scalar.diagonal1(*target, controls, d[0], d[1]);
+            }
+            Gate::Flip { target, controls } => {
+                exact.flip(*target, controls);
+                scalar.flip(*target, controls);
+            }
+        }
+        group.push(gate);
+        if group.len() == 8 {
+            fused.apply_fused(&group);
+            assert_agree(&fused, &exact, n, "long fused");
+            assert_agree(&scalar, &exact, n, "long scalar");
+            group.clear();
+        }
+    }
 }

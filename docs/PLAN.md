@@ -93,14 +93,17 @@ frames, never re-execution.
    bead bennett-vm-bjm; engine-selection wiring pending).** A qHiPSTER-style
    dense simulator in `src/dense/` alongside the exact sparse engine: SoA
    binary64 amplitudes (16 bytes/amplitude, one state vector + O(1) scratch),
-   in-place blocked pair kernels, gate fusion, diagonal/permutation fast paths,
+   in-place blocked pair kernels, cache-resident gate fusion, diagonal/permutation fast paths,
    XOR-oracle branch enumeration, measurement with collapse, `std::thread`
-   static partitioning and AVX2/FMA with a tested scalar fallback. Evidence is
-   always kind `numerical` with an accumulated floating-point bound, never
+   static partitioning and AVX2/FMA with a tested scalar fallback. Measurement
+   uses balanced prefix reductions without an outcome table. Simulation evidence is
+   always kind `numerical` with state and measurement error bounds, never
    `exhaustive` (design: `docs/design/dense-engine.md`; benchmarks:
    `examples/dense_bench.rs`, numbers recorded in the design doc). Remaining:
    selection via `BENNETT_VM_ENGINE=dense` in the Q-action/CC paths and the
-   full action corpus differential, a later stage after rhc lands.
+   full action corpus differential and certificate provenance, after the
+   orchestrator merges closed rhc from main and notifies this job. State-error
+   metadata does not replace ISA 0.9's interval-checked numerical claims.
 
 ## ISA 0.9 watch list (draft, not accepted; build stays on 0.8)
 

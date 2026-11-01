@@ -120,7 +120,9 @@ fn seeded_state(n: usize, seed: u64) -> DenseState {
 }
 
 fn assert_close(d: &DenseState, s: &Slow, ctx: &str) {
-    let tol = 1e-12_f64.max(1000.0 * d.error_bound());
+    // The slow f64 oracle also rounds; allow one independent budget,
+    // not the predecessor's 1000x multiplier and fixed 1e-12 floor.
+    let tol = 2.0 * d.error_bound() + 8.0 * f64::EPSILON;
     for i in 0..d.len() {
         let z = d.amplitude(i);
         assert!(
@@ -374,14 +376,14 @@ fn fused_groups_match_sequential_and_slow_oracle() {
     }
     assert_close(&fused, &slow, "fused vs slow");
     for i in 0..fused.len() {
-        let tol = 1e-12_f64.max(1000.0 * fused.error_bound());
+        let tol = fused.error_bound() + seq.error_bound() + 8.0 * f64::EPSILON;
         assert!(
             (fused.amplitude(i).re - seq.amplitude(i).re).abs() <= tol
                 && (fused.amplitude(i).im - seq.amplitude(i).im).abs() <= tol,
             "fused vs seq amp[{i}]"
         );
     }
-    // Oversized group (>6 wires) must still be correct via sequential fallback.
+    // Exercise the six-wire fusion limit, including a five-control flip.
     let big: Vec<Gate> = (0..6)
         .map(|t| Gate::One {
             target: t,
@@ -406,7 +408,7 @@ fn fused_groups_match_sequential_and_slow_oracle() {
             k
         }
     });
-    assert_close(&d2, &s2, "fused oversized fallback");
+    assert_close(&d2, &s2, "six-wire fusion limit");
 }
 #[test]
 fn fused_contiguous_low_wires_match_slow_oracle() {
@@ -553,14 +555,15 @@ fn scalar_fallback_matches_default_path() {
     };
     let a = build(true);
     let b = build(false);
-    if a.simd_active() || !cfg!(target_arch = "x86_64") { /* comparison still meaningful */ }
+    let mut distance2 = 0.0;
     for i in 0..a.len() {
-        assert!(
-            (a.amplitude(i).re - b.amplitude(i).re).abs() < 1e-12
-                && (a.amplitude(i).im - b.amplitude(i).im).abs() < 1e-12,
-            "simd/scalar amp[{i}]"
-        );
+        distance2 += (a.amplitude(i) - b.amplitude(i)).norm2();
     }
+    assert!(
+        distance2.sqrt() <= a.error_bound() + b.error_bound(),
+        "SIMD/scalar norm distance {}",
+        distance2.sqrt()
+    );
 }
 
 #[test]
@@ -614,4 +617,181 @@ fn control_equals_target_panics() {
 #[should_panic]
 fn draw_out_of_range_panics() {
     DenseState::new(2).measure(&[0], 1.5);
+}
+
+#[test]
+fn probability_reduction_retains_small_positive_terms() {
+    let mut d = DenseState::with_threads(17, 1);
+    for i in 1..d.len() {
+        d.set_amplitude(i, Complex::new(2.0f64.powi(-30), 0.0));
+    }
+    let expected = 1.0 + (d.len() - 1) as f64 * 2.0f64.powi(-60);
+    assert!((d.norm2() - expected).abs() <= 2.0 * f64::EPSILON);
+    assert!((d.probabilities(&[])[0] - expected).abs() <= 2.0 * f64::EPSILON);
+}
+
+#[test]
+fn measurement_near_one_never_selects_zero_mass() {
+    let mut d = DenseState::with_threads(2, 1);
+    d.set_amplitude(0, Complex::ZERO);
+    d.set_amplitude(1, Complex::new(1.0 - f64::EPSILON, 0.0));
+    assert_eq!(d.measure(&[0, 1], 1.0f64.next_down()), (1, "10".into()));
+    assert!((d.norm2() - 1.0).abs() <= 4.0 * f64::EPSILON);
+}
+
+#[test]
+fn measurement_bound_accounts_for_rare_outcome_conditioning() {
+    let mut d = DenseState::with_threads(2, 1);
+    d.h_gate(0);
+    d.ry(1, 2.0e-6);
+    let probability = d.probabilities(&[1])[1];
+    let before = d.error_bound();
+    assert_eq!(d.measure(&[1], 1.0f64.next_down()).0, 1);
+    assert!(
+        d.error_bound() >= before / probability.sqrt(),
+        "conditional bound {} omitted amplification of {before} by 1/sqrt({probability})",
+        d.error_bound()
+    );
+}
+
+#[test]
+fn fused_long_sequence_accounts_for_every_gate() {
+    let group = vec![
+        Gate::One {
+            target: 0,
+            controls: vec![],
+            m: h()
+        };
+        1000
+    ];
+    let mut fused = DenseState::with_threads(1, 1);
+    let mut seq = fused.clone();
+    fused.apply_fused(&group);
+    for _ in 0..group.len() {
+        seq.h_gate(0);
+    }
+    assert!(fused.error_bound() >= seq.error_bound());
+    for i in 0..fused.len() {
+        assert!(
+            (fused.amplitude(i).re - seq.amplitude(i).re).abs()
+                <= fused.error_bound() + seq.error_bound()
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "zero or non-finite norm")]
+fn measurement_of_zero_state_panics() {
+    let mut d = DenseState::with_threads(2, 1);
+    d.set_amplitude(0, Complex::ZERO);
+    d.measure(&[0], 0.5);
+}
+
+#[test]
+#[should_panic(expected = "duplicate wire")]
+fn measurement_duplicate_wires_panics() {
+    DenseState::with_threads(2, 1).measure(&[0, 0], 0.5);
+}
+
+#[test]
+#[should_panic(expected = "overflow")]
+fn huge_qubit_count_does_not_truncate() {
+    // Also catches truncation through `n as u32` on 64-bit hosts.
+    let n = 1usize.checked_shl(32).unwrap_or(usize::MAX);
+    DenseState::with_threads(n, 1);
+}
+
+#[test]
+fn threaded_measurement_and_all_wire_reset_match_single_thread() {
+    let mut one = seeded_state(17, 89723);
+    // Use explicit counts regardless of the host CPU count.
+    let mut four = DenseState::with_threads(17, 4);
+    for i in 0..one.len() {
+        four.set_amplitude(i, one.amplitude(i));
+    }
+    for (wires, draw) in [(&[16usize, 2, 0][..], 0.718), (&[1usize, 15][..], 0.111)] {
+        assert_eq!(one.measure(wires, draw), four.measure(wires, draw));
+        let mut distance2 = 0.0;
+        for i in 0..one.len() {
+            let delta = one.amplitude(i) - four.amplitude(i);
+            distance2 += delta.norm2();
+        }
+        assert!(distance2.sqrt() <= one.error_bound() + four.error_bound());
+        assert!((four.norm2() - 1.0).abs() < 32.0 * f64::EPSILON);
+    }
+    let wires: Vec<_> = (0..17).rev().collect();
+    four.measure(&wires, 0.921);
+    assert!((four.amplitude(0).norm2() - 1.0).abs() < 32.0 * f64::EPSILON);
+    assert!((four.norm2() - four.amplitude(0).norm2()).abs() < f64::EPSILON);
+    assert!(four.evidence().measurement_error_bound > 0.0);
+}
+
+#[test]
+fn scattered_and_oversized_fusion_match_independent_oracle() {
+    let mut d = seeded_state(17, 7231);
+    let mut slow = Slow::from_dense(&d);
+    for targets in [vec![0, 10, 16], vec![0, 1, 2, 3, 4, 10, 16]] {
+        let mut group: Vec<_> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| Gate::One {
+                target: t,
+                controls: if i == 0 { vec![] } else { vec![targets[i - 1]] },
+                m: u(0.13 * (i + 1) as f64, -0.7),
+            })
+            .collect();
+        group.push(Gate::Diagonal {
+            target: 16,
+            controls: vec![0],
+            d: [Complex::I, Complex::ONE],
+        });
+        group.push(Gate::Flip {
+            target: 10,
+            controls: vec![0, 16],
+        });
+        d.apply_fused(&group);
+        for g in group {
+            match g {
+                Gate::One {
+                    target,
+                    controls,
+                    m,
+                } => slow.apply1(target, &controls, cc(m)),
+                Gate::Diagonal {
+                    target,
+                    controls,
+                    d,
+                } => slow.apply1(
+                    target,
+                    &controls,
+                    [
+                        [(d[0].re, d[0].im), (0.0, 0.0)],
+                        [(0.0, 0.0), (d[1].re, d[1].im)],
+                    ],
+                ),
+                Gate::Flip { target, controls } => slow.map_basis(|i| {
+                    if controls.iter().all(|&w| i >> w & 1 == 1) {
+                        i ^ (1 << target)
+                    } else {
+                        i
+                    }
+                }),
+            }
+        }
+        assert_close(&d, &slow, "scattered/oversized fusion");
+    }
+}
+
+#[test]
+#[should_panic(expected = "error bound")]
+fn overflowing_error_bound_fails_loudly() {
+    let mut d = DenseState::with_threads(1, 1);
+    d.apply1(
+        0,
+        &[],
+        [
+            [Complex::new(f64::MAX, 0.0), Complex::ZERO],
+            [Complex::ZERO, Complex::ONE],
+        ],
+    );
 }

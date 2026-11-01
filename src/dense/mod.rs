@@ -11,14 +11,11 @@
 //! `phase_if_all`, `swap` and `measure` mirror that exact engine; this
 //! engine's evidence kind is always `"numerical"` with the accumulated
 //! floating-point bound from `error_bound()`, never `"exhaustive"`.
-
-use std::collections::BTreeMap;
-
 /// Binary64 unit roundoff, `2^-53`.
 const U: f64 = 1.110_223_024_625_156_5e-16;
-/// Work items below this run single-threaded (spawn cost dominates).
+/// States smaller than this run single-threaded (spawn cost dominates).
 const THREAD_MIN_ITEMS: usize = 1 << 14;
-/// Maximum wires in one fused group (matrix is at most 64x64).
+/// Maximum involved wires in one fused group (local vector <=64).
 const FUSE_MAX_WIRES: usize = 6;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -103,6 +100,9 @@ pub struct Evidence {
     pub error_bound: f64,
     pub qubits: usize,
     pub gates: u64,
+    /// Accumulated bound on measurement distribution error (total variation).
+    /// The state error after measurement is conditional on its returned outcome.
+    pub measurement_error_bound: f64,
 }
 
 /// Raw `f64` pointer shared between worker threads.
@@ -137,11 +137,7 @@ fn run_ranges(total: usize, threads: usize, f: impl Fn(usize, usize) + Sync) {
     if total == 0 {
         return;
     }
-    let t = if total < THREAD_MIN_ITEMS {
-        1
-    } else {
-        threads.min(total)
-    };
+    let t = threads.min(total);
     if t <= 1 {
         f(0, total);
         return;
@@ -171,6 +167,8 @@ pub struct DenseState {
     threads: usize,
     gates: u64,
     bound: f64,
+    norm_upper: f64,
+    measurement_bound: f64,
     simd: bool,
 }
 
@@ -189,6 +187,10 @@ impl DenseState {
     /// If `threads == 0` or `2^n` does not fit an index (fail loud).
     pub fn with_threads(n: usize, threads: usize) -> Self {
         assert!(threads >= 1, "dense: thread count must be >= 1, got 0");
+        assert!(
+            n < usize::BITS as usize,
+            "dense: 2^{n} amplitudes overflow usize indexing"
+        );
         let size = 1usize
             .checked_shl(n as u32)
             .unwrap_or_else(|| panic!("dense: 2^{n} amplitudes overflow usize indexing"));
@@ -203,6 +205,8 @@ impl DenseState {
             threads,
             gates: 0,
             bound: 0.0,
+            norm_upper: 1.0,
+            measurement_bound: 0.0,
             simd: true,
         };
         if threads > 1 && size >= THREAD_MIN_ITEMS {
@@ -253,14 +257,20 @@ impl DenseState {
             error_bound: self.bound,
             qubits: self.n,
             gates: self.gates,
+            measurement_error_bound: self.measurement_bound,
         }
     }
     pub fn amplitude(&self, i: usize) -> Complex {
         Complex::new(self.re[i], self.im[i])
     }
-    /// Overwrite one amplitude. Does NOT renormalise and does not
-    /// charge the error bound: state preparation is exact input.
+    /// Overwrite one amplitude during input preparation. Does not
+    /// renormalise: error accounting assumes normalized prepared input.
+    /// State preparation is exact input, outside the gate error budget.
     pub fn set_amplitude(&mut self, i: usize, v: Complex) {
+        assert!(
+            v.re.is_finite() && v.im.is_finite(),
+            "dense: non-finite prepared amplitude"
+        );
         self.re[i] = v.re;
         self.im[i] = v.im;
     }
@@ -272,41 +282,43 @@ impl DenseState {
         self.simd && avx2_fma_detected()
     }
 
-    /// Sum of |amplitude|^2 (parallel chunked reduction, fixed order).
+    /// Sum of |amplitude|^2 (balanced reduction, fixed chunk order).
     pub fn norm2(&self) -> f64 {
-        let size = self.len();
-        let t = if size < THREAD_MIN_ITEMS {
-            1
-        } else {
-            self.threads
-        };
-        if t <= 1 {
-            return (0..size)
-                .map(|i| self.re[i] * self.re[i] + self.im[i] * self.im[i])
-                .sum();
-        }
-        let chunk = size.div_ceil(t);
-        let partials: Vec<f64> = std::thread::scope(|s| {
-            let mut handles = Vec::new();
-            let mut lo = 0;
-            while lo < size {
-                let hi = (lo + chunk).min(size);
-                let (re, im) = (&self.re, &self.im);
-                handles.push(
-                    s.spawn(move || (lo..hi).map(|i| re[i] * re[i] + im[i] * im[i]).sum::<f64>()),
-                );
-                lo = hi;
-            }
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("dense: norm worker panicked"))
-                .collect()
-        });
-        partials.iter().sum()
+        self.reduce_probabilities(0, 0, 0)[0]
     }
 
-    fn charge(&mut self, k: f64) {
-        self.bound += k * U * (1.0 + self.bound);
+    fn workers(&self) -> usize {
+        if self.len() < THREAD_MIN_ITEMS {
+            1
+        } else {
+            self.threads.min(self.len())
+        }
+    }
+    fn charge(&mut self, amplification: f64, operations: usize) {
+        // The gate's spectral-norm bound accounts for binary64 entries
+        // which are not perfectly unitary, and for general linear input.
+        assert!(
+            amplification.is_finite(),
+            "dense: error bound overflow in gate norm"
+        );
+        // A conservative absolute allowance also covers gradual
+        // underflow (the relative-error model alone does not).
+        let absolute = operations as f64 * f64::MIN_POSITIVE * (self.len() as f64).sqrt();
+        self.bound = (amplification * self.bound
+            + gamma(operations) * amplification * (self.norm_upper + self.bound)
+            + absolute)
+            .next_up();
+        self.norm_upper = (amplification * self.norm_upper).next_up();
+        assert!(
+            self.bound.is_finite() && self.norm_upper.is_finite(),
+            "dense: error bound overflow"
+        );
+    }
+    fn check_wires(&self, wires: &[usize]) {
+        for (i, &w) in wires.iter().enumerate() {
+            self.check_wire(w);
+            assert!(!wires[..i].contains(&w), "dense: duplicate wire {w}");
+        }
     }
     fn check_wire(&self, w: usize) {
         assert!(
@@ -358,8 +370,17 @@ impl DenseState {
         let cmask: usize = controls.iter().fold(0, |acc, &c| acc | (1usize << c));
         let (a, b, c, d) = (m[0][0], m[0][1], m[1][0], m[1][1]);
         let (re, im) = self.ptrs();
-        let threads = self.threads;
-        if controls.is_empty() && self.simd && stride >= 4 && avx2_fma_detected() {
+        let threads = self.workers();
+        if controls.is_empty() && self.simd_active() && stride < 4 && self.len() >= 4 {
+            #[cfg(target_arch = "x86_64")]
+            run_ranges(self.len() / 4, threads, move |lo, hi| {
+                // SAFETY: every four-lane group contains whole pairs
+                // for either low wire, and groups are disjoint.
+                unsafe { apply1_avx2_low(re, im, lo * 4, (hi - lo) * 4, stride, m) };
+            });
+            #[cfg(not(target_arch = "x86_64"))]
+            unreachable!("dense: AVX2 detected on a non-x86_64 target");
+        } else if controls.is_empty() && self.simd_active() && stride >= 4 {
             // AVX2 over groups of 4 consecutive pairs; stride is a
             // power of two >= 4, so a group never crosses a run edge.
             // SAFETY: pair groups are disjoint by partition.
@@ -413,7 +434,7 @@ impl DenseState {
             });
         }
         self.gates += 1;
-        self.charge(8.0);
+        self.charge(matrix_norm_upper(&m), 32);
     }
 
     /// Diagonal 1-qubit gate `diag(d0, d1)` under all-ones controls.
@@ -427,7 +448,7 @@ impl DenseState {
         let cmask: usize = controls.iter().fold(0, |acc, &c| acc | (1usize << c));
         let size = self.len();
         let (re, im) = self.ptrs();
-        run_ranges(size, self.threads, move |lo, hi| {
+        run_ranges(size, self.workers(), move |lo, hi| {
             for i in lo..hi {
                 if i & cmask != cmask {
                     continue;
@@ -445,7 +466,7 @@ impl DenseState {
             }
         });
         self.gates += 1;
-        self.charge(4.0);
+        self.charge(phase_norm_upper(d0).max(phase_norm_upper(d1)), 8);
     }
 
     /// Multiply amplitudes with every wire in `wires` equal to 1 by
@@ -461,7 +482,7 @@ impl DenseState {
         let mask: usize = wires.iter().fold(0, |acc, &w| acc | (1usize << w));
         let size = self.len();
         let (re, im) = self.ptrs();
-        run_ranges(size, self.threads, move |lo, hi| {
+        run_ranges(size, self.workers(), move |lo, hi| {
             for i in lo..hi {
                 if i & mask != mask {
                     continue;
@@ -475,7 +496,7 @@ impl DenseState {
             }
         });
         self.gates += 1;
-        self.charge(4.0);
+        self.charge(phase_norm_upper(phase), 8);
     }
 
     /// Flip `target` where every control is 1 (permutation gate:
@@ -487,7 +508,7 @@ impl DenseState {
         let pairs = self.len() / 2;
         let cmask: usize = controls.iter().fold(0, |acc, &c| acc | (1usize << c));
         let (re, im) = self.ptrs();
-        run_ranges(pairs, self.threads, move |lo, hi| {
+        run_ranges(pairs, self.workers(), move |lo, hi| {
             for p in lo..hi {
                 let i0 = pair_index(p, stride);
                 if i0 & cmask != cmask {
@@ -521,7 +542,7 @@ impl DenseState {
         let (re, im) = self.ptrs();
         // Source indices have bit a = 0, bit b = 1; each pair is
         // touched exactly once and pairs are disjoint.
-        run_ranges(size, self.threads, move |lo, hi| {
+        run_ranges(size, self.workers(), move |lo, hi| {
             for i in lo..hi {
                 if i & ba == 0 && i & bb != 0 {
                     let j = i ^ ba ^ bb;
@@ -626,9 +647,8 @@ impl DenseState {
         target_wires: &[usize],
         mut f: impl FnMut(usize) -> usize,
     ) {
-        for &w in input_wires.iter().chain(target_wires) {
-            self.check_wire(w);
-        }
+        self.check_wires(input_wires);
+        self.check_wires(target_wires);
         for &w in target_wires {
             assert!(
                 !input_wires.contains(&w),
@@ -643,10 +663,9 @@ impl DenseState {
         } else {
             (1usize << target_wires.len()) - 1
         };
-        let mut memo: BTreeMap<usize, usize> = BTreeMap::new();
         let mut table = Vec::with_capacity(n_in);
         for x in 0..n_in {
-            let y = *memo.entry(x).or_insert_with(|| f(x));
+            let y = f(x);
             assert!(
                 y & !tout_max == 0,
                 "dense: oracle output {y} does not fit {} target wires",
@@ -660,7 +679,7 @@ impl DenseState {
         let (re, im) = self.ptrs();
         // Partner of i keeps the input bits and XORs f(x) into the
         // target bits: an involution, so disjoint pair swaps.
-        run_ranges(size, self.threads, move |lo, hi| {
+        run_ranges(size, self.workers(), move |lo, hi| {
             for i in lo..hi {
                 let mut x = 0usize;
                 for (b, &w) in in_w.iter().enumerate() {
@@ -693,158 +712,221 @@ impl DenseState {
     }
 }
 
-/// Extract the value on `wires` (list order = bit order) from index `i`.
-fn extract_wires(i: usize, wires: &[usize]) -> usize {
-    let mut v = 0usize;
-    for (b, &w) in wires.iter().enumerate() {
-        v |= ((i >> w) & 1) << b;
+fn gamma(operations: usize) -> f64 {
+    let ku = operations as f64 * U;
+    (ku / (1.0 - ku)).next_up()
+}
+
+// Bound ||M||_2 through the row-sum norm of the 2x2 Gram matrix.
+// The additive margin bounds rounding, including cancellation in
+// off-diagonal inner products. Identity control sectors have norm 1.
+fn matrix_norm_upper(m: &[[Complex; 2]; 2]) -> f64 {
+    let sq = |z: Complex| z.re * z.re + z.im * z.im;
+    let g0 = sq(m[0][0]) + sq(m[1][0]);
+    let g1 = sq(m[0][1]) + sq(m[1][1]);
+    if !g0.is_finite() || !g1.is_finite() {
+        return f64::INFINITY;
     }
-    v
+    let inner =
+        |a: Complex, b: Complex| Complex::new(a.re * b.re + a.im * b.im, a.re * b.im - a.im * b.re);
+    let off = inner(m[0][0], m[0][1]) + inner(m[1][0], m[1][1]);
+    ((g0.max(g1) + off.re.hypot(off.im) + gamma(32) * (g0 + g1)).sqrt() * (1.0 + gamma(4)))
+        .next_up()
+        .max(1.0)
+}
+
+fn phase_norm_upper(z: Complex) -> f64 {
+    (z.re.hypot(z.im) * (1.0 + gamma(4))).next_up().max(1.0)
+}
+
+fn sum_partials(parts: &[[f64; 2]]) -> [f64; 2] {
+    if parts.len() == 1 {
+        return parts[0];
+    }
+    let mid = parts.len() / 2;
+    let a = sum_partials(&parts[..mid]);
+    let b = sum_partials(&parts[mid..]);
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+fn sum_split(
+    re: &[f64],
+    im: &[f64],
+    start: usize,
+    mask: usize,
+    value: usize,
+    bit: usize,
+) -> [f64; 2] {
+    if re.len() <= 32 {
+        let mut out = [0.0; 2];
+        for i in 0..re.len() {
+            let index = start + i;
+            if index & mask == value {
+                out[usize::from(index & bit != 0)] += re[i] * re[i] + im[i] * im[i];
+            }
+        }
+        return out;
+    }
+    let mid = re.len() / 2;
+    let a = sum_split(&re[..mid], &im[..mid], start, mask, value, bit);
+    let b = sum_split(&re[mid..], &im[mid..], start + mid, mask, value, bit);
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+// Power-of-two slices let fixed outcome bits prune entire subtrees.
+// Across all outcome bins, the leaves visit each amplitude once.
+fn sum_outcome(re: &[f64], im: &[f64], mask: usize, value: usize) -> f64 {
+    if re.len() == 1 {
+        return re[0] * re[0] + im[0] * im[0];
+    }
+    let mid = re.len() / 2;
+    if mask & mid != 0 {
+        if value & mid == 0 {
+            sum_outcome(&re[..mid], &im[..mid], mask, value)
+        } else {
+            sum_outcome(&re[mid..], &im[mid..], mask, value)
+        }
+    } else {
+        sum_outcome(&re[..mid], &im[..mid], mask, value)
+            + sum_outcome(&re[mid..], &im[mid..], mask, value)
+    }
 }
 
 impl DenseState {
-    fn outcome_probs_sparse(&self, wires: &[usize]) -> BTreeMap<usize, f64> {
-        for &w in wires {
-            self.check_wire(w);
+    // A pair of probabilities for a prefix and its next wire. Each
+    // leaf sums at most 32 entries, then all sums form a balanced tree.
+    // Scratch is O(workers * log(amplitudes)), independent of outcomes.
+    fn reduce_probabilities(&self, mask: usize, value: usize, bit: usize) -> [f64; 2] {
+        if self.workers() == 1 {
+            return sum_split(&self.re, &self.im, 0, mask, value, bit);
         }
-        let size = self.len();
-        let t = if size < THREAD_MIN_ITEMS {
-            1
-        } else {
-            self.threads
-        };
-        let partial = |lo: usize, hi: usize, re: &[f64], im: &[f64]| {
-            let mut m: BTreeMap<usize, f64> = BTreeMap::new();
-            for i in lo..hi {
-                *m.entry(extract_wires(i, wires)).or_insert(0.0) += re[i] * re[i] + im[i] * im[i];
-            }
-            m
-        };
-        if t <= 1 {
-            return partial(0, size, &self.re, &self.im);
-        }
-        let chunk = size.div_ceil(t);
-        let parts: Vec<BTreeMap<usize, f64>> = std::thread::scope(|s| {
-            let mut handles = Vec::new();
-            let mut lo = 0;
-            while lo < size {
-                let hi = (lo + chunk).min(size);
-                let (re, im) = (&self.re, &self.im);
-                handles.push(s.spawn(move || partial(lo, hi, re, im)));
-                lo = hi;
-            }
+        let chunk = self.len().div_ceil(self.workers());
+        let parts: Vec<[f64; 2]> = std::thread::scope(|scope| {
+            let handles: Vec<_> = self
+                .re
+                .chunks(chunk)
+                .zip(self.im.chunks(chunk))
+                .enumerate()
+                .map(|(i, (re, im))| {
+                    scope.spawn(move || sum_split(re, im, i * chunk, mask, value, bit))
+                })
+                .collect();
             handles
                 .into_iter()
                 .map(|h| h.join().expect("dense: probability worker panicked"))
                 .collect()
         });
-        // Merge in fixed chunk order: deterministic for a thread count.
-        let mut out: BTreeMap<usize, f64> = BTreeMap::new();
-        for part in parts {
-            for (k, v) in part {
-                *out.entry(k).or_insert(0.0) += v;
+        sum_partials(&parts)
+    }
+
+    /// Born probabilities indexed by outcome value (bit b = wires[b]).
+    /// This explicit diagnostic allocates its returned outcome table;
+    /// `measure` does not allocate a table or a second state vector.
+    pub fn probabilities(&self, wires: &[usize]) -> Vec<f64> {
+        self.check_wires(wires);
+        let size = 1usize << wires.len();
+        let mask = wires.iter().fold(0, |m, &w| m | (1usize << w));
+        let mut out = vec![0.0; size];
+        let ptr = Ptr(out.as_mut_ptr());
+        run_ranges(size, self.workers(), |lo, hi| {
+            for v in lo..hi {
+                let bits = wires
+                    .iter()
+                    .enumerate()
+                    .fold(0, |m, (b, &w)| m | (((v >> b) & 1) << w));
+                let p = sum_outcome(&self.re, &self.im, mask, bits);
+                // SAFETY: each output bin has exactly one worker.
+                unsafe { ptr.set(v, p) };
             }
-        }
+        });
         out
     }
 
-    /// Born probabilities for `wires`, indexed by outcome value (bit
-    /// `b` of the index is `wires[b]`).
-    pub fn probabilities(&self, wires: &[usize]) -> Vec<f64> {
-        assert!(
-            wires.len() <= 31,
-            "dense: probability table for {} wires is too large to materialise",
-            wires.len()
-        );
-        let sparse = self.outcome_probs_sparse(wires);
-        let mut p = vec![0.0; 1usize << wires.len()];
-        for (v, prob) in sparse {
-            p[v] = prob;
-        }
-        p
-    }
-
-    /// Measure `wires` with caller-supplied `draw` in `[0, 1)`.
+    /// Measure in lexicographic wire-list order, collapse, and reset
+    /// measured wires to zero, as in `QuantumState::measure`.
+    /// Randomness and K17 draw ordering belong to the caller.
     ///
-    /// Mirrors `QuantumState::measure`: outcomes are enumerated in
-    /// lexicographic order in wire-list order (first listed wire is
-    /// most significant for ordering); the first outcome whose
-    /// cumulative probability exceeds `draw` wins; the state collapses
-    /// and renormalises, and the measured wires are reset to 0 in the
-    /// remaining state. Returns `(value, bits)` with `bits[b]` the
-    /// outcome of `wires[b]`. This engine never draws randomness:
-    /// K17 draw order is the caller's concern.
+    /// Balanced prefix reductions sample without an exponential outcome
+    /// table. Draws are normalised to the computed positive mass, so
+    /// norm drift cannot select a zero-probability outcome near draw=1.
+    /// The post-measurement state bound is conditional on this outcome;
+    /// evidence also reports measurement distribution uncertainty.
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (usize, String) {
         assert!(!wires.is_empty(), "dense: measure needs at least one wire");
+        self.check_wires(wires);
         assert!(
             (0.0..1.0).contains(&draw),
             "dense: measure draw {draw} outside [0, 1)"
         );
-        let probs = self.outcome_probs_sparse(wires);
-        let k = wires.len();
-        let mut ordered: Vec<usize> = probs.keys().copied().collect();
-        ordered.sort_by_key(|&v| {
-            // Lexicographic in wire order = ascending bit-reversed value.
-            let mut r = 0usize;
-            for b in 0..k {
-                r |= ((v >> b) & 1) << (k - 1 - b);
-            }
-            r
-        });
-        let mut cumulative = 0.0;
-        let mut chosen: Option<usize> = None;
-        for v in ordered {
-            cumulative += probs[&v];
-            if draw < cumulative {
-                chosen = Some(v);
-                break;
-            }
-        }
-        let value = chosen.or_else(|| probs.keys().max().copied()).unwrap_or(0);
-        let p = probs.get(&value).copied().unwrap_or(1.0);
-        let scale = if p > 0.0 { 1.0 / p.sqrt() } else { 1.0 };
-        // Bits of `value` spread back onto the measured wires.
-        let mut chosen_bits = 0usize;
+        let mut conditional_draw = draw;
+        let (mut measured_mask, mut chosen_bits, mut value) = (0usize, 0usize, 0usize);
+        let mut p = 0.0;
+        let eta = gamma(2 * self.n + 64);
+        let absolute = 4.0 * self.len() as f64 * f64::MIN_POSITIVE;
+        let before = self.bound;
+        // For normalized ideal input, normalized approximate-state
+        // measurement differs by at most 2B+B^2 in total variation.
+        self.measurement_bound = (self.measurement_bound
+            + 2.0 * before
+            + before * before
+            + absolute
+            + (wires.len() as f64 + 1.0) * 8.0 * eta)
+            .min(1.0)
+            .next_up()
+            .min(1.0);
         for (b, &w) in wires.iter().enumerate() {
-            if (value >> b) & 1 == 1 {
-                chosen_bits |= 1usize << w;
+            let bit = 1usize << w;
+            let [p0, p1] = self.reduce_probabilities(measured_mask, chosen_bits, bit);
+            let total = p0 + p1;
+            assert!(
+                total > 0.0 && total.is_finite(),
+                "dense: measurement has zero or non-finite norm"
+            );
+            let position = conditional_draw * total;
+            let one = p1 > 0.0 && (p0 == 0.0 || position >= p0);
+            if one {
+                chosen_bits |= bit;
+                value |= 1usize << b;
+                p = p1;
+                conditional_draw = ((position - p0) / p1).clamp(0.0, 1.0f64.next_down());
+            } else {
+                p = p0;
+                conditional_draw = (position / p0).clamp(0.0, 1.0f64.next_down());
             }
+            measured_mask |= bit;
         }
-        let measured_mask: usize = wires.iter().fold(0, |acc, &w| acc | (1usize << w));
-        let wires_v: Vec<usize> = wires.to_vec();
+        let scale = 1.0 / p.sqrt();
+        assert!(
+            scale.is_finite(),
+            "dense: measurement normalization overflow"
+        );
         let size = self.len();
+        let threads = self.workers();
         let (re, im) = self.ptrs();
-        let threads = self.threads;
-        // Pass 1: destination indices (measured bits all 0) receive
-        // the scaled surviving amplitude; non-surviving,
-        // non-destination indices are zeroed. Surviving sources are
-        // left untouched until pass 2 (they are read here).
+        // Destination indices have every measured bit zero. Surviving
+        // sources are untouched until the second pass, so reads cannot
+        // race with another worker's writes. If chosen_bits == 0, the
+        // source is the destination itself and has one owner.
         run_ranges(size, threads, move |lo, hi| {
             for i in lo..hi {
-                let m = extract_wires(i, &wires_v);
-                // SAFETY: writes are to i only; the only read of a
-                // foreign index is a surviving source, not written
-                // in this pass (Ptr contract, two-pass collapse).
                 unsafe {
                     if i & measured_mask == 0 {
                         let src = i | chosen_bits;
-                        let (x0, x1) = (re.get(src), im.get(src));
-                        re.set(i, x0 * scale);
-                        im.set(i, x1 * scale);
-                    } else if m != value {
+                        let (xr, xi) = (re.get(src), im.get(src));
+                        re.set(i, xr * scale);
+                        im.set(i, xi * scale);
+                    } else if i & measured_mask != chosen_bits {
                         re.set(i, 0.0);
                         im.set(i, 0.0);
                     }
                 }
             }
         });
-        // Pass 2: vacate the surviving sources (their content moved).
-        if value != 0 {
-            let wires_v: Vec<usize> = wires.to_vec();
+        if chosen_bits != 0 {
             run_ranges(size, threads, move |lo, hi| {
                 for i in lo..hi {
-                    if extract_wires(i, &wires_v) == value {
-                        // SAFETY: index ranges are disjoint.
+                    if i & measured_mask == chosen_bits {
+                        // SAFETY: index ranges are disjoint; prior pass joined.
                         unsafe {
                             re.set(i, 0.0);
                             im.set(i, 0.0);
@@ -853,21 +935,34 @@ impl DenseState {
                 }
             });
         }
-        self.charge(self.n as f64 + 8.0);
-        let bits: String = (0..k)
-            .map(|b| if (value >> b) & 1 == 1 { '1' } else { '0' })
+        // ||normalize(Px)-normalize(Py)|| <= 2||x-y||/||Py||.
+        // Subtract the reduction's relative and absolute error from
+        // p to bound its true projected norm. Include sqrt, divide and
+        // amplitude-scaling roundoff, rather than charging O(n*u) alone.
+        let probability_error = eta * p + absolute;
+        let lower_p = (p - probability_error).max(0.0);
+        let conditional_error = if lower_p > 0.0 {
+            2.0 * before / lower_p.sqrt()
+        } else {
+            // At underflow-scale mass, use the distance bound from
+            // two vector norms instead of claiming relative accuracy.
+            1.0 + ((p + probability_error) / p).sqrt()
+        };
+        self.bound = (conditional_error + 8.0 * (eta + absolute / p)).next_up();
+        self.norm_upper = 1.0;
+        let bits = (0..wires.len())
+            .map(|b| if value >> b & 1 == 1 { '1' } else { '0' })
             .collect();
         (value, bits)
     }
 }
 
 impl DenseState {
-    /// Apply a consecutive group of gates in ONE pass when their
-    /// involved-wire union has at most 6 wires: the group's unitary
-    /// is built once (at most 64x64) and applied block-wise, so each
-    /// amplitude is touched once per group instead of once per gate.
-    /// Larger unions fall back to sequential application (same
-    /// result, more passes).
+    /// Apply consecutive gates in one cache-blocked traversal when
+    /// their involved-wire union has at most six wires. Low wires use
+    /// 16 KiB resident tiles; scattered wires use a 64-amplitude local
+    /// vector. Gate order and individual gate error charges are kept.
+    /// Larger unions execute sequentially (same result, more passes).
     pub fn apply_fused(&mut self, gates: &[Gate]) {
         if gates.is_empty() {
             return;
@@ -935,79 +1030,166 @@ impl DenseState {
         let pos = |w: usize| wires.iter().position(|&x| x == w).expect("fused wire");
         let k = wires.len();
         let dim = 1usize << k;
-        // Build U (row-major, row = out, col = in) by applying the
-        // gates in order to the identity's columns.
-        let mut u = vec![Complex::ZERO; dim * dim];
-        for c in 0..dim {
-            u[c * dim + c] = Complex::ONE;
-        }
-        let mut col = vec![Complex::ZERO; dim];
-        for c in 0..dim {
-            for r in 0..dim {
-                col[r] = u[r * dim + c];
-            }
-            for g in gates {
-                apply_gate_local(&mut col, g, &pos);
-            }
-            for r in 0..dim {
-                u[r * dim + c] = col[r];
-            }
-        }
-        // Spread tables between local (fused) indices and global ones.
-        let mut spread = vec![0usize; dim];
-        for (local, s) in spread.iter_mut().enumerate() {
-            for (b, &w) in wires.iter().enumerate() {
-                if (local >> b) & 1 == 1 {
-                    *s |= 1usize << w;
+        // qHiPSTER-style fusion: apply the original sparse gates while
+        // a tile stays in cache, avoiding a dense 2^k by 2^k matvec.
+        // Gates keep their original order; no matrix construction error.
+        if wires[k - 1] < 10 {
+            let block_len = 1usize << self.n.min(10);
+            let blocks = self.len() / block_len;
+            let simd = self.simd_active();
+            let threads = self.workers();
+            let (re, im) = self.ptrs();
+            run_ranges(blocks, threads, |lo, hi| {
+                for block in lo..hi {
+                    for gate in gates {
+                        // SAFETY: each worker owns whole tiles, and every
+                        // involved wire is strictly below the tile width.
+                        unsafe {
+                            apply_gate_tile(re, im, block * block_len, block_len, gate, simd)
+                        };
+                    }
+                }
+            });
+        } else {
+            let mut spread = [0usize; 1 << FUSE_MAX_WIRES];
+            for (local, s) in spread[..dim].iter_mut().enumerate() {
+                for (b, &w) in wires.iter().enumerate() {
+                    *s |= ((local >> b) & 1) << w;
                 }
             }
-        }
-        let free: Vec<usize> = (0..self.n).filter(|w| !wires.contains(w)).collect();
-        let contiguous = wires.iter().enumerate().all(|(i, &w)| w == i);
-        let outer_count = self.len() >> k;
-        let (re, im) = self.ptrs();
-        run_ranges(outer_count, self.threads, move |lo, hi| {
-            let mut idxs = vec![0usize; dim];
-            let mut vin = vec![Complex::ZERO; dim];
-            for o in lo..hi {
-                let mut base = 0usize;
-                if contiguous {
-                    base = o << k;
-                } else {
-                    for (b, &w) in free.iter().enumerate() {
-                        if (o >> b) & 1 == 1 {
-                            base |= 1usize << w;
+            let free: Vec<usize> = (0..self.n).filter(|w| !wires.contains(w)).collect();
+            let outer_count = self.len() >> k;
+            let threads = self.workers();
+            let (re, im) = self.ptrs();
+            run_ranges(outer_count, threads, |lo, hi| {
+                let mut vin = [Complex::ZERO; 1 << FUSE_MAX_WIRES];
+                for o in lo..hi {
+                    let base = free
+                        .iter()
+                        .enumerate()
+                        .fold(0, |v, (b, &w)| v | (((o >> b) & 1) << w));
+                    for l in 0..dim {
+                        // SAFETY: outer indices partition disjoint blocks.
+                        vin[l] = unsafe {
+                            Complex::new(re.get(base | spread[l]), im.get(base | spread[l]))
+                        };
+                    }
+                    for gate in gates {
+                        apply_gate_local(&mut vin[..dim], gate, &pos);
+                    }
+                    for l in 0..dim {
+                        // SAFETY: the same disjoint blocks are written back.
+                        unsafe {
+                            re.set(base | spread[l], vin[l].re);
+                            im.set(base | spread[l], vin[l].im);
                         }
                     }
                 }
-                for l in 0..dim {
-                    idxs[l] = base | spread[l];
-                    // SAFETY: one outer block per item; blocks are
-                    // disjoint sets of amplitude indices.
-                    vin[l] = unsafe { Complex::new(re.get(idxs[l]), im.get(idxs[l])) };
-                }
-                for r in 0..dim {
-                    let mut acc = Complex::ZERO;
-                    for c in 0..dim {
-                        let e = u[r * dim + c];
-                        if e != Complex::ZERO {
-                            acc = acc + e * vin[c];
-                        }
-                    }
-                    // SAFETY: disjoint fused blocks (above).
-                    unsafe {
-                        re.set(idxs[r], acc.re);
-                        im.set(idxs[r], acc.im);
-                    }
-                }
-            }
-        });
+            });
+        }
+
         self.gates += gates.len() as u64;
-        self.charge(8.0 * dim as f64);
+        for g in gates {
+            match g {
+                Gate::One { m, .. } => self.charge(matrix_norm_upper(m), 32),
+                Gate::Diagonal { d, .. } => {
+                    self.charge(phase_norm_upper(d[0]).max(phase_norm_upper(d[1])), 8)
+                }
+                Gate::Flip { .. } => (),
+            }
+        }
     }
 }
 
-/// Apply one gate to a dense local vector (fused-matrix construction).
+/// Apply a gate within a resident cache tile. All wires are tile-local.
+/// # Safety
+/// Caller exclusively owns the complete tile and has detected AVX2/FMA
+/// when `simd` is true. All gate wires must be below log2(len).
+unsafe fn apply_gate_tile(re: Ptr, im: Ptr, start: usize, len: usize, g: &Gate, simd: bool) {
+    let (target, controls) = match g {
+        Gate::One {
+            target, controls, ..
+        }
+        | Gate::Diagonal {
+            target, controls, ..
+        }
+        | Gate::Flip { target, controls } => (*target, controls),
+    };
+    let stride = 1usize << target;
+    let cmask = controls.iter().fold(0, |m, &w| m | (1usize << w));
+    // SAFETY: every index below is inside this tile; pairs are disjoint.
+    unsafe {
+        match g {
+            Gate::One { m, .. } if cmask == 0 => {
+                if simd && stride < 4 && len >= 4 {
+                    #[cfg(target_arch = "x86_64")]
+                    apply1_avx2_low(re, im, start, len, stride, *m);
+                    #[cfg(not(target_arch = "x86_64"))]
+                    unreachable!("dense: SIMD tile on unsupported architecture");
+                    return;
+                }
+                for block in (start..start + len).step_by(2 * stride) {
+                    if simd && stride >= 4 {
+                        #[cfg(target_arch = "x86_64")]
+                        for i in (block..block + stride).step_by(4) {
+                            apply1_avx2_x4(re, im, i, stride, m[0][0], m[0][1], m[1][0], m[1][1]);
+                        }
+                        #[cfg(not(target_arch = "x86_64"))]
+                        unreachable!("dense: SIMD tile on unsupported architecture");
+                    } else {
+                        apply1_run(
+                            re, im, block, stride, stride, m[0][0], m[0][1], m[1][0], m[1][1],
+                        );
+                    }
+                }
+            }
+            Gate::One { m, .. } => {
+                for pair in 0..len / 2 {
+                    let i = start + pair_index(pair, stride);
+                    if i & cmask != cmask {
+                        continue;
+                    }
+                    let j = i | stride;
+                    let (x, y) = (
+                        Complex::new(re.get(i), im.get(i)),
+                        Complex::new(re.get(j), im.get(j)),
+                    );
+                    let a = m[0][0] * x + m[0][1] * y;
+                    let b = m[1][0] * x + m[1][1] * y;
+                    re.set(i, a.re);
+                    im.set(i, a.im);
+                    re.set(j, b.re);
+                    im.set(j, b.im);
+                }
+            }
+            Gate::Diagonal { d, .. } => {
+                for i in start..start + len {
+                    if i & cmask == cmask {
+                        let z =
+                            Complex::new(re.get(i), im.get(i)) * d[usize::from(i & stride != 0)];
+                        re.set(i, z.re);
+                        im.set(i, z.im);
+                    }
+                }
+            }
+            Gate::Flip { .. } => {
+                for pair in 0..len / 2 {
+                    let i = start + pair_index(pair, stride);
+                    if i & cmask == cmask {
+                        let j = i | stride;
+                        let (r, a) = (re.get(i), im.get(i));
+                        re.set(i, re.get(j));
+                        im.set(i, im.get(j));
+                        re.set(j, r);
+                        im.set(j, a);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Apply one gate to a gathered local vector (scattered-wire fusion).
 fn apply_gate_local(v: &mut [Complex], g: &Gate, pos: &impl Fn(usize) -> usize) {
     let dim = v.len();
     match g {
@@ -1062,6 +1244,7 @@ fn apply_gate_local(v: &mut [Complex], g: &Gate, pos: &impl Fn(usize) -> usize) 
 /// The `2 * cnt` amplitudes in the two runs must be in bounds and
 /// exclusively owned by this call.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 unsafe fn apply1_run(
     re: Ptr,
     im: Ptr,
@@ -1104,6 +1287,66 @@ fn avx2_fma_detected() -> bool {
     #[cfg(not(target_arch = "x86_64"))]
     {
         false
+    }
+}
+
+/// Low-wire AVX2 kernel: four lanes hold two complete pairs. A fixed
+/// permutation exchanges the partner lanes, avoiding strided gathers.
+/// # Safety
+/// AVX2/FMA must be detected. start and len are multiples of four, the
+/// range is exclusively owned, and stride is either one or two.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn apply1_avx2_low(
+    re: Ptr,
+    im: Ptr,
+    start: usize,
+    len: usize,
+    stride: usize,
+    m: [[Complex; 2]; 2],
+) {
+    use std::arch::x86_64::*;
+    unsafe {
+        let lanes = |lo: f64, hi: f64| {
+            if stride == 1 {
+                _mm256_setr_pd(lo, hi, lo, hi)
+            } else {
+                _mm256_setr_pd(lo, lo, hi, hi)
+            }
+        };
+        let ar = lanes(m[0][0].re, m[1][1].re);
+        let ai = lanes(m[0][0].im, m[1][1].im);
+        let br = lanes(m[0][1].re, m[1][0].re);
+        let bi = lanes(m[0][1].im, m[1][0].im);
+        for i in (start..start + len).step_by(4) {
+            let rp = re.0.add(i);
+            let ip = im.0.add(i);
+            let xr = _mm256_loadu_pd(rp);
+            let xi = _mm256_loadu_pd(ip);
+            let (yr, yi) = if stride == 1 {
+                (
+                    _mm256_permute4x64_pd::<0xb1>(xr),
+                    _mm256_permute4x64_pd::<0xb1>(xi),
+                )
+            } else {
+                (
+                    _mm256_permute4x64_pd::<0x4e>(xr),
+                    _mm256_permute4x64_pd::<0x4e>(xi),
+                )
+            };
+            let r = _mm256_fnmadd_pd(
+                bi,
+                yi,
+                _mm256_fmadd_pd(br, yr, _mm256_fnmadd_pd(ai, xi, _mm256_mul_pd(ar, xr))),
+            );
+            let a = _mm256_fmadd_pd(
+                bi,
+                yr,
+                _mm256_fmadd_pd(br, yi, _mm256_fmadd_pd(ai, xr, _mm256_mul_pd(ar, xi))),
+            );
+            _mm256_storeu_pd(rp, r);
+            _mm256_storeu_pd(ip, a);
+        }
     }
 }
 

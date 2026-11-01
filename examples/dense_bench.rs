@@ -3,11 +3,14 @@
 //! (written here, independent of the library) against
 //! `bennett_vm::dense::DenseState` at several thread counts, reporting
 //! gates/s, bytes/amplitude and effective GB/s (32 bytes of traffic
-//! per amplitude per gate: one read + one write of 16 bytes).
+//! per amplitude per gate: one read + one write of 16 bytes). For
+//! fused groups this is equivalent traffic, including cache reuse,
+//! not a measurement of physical DRAM bandwidth.
 //!
 //! Usage: `cargo run --release --example dense_bench -- --qubits 20,24,28`
 //! Options: `--qubits <list>` (default 20,24), `--reps <n>` (override
-//! per-size repetition count), `--no-naive` (skip the baseline).
+//! per-size repetition count), `--no-naive` (skip the baseline),
+//! `--targets <list>` (restrict target qubits, useful for sparse n=28 runs).
 //! The machine is shared: load average is printed before and after,
 //! and the best of up to 3 timed batches is reported.
 use bennett_vm::dense::{Complex, DenseState, Gate};
@@ -66,23 +69,32 @@ fn loadavg() -> String {
         .unwrap_or_else(|_| "unavailable".into())
 }
 
-fn best_gates_per_sec(
+fn best_gates_per_sec<T>(
+    state: &mut T,
     reps: usize,
     batches: usize,
-    mut one_batch: impl FnMut() -> f64,
+    mut one_batch: impl FnMut(&mut T),
+    checksum: impl Fn(&T) -> f64,
 ) -> (f64, f64) {
-    // Warmup (untimed), then timed batches; report the best rate and
-    // the checksum of the last batch for sanity.
-    let _ = one_batch();
+    // Norm reductions are outside the timed interval. Check every batch,
+    // including warmup, rather than allowing an invalid early batch.
+    let check = |state: &T| {
+        let norm = checksum(state);
+        assert!((norm - 1.0).abs() < 1e-6, "bench sanity: norm2={norm}");
+        norm
+    };
+    one_batch(state);
+    check(state);
     let mut best = 0.0f64;
-    let mut checksum = 0.0;
+    let mut norm = 0.0;
     for _ in 0..batches {
         let t = Instant::now();
-        checksum = one_batch();
+        one_batch(state);
         let dt = t.elapsed().as_secs_f64();
+        norm = check(state);
         best = best.max(reps as f64 / dt);
     }
-    (best, checksum)
+    (best, norm)
 }
 
 fn reps_for(n: usize) -> (usize, usize) {
@@ -108,8 +120,9 @@ fn report(
     let amps = bytes as f64 / 16.0;
     let gbs = gates_s * amps * 32.0 / 1e9;
     println!(
-        "{engine:<18} n={n:>2} target={target:>2} threads={threads:>2}  {gates_s:>10.2} gates/s  {} bytes/amp  {gbs:>7.2} GB/s  norm2={checksum:.12}",
-        bytes / (1usize << n)
+        "{engine:<18} n={n:>2} target={target:>2} threads={threads:>2}  {gates_s:>10.2} gates/s  {} bytes/amp  {gbs:>7.2} GB/s  norm2={checksum:.12} loadavg={}",
+        bytes / (1usize << n),
+        loadavg()
     );
     assert!(
         (checksum - 1.0).abs() < 1e-6,
@@ -122,6 +135,7 @@ fn main() {
     let mut qubits: Vec<usize> = vec![20, 24];
     let mut reps_override: Option<usize> = None;
     let mut naive = true;
+    let mut targets_override: Option<Vec<usize>> = None;
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -141,6 +155,15 @@ fn main() {
                 )
             }
             "--no-naive" => naive = false,
+            "--targets" => {
+                targets_override = Some(
+                    it.next()
+                        .expect("--targets needs a value")
+                        .split(',')
+                        .map(|s| s.parse().expect("target qubit"))
+                        .collect(),
+                )
+            }
             other => panic!("unknown argument {other}"),
         }
     }
@@ -154,7 +177,15 @@ fn main() {
     for &n in &qubits {
         let (reps0, batches) = reps_for(n);
         let reps = reps_override.unwrap_or(reps0);
-        let targets = [0usize, n / 2, n - 1];
+        assert!(
+            n >= 4 && n < (usize::BITS - 4) as usize,
+            "benchmark qubits must be in 4..usize::BITS-4"
+        );
+        assert!(reps > 0, "benchmark repetitions must be positive");
+        let targets = targets_override
+            .clone()
+            .unwrap_or_else(|| vec![0usize, n / 2, n - 1]);
+        assert!(targets.iter().all(|&t| t < n), "target out of range");
         println!(
             "-- n = {n} ({} amplitudes, {} MiB state), reps/batch = {reps}, batches = {batches}",
             1usize << n,
@@ -167,12 +198,17 @@ fn main() {
                 // Put the state in superposition so no branch is trivial.
                 st.apply1(n - 1, gate_u());
                 let bytes = st.memory_bytes();
-                let (rate, chk) = best_gates_per_sec(reps, batches, || {
-                    for _ in 0..reps {
-                        st.apply1(t, m);
-                    }
-                    st.checksum()
-                });
+                let (rate, chk) = best_gates_per_sec(
+                    &mut st,
+                    reps,
+                    batches,
+                    |st| {
+                        for _ in 0..reps {
+                            st.apply1(t, m);
+                        }
+                    },
+                    Naive::checksum,
+                );
                 report("naive-AoS", n, t, 1, rate, bytes, chk);
                 drop(st);
             }
@@ -188,12 +224,17 @@ fn main() {
                 let mut st = DenseState::with_threads(n, threads);
                 st.apply1(n - 1, &[], m);
                 let bytes = st.memory_bytes();
-                let (rate, chk) = best_gates_per_sec(reps, batches, || {
-                    for _ in 0..reps {
-                        st.apply1(t, &[], m);
-                    }
-                    st.norm2()
-                });
+                let (rate, chk) = best_gates_per_sec(
+                    &mut st,
+                    reps,
+                    batches,
+                    |st| {
+                        for _ in 0..reps {
+                            st.apply1(t, &[], m);
+                        }
+                    },
+                    DenseState::norm2,
+                );
                 report(
                     if st.simd_active() {
                         "dense-SoA+AVX2"
@@ -216,12 +257,17 @@ fn main() {
                 st.set_simd_enabled(false);
                 st.apply1(n - 1, &[], m);
                 let bytes = st.memory_bytes();
-                let (rate, chk) = best_gates_per_sec(reps, batches, || {
-                    for _ in 0..reps {
-                        st.apply1(t, &[], m);
-                    }
-                    st.norm2()
-                });
+                let (rate, chk) = best_gates_per_sec(
+                    &mut st,
+                    reps,
+                    batches,
+                    |st| {
+                        for _ in 0..reps {
+                            st.apply1(t, &[], m);
+                        }
+                    },
+                    DenseState::norm2,
+                );
                 report("dense-SoA-scalar", n, t, 1, rate, bytes, chk);
                 drop(st);
             }
@@ -246,35 +292,52 @@ fn main() {
             let mut fused = DenseState::with_threads(n, threads);
             fused.apply1(n - 1, &[], m);
             let bytes = fused.memory_bytes();
-            let (rate, chk) = best_gates_per_sec(reps * group.len(), batches, || {
-                for _ in 0..reps {
-                    fused.apply_fused(&group);
-                }
-                fused.norm2()
-            });
+            let (rate, chk) = best_gates_per_sec(
+                &mut fused,
+                reps * group.len(),
+                batches,
+                |st| {
+                    for _ in 0..reps {
+                        st.apply_fused(&group);
+                    }
+                },
+                DenseState::norm2,
+            );
             report("dense-fused8", n, 3, threads, rate, bytes, chk);
+            // Keep only a bounded sample before dropping the 4 GiB
+            // state at n=28; fused and sequential never coexist.
+            let sample: Vec<_> = (0..fused.len())
+                .step_by((fused.len() / 1024).max(1))
+                .map(|i| (i, fused.amplitude(i)))
+                .collect();
+            let bound = fused.error_bound();
+            drop(fused);
             let mut seq = DenseState::with_threads(n, threads);
             seq.apply1(n - 1, &[], m);
-            let (rate, chk) = best_gates_per_sec(reps * group.len(), batches, || {
-                for _ in 0..reps {
-                    for g in &group {
-                        if let Gate::One { target, m, .. } = g {
-                            seq.apply1(*target, &[], *m);
+            let (rate, chk) = best_gates_per_sec(
+                &mut seq,
+                reps * group.len(),
+                batches,
+                |st| {
+                    for _ in 0..reps {
+                        for g in &group {
+                            if let Gate::One { target, m, .. } = g {
+                                st.apply1(*target, &[], *m);
+                            }
                         }
                     }
-                }
-                seq.norm2()
-            });
+                },
+                DenseState::norm2,
+            );
             report("dense-seq8", n, 3, threads, rate, bytes, chk);
             // Fused and sequential must agree (bench doubles as a check).
-            for i in (0..fused.len()).step_by((fused.len() / 1024).max(1)) {
-                let (x, y) = (fused.amplitude(i), seq.amplitude(i));
+            for (i, x) in sample {
+                let y = seq.amplitude(i);
                 assert!(
-                    (x.re - y.re).abs() < 1e-9 && (x.im - y.im).abs() < 1e-9,
+                    (x.re - y.re).hypot(x.im - y.im) <= bound + seq.error_bound(),
                     "fused vs sequential mismatch at amp[{i}]"
                 );
             }
-            drop(fused);
             drop(seq);
         }
     }

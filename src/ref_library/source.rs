@@ -41,6 +41,7 @@ struct Source {
     computations: BTreeMap<String, Instr>,
     cleanup_sites: BTreeMap<String, usize>,
     history: Vec<Instr>,
+    images: BTreeMap<String, String>,
 }
 impl Catalog {
     /// Form a structured source action from resolved classical parameters,
@@ -237,6 +238,7 @@ pub(super) fn action_body(
         computations: BTreeMap::new(),
         cleanup_sites: BTreeMap::new(),
         history: vec![],
+        images: object.data.clone(),
     };
 
     for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -507,7 +509,7 @@ impl Source {
         }
         if matches!(
             i.op.as_str(),
-            "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch"
+            "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch" | "qstore" | "qexchm"
         ) {
             return true;
         }
@@ -531,6 +533,99 @@ impl Source {
             })
             || i.nested.iter().flatten().any(|i| Self::mentions(i, target))
     }
+    fn references(i: &Instr) -> BTreeSet<String> {
+        i.operands
+            .iter()
+            .flat_map(|a| crate::validate::list_operand(a).unwrap_or_else(|_| vec![a.clone()]))
+            .map(|n| n.split('[').next().unwrap().to_string())
+            .chain(i.nested.iter().flatten().flat_map(Self::references))
+            .collect()
+    }
+    fn outputs(i: &Instr, env: &Bindings) -> Vec<String> {
+        match i.op.as_str() {
+            "qif" | "qloop" => i
+                .nested
+                .iter()
+                .flatten()
+                .flat_map(|i| Self::outputs(i, env))
+                .collect(),
+            "swap" | "qexch" => i.operands.clone(),
+            "qstore" => vec![i.operands[0].clone()],
+            "qexchm" => vec![i.operands[0].clone(), i.operands[2].clone()],
+            "action_call" | "adj" | "ctl" => {
+                let Ok((_, _, op, args)) = crate::action::normalize_call(i) else {
+                    return vec![];
+                };
+                if op != "action_call" {
+                    return vec![];
+                }
+                let mut out = crate::validate::list_operand(&args[1]).unwrap();
+                if let Some(f) = env
+                    .registry
+                    .as_ref()
+                    .and_then(|r| r.object.function(args[0].trim_start_matches('@')))
+                {
+                    out.extend(
+                        crate::validate::list_operand(&args[3])
+                            .unwrap()
+                            .into_iter()
+                            .zip(&f.lists[2])
+                            .filter(|(_, p)| p.role.as_deref() == Some("mut"))
+                            .map(|(n, _)| n),
+                    );
+                }
+                out
+            }
+            op if crate::action::is_gate_name(op) || op == "qxor" => {
+                i.operands.last().cloned().into_iter().collect()
+            }
+            _ => vec![],
+        }
+    }
+    fn input_history(
+        &self,
+        rows: &[Instr],
+        adjoint: bool,
+        env: &mut Bindings,
+    ) -> Result<Vec<Json>, String> {
+        // Local region creation is hoisted in ordinary source formation. Its
+        // fresh history instead prepares/restores the declared image here.
+        let mut body = vec![];
+        let mut chunk = vec![];
+        for i in rows {
+            if i.op != "qregion" {
+                chunk.push(i.clone());
+                continue;
+            }
+            if adjoint {
+                chunk.reverse();
+            }
+            body.extend(self.raw_sequence(&chunk, adjoint, false, env)?);
+            chunk.clear();
+            let name = &i.operands[0];
+            let image = i
+                .operands
+                .get(3)
+                .map(|n| {
+                    self.images
+                        .get(n.trim_start_matches('@'))
+                        .cloned()
+                        .ok_or_else(|| err("unbound history image"))
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let prepare = vec![
+                Json::obj(vec![("acquire", text(name))]),
+                Json::obj(vec![("image", text(image)), ("wires", text(name))]),
+            ];
+            body.extend(prepare);
+        }
+        if adjoint {
+            chunk.reverse();
+        }
+        body.extend(self.raw_sequence(&chunk, adjoint, false, env)?);
+        Ok(body)
+    }
     // Recover exact pre-call target values from their source computation,
     // rather than treating allocation metadata as a zero-value assertion.
     // Keep execution order here, including source-adjoint acquisition.
@@ -538,6 +633,7 @@ impl Source {
         &self,
         instructions: &[Instr],
         compute: &Instr,
+        cleanup: &Instr,
         targets: &[String],
         adjoint: bool,
         env: &Bindings,
@@ -555,7 +651,10 @@ impl Source {
         if adjoint {
             prefix.reverse();
         }
-        prefix.truncate(prefix.iter().position(|i| i.line == compute.line)?);
+        prefix.truncate(prefix.iter().position(|i| i.line == cleanup.line)?);
+        prefix.retain(|i| i.op != "qregion");
+        prefix.splice(0..0, self.locals.iter());
+        let compute_at = prefix.iter().position(|i| i.line == compute.line)?;
         let acquisition = |i: &Instr, target: &str| {
             if !adjoint {
                 matches!(i.op.as_str(), "qalloc" | "qcopy" | "qload")
@@ -569,33 +668,112 @@ impl Source {
                 }
             }
         };
-        let starts = targets
+        // Walk backwards from the exact versions the call consumes. Rebuild
+        // source-owned read dependencies too: using their current wire names
+        // can silently substitute a later version of an input to an earlier copy.
+        let base = |n: &str| n.split('[').next().unwrap().to_string();
+        let owned = self
+            .declarations
             .iter()
-            .map(|t| prefix.iter().rposition(|i| acquisition(i, t)))
-            .collect::<Option<Vec<_>>>()?;
-        let mut rows = vec![];
-        for (index, i) in prefix.into_iter().enumerate() {
+            .filter(|(_, _, _, state)| state == "clean")
+            .map(|(n, ..)| n.clone())
+            .chain(self.locals.iter().map(|i| i.operands[0].clone()))
+            .collect::<BTreeSet<_>>();
+        let mut needed = targets.iter().map(|n| base(n)).collect::<BTreeSet<_>>();
+        needed.extend(
+            Self::references(compute)
+                .into_iter()
+                .filter(|n| owned.contains(n)),
+        );
+        let mut selected = BTreeSet::new();
+        let mut acquired = BTreeSet::new();
+        let mut external_changes: Vec<(&Instr, Vec<String>)> = vec![];
+        let mut predicates = vec![];
+        for (index, i) in prefix.iter().enumerate().rev() {
             if matches!(i.op.as_str(), "qpred" | "qunpred") {
-                rows.push((*i).clone());
+                if (i.op == "qunpred") != adjoint {
+                    predicates.push(i.operands[0].clone());
+                } else {
+                    predicates.pop();
+                }
+                if index < compute_at {
+                    needed.extend(
+                        Self::references(i)
+                            .into_iter()
+                            .filter(|n| owned.contains(n)),
+                    );
+                    selected.insert(index);
+                }
                 continue;
             }
-            if !targets
+            let acquisitions = owned
                 .iter()
-                .zip(&starts)
-                .any(|(t, start)| index >= *start && Self::mentions(i, t))
-            {
+                .filter(|n| {
+                    acquisition(i, n) || (i.op == "qregion" && i.operands.first() == Some(n))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let outputs = if acquisitions.is_empty() {
+                Self::outputs(i, env)
+                    .into_iter()
+                    .map(|n| base(&n))
+                    .collect::<BTreeSet<_>>()
+            } else {
+                acquisitions.iter().cloned().collect()
+            };
+            if index >= compute_at || outputs.is_disjoint(&needed) {
+                if outputs.iter().any(|n| !owned.contains(n)) {
+                    if external_changes.last().is_some_and(|(next, scopes)| {
+                        *scopes == predicates && Self::inverse_rows(i, next)
+                    }) {
+                        external_changes.pop();
+                    } else {
+                        external_changes.push((i, predicates.clone()));
+                    }
+                }
                 continue;
             }
-            if !targets.iter().any(|t| acquisition(i, t))
-                && !targets.iter().any(|t| Self::writes_only(i, t, env))
+            let changed_after = external_changes
+                .iter()
+                .flat_map(|(i, _)| Self::outputs(i, env))
+                .map(|n| base(&n))
+                .collect::<BTreeSet<_>>();
+            if Self::references(i)
+                .iter()
+                .chain(&predicates)
+                .any(|n| !owned.contains(n) && changed_after.contains(n))
+            {
+                // A current interface binding is not proof of an earlier
+                // input version. Retain the exact-history obligation.
+                return None;
+            }
+            // A selected row may change only reconstructed owned values.
+            // Interface and borrowed values must retain their original bindings.
+            if outputs.iter().any(|n| !owned.contains(n))
+                || (acquisitions.is_empty() && !Self::permutation_row(i, env))
             {
                 return None;
             }
-            if !targets.iter().any(|t| acquisition(i, t)) && !Self::permutation_row(i, env) {
-                return None;
+            selected.insert(index);
+            for n in acquisitions {
+                needed.remove(&n);
+                acquired.insert(n);
             }
-            rows.push((*i).clone());
+            needed.extend(Self::references(i).into_iter().filter(|n| {
+                owned.contains(n)
+                    && !acquisition(i, n)
+                    && !(i.op == "qregion" && i.operands.first() == Some(n))
+            }));
         }
+        if !needed.is_empty() || targets.iter().any(|n| !acquired.contains(&base(n))) {
+            return None;
+        }
+        let mut rows = prefix
+            .into_iter()
+            .enumerate()
+            .filter(|(n, _)| selected.contains(n))
+            .map(|(_, i)| i.clone())
+            .collect::<Vec<_>>();
         // The prefix can end inside a predicate which contains the call.
         // Close its captured input-history scope before replay; in a source
         // adjoint, execution-order qunpred opens the corresponding scope.
@@ -853,13 +1031,17 @@ impl Source {
                 .object
                 .function(args[0].trim_start_matches('@'))
                 .ok_or_else(|| err("missing paired callee"))?;
-            // Region recomputation needs a fresh region binding as well as
-            // fresh wires; retain an explicitly incomplete trace until formed.
-            let regions = f.lists[2].iter().any(|p| p.role.as_deref() != Some("in"));
-            let targets = crate::validate::list_operand(&args[1])?;
+            let mut targets = crate::validate::list_operand(&args[1])?;
+            targets.extend(
+                crate::validate::list_operand(&args[3])?
+                    .into_iter()
+                    .zip(&f.lists[2])
+                    .filter(|(_, p)| p.role.as_deref() == Some("mut"))
+                    .map(|(n, _)| n),
+            );
             let perm = f.kind == FnKind::PermAction;
-            call_pairs.insert(compute.line, (i.clone(), targets.clone(), perm, regions));
-            call_pairs.insert(i.line, (compute.clone(), targets, perm, regions));
+            call_pairs.insert(compute.line, (i.clone(), targets.clone(), perm));
+            call_pairs.insert(i.line, (compute.clone(), targets, perm));
         }
         let mut index = 0;
         while index < instructions.len() {
@@ -937,14 +1119,12 @@ impl Source {
                     } else {
                         body
                     }
-                } else if let Some((partner, targets, perm, regions)) = call_pairs.get(&i.line) {
-                    let (inverse, control, _, _) = crate::action::normalize_call(i)?;
-                    if inverse ^ adjoint {
+                } else if let Some((partner, targets, perm)) = call_pairs.get(&i.line) {
+                    let (call_inverse, control, _, _) = crate::action::normalize_call(i)?;
+                    if call_inverse ^ adjoint {
                         let computing = self.instruction(partner, adjoint, env)?;
                         let uncomputing = self.instruction(partner, !adjoint, env)?;
-                        if *regions {
-                            self.defer_cleanup(body, env)?
-                        } else {
+                        {
                             let mut pair = self.pair_annotation(
                                 "",
                                 &self.points[&partner.line],
@@ -956,32 +1136,74 @@ impl Source {
                             if let Json::Obj(c) = &mut pair
                                 && let Some(Json::Obj(p)) = c.get_mut("$cleanup")
                             {
-                                let inputs =
-                                    self.call_inputs(instructions, partner, targets, adjoint, env);
+                                let inputs = self.call_inputs(
+                                    instructions,
+                                    partner,
+                                    i,
+                                    targets,
+                                    adjoint,
+                                    env,
+                                );
                                 p.insert(
                                     "recompute_supported".into(),
                                     Json::Bool(inputs.is_some()),
                                 );
                                 if let Some(inputs) = inputs {
-                                    // call_inputs is already in execution order;
-                                    // raw_sequence expects source order.
-                                    let mut inputs = inputs;
-                                    if adjoint {
-                                        inputs.reverse();
-                                    }
+                                    let allocations = inputs
+                                        .iter()
+                                        .filter_map(|i| {
+                                            let name = if i.op == "qregion" {
+                                                i.operands.first()
+                                            } else if !adjoint
+                                                && matches!(
+                                                    i.op.as_str(),
+                                                    "qalloc" | "qcopy" | "qload"
+                                                )
+                                            {
+                                                i.lhs.first()
+                                            } else if adjoint {
+                                                match i.op.as_str() {
+                                                    "qfree" => i.operands.first(),
+                                                    "quncopy" => i.operands.get(1),
+                                                    "qunload" => i.operands.get(2),
+                                                    _ => None,
+                                                }
+                                            } else {
+                                                None
+                                            }?;
+                                            let (width, class) =
+                                                if let Some(r) = self.regions.get(name) {
+                                                    (self.region_width(r).ok()?, "any".to_string())
+                                                } else {
+                                                    let (_, w, c, state) = self
+                                                        .declarations
+                                                        .iter()
+                                                        .find(|(n, ..)| n == name)?;
+                                                    if state != "clean" {
+                                                        return None;
+                                                    }
+                                                    (*w, c.clone())
+                                                };
+                                            Some(Json::obj(vec![
+                                                ("name", text(name)),
+                                                ("width", num(width)),
+                                                ("class", text(class)),
+                                            ]))
+                                        })
+                                        .collect();
+                                    p.insert("allocations".into(), Json::Arr(allocations));
                                     p.insert(
                                         "targets".into(),
                                         Json::Arr(targets.iter().map(text).collect()),
                                     );
+                                    let initialising = self.input_history(&inputs, adjoint, env)?;
                                     p.insert(
                                         "initialising".into(),
-                                        Json::Arr(self.raw_sequence(&inputs, adjoint, false, env)?),
+                                        Json::Arr(initialising.clone()),
                                     );
                                     p.insert(
                                         "uninitialising".into(),
-                                        Json::Arr(
-                                            self.raw_sequence(&inputs, !adjoint, false, env)?,
-                                        ),
+                                        Json::Arr(vec![inverse(initialising)]),
                                     );
                                 }
                             }

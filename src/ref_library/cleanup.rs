@@ -178,30 +178,26 @@ impl Catalog {
         let mut targets = vec![];
         for name in arr(field(pair, "targets")?)? {
             let name = string(name)?;
-            let Some(Bound::Allocation(a)) = local.values.remove(name) else {
-                return Err(err("call recompute needs a source-owned target allocation"));
-            };
-            let allocation = a.borrow();
-            if allocation.state != "clean" {
-                return Err(err("call recompute needs a clean owned target"));
+            let (base, suffix) = name
+                .split_once('[')
+                .map_or((name, String::new()), |(base, sub)| {
+                    (base, format!("[{sub}"))
+                });
+            let width = wires(&Json::Str(name.into()), env)?.len();
+            let alias = format!("$cleanup.original.{base}");
+            if let Some(value) = local.values.remove(base) {
+                if local.values.insert(alias.clone(), value).is_some() {
+                    return Err(err("call cleanup alias collision"));
+                }
+            } else if !local.values.contains_key(&alias) {
+                return Err(err("call recompute target is unbound"));
             }
-            let alias = format!("$cleanup.original.{name}");
-            if local.values.contains_key(&alias) {
-                return Err(err("call cleanup alias collision"));
-            }
-            targets.push((
-                name.to_string(),
-                alias.clone(),
-                allocation.width,
-                allocation.class.clone(),
-            ));
-            drop(allocation);
-            local.values.insert(alias, Bound::Allocation(a));
+            targets.push((name.to_string(), format!("{alias}{suffix}"), width));
         }
-        let xor = |targets: &[(String, String, usize, String)]| {
+        let xor = |targets: &[(String, String, usize)]| {
             targets
                 .iter()
-                .map(|(name, original, width, _)| {
+                .map(|(name, original, width)| {
                     Json::obj(vec![
                         ("invoke", Json::Str("bind.qxor".into())),
                         (
@@ -224,13 +220,14 @@ impl Catalog {
         // not be zero. Restore it before uncomputing the fresh input history.
         body.extend(xor(&targets));
         body.extend(arr(field(pair, "uninitialising")?)?.iter().cloned());
-        for (name, _, width, class) in targets.iter().rev() {
+        for allocation in arr(field(pair, "allocations")?)?.iter().rev() {
+            local.values.remove(string(field(allocation, "name")?)?);
             body = vec![Json::obj(vec![
-                ("declare", Json::Str(name.clone())),
-                ("width", Json::u64(*width as u64)),
+                ("declare", field(allocation, "name")?.clone()),
+                ("width", field(allocation, "width")?.clone()),
                 (
                     "class",
-                    Json::obj(vec![("class", Json::Str(class.clone()))]),
+                    Json::obj(vec![("class", field(allocation, "class")?.clone())]),
                 ),
                 ("state", Json::Str("clean".into())),
                 ("body", Json::Arr(body)),

@@ -1485,6 +1485,7 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
                     "uncomputing",
                     "perm",
                     "recompute_supported",
+                    "allocations",
                     "targets",
                     "initialising",
                     "uninitialising",

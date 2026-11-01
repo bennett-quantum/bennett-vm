@@ -10,11 +10,15 @@ fn h_amp() -> [[Amp; 2]; 2] {
     let s = std::f64::consts::FRAC_1_SQRT_2;
     [[(s, 0.0), (s, 0.0)], [(s, 0.0), (-s, 0.0)]]
 }
-fn h_c() -> [[Complex; 2]; 2] { h_amp().map(|r| r.map(|(a, b)| Complex::new(a, b))) }
+fn h_c() -> [[Complex; 2]; 2] {
+    h_amp().map(|r| r.map(|(a, b)| Complex::new(a, b)))
+}
 
 fn exact_amps(q: &QuantumState, n: usize) -> BTreeMap<usize, Amp> {
     let mut out: BTreeMap<usize, Amp> = (0..1usize << n).map(|i| (i, (0.0, 0.0))).collect();
-    for (k, a) in &q.amps { out.insert(k.to_usize().expect("small key"), *a); }
+    for (k, a) in &q.amps {
+        out.insert(k.to_usize().expect("small key"), *a);
+    }
     out
 }
 
@@ -24,8 +28,15 @@ fn assert_agree(d: &DenseState, q: &QuantumState, n: usize, ctx: &str) {
     for i in 0..1usize << n {
         let z = d.amplitude(i);
         let e = ex[&i];
-        assert!((z.re - e.0).abs() <= tol && (z.im - e.1).abs() <= tol,
-            "{ctx} amp[{i}]: dense=({},{}) exact=({},{}) bound={:e}", z.re, z.im, e.0, e.1, d.error_bound());
+        assert!(
+            (z.re - e.0).abs() <= tol && (z.im - e.1).abs() <= tol,
+            "{ctx} amp[{i}]: dense=({},{}) exact=({},{}) bound={:e}",
+            z.re,
+            z.im,
+            e.0,
+            e.1,
+            d.error_bound()
+        );
     }
 }
 
@@ -37,20 +48,36 @@ fn dense_agrees_with_exact_engine_on_gate_corpus() {
     let w = q.alloc_wires(n);
     assert_eq!(w, vec![0, 1, 2, 3]);
     // Realistic structured sequence over the named gate alphabet.
-    d.apply1(0, &[], h_c()); q.apply1(0, &[], h_amp());
-    d.apply1(2, &[], h_c()); q.apply1(2, &[], h_amp());
-    d.cx(0, 1); q.flip(1, &[0]);
-    d.t_gate(1); { let s = std::f64::consts::FRAC_1_SQRT_2; q.apply1(1, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (s, s)]]); }
-    d.flip(3, &[0, 1]); q.flip(3, &[0, 1]); // ccx
-    d.s_gate(2); q.apply1(2, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (0.0, 1.0)]]);
-    d.swap(1, 3); q.swap(1, 3);
-    d.cz(0, 2); { q.phase_if_all(&[0, 2], (-1.0, 0.0)); }
-    d.phase_if_all(&[0, 1, 2], Complex::new(0.0, -1.0)); q.phase_if_all(&[0, 1, 2], (0.0, -1.0));
+    d.apply1(0, &[], h_c());
+    q.apply1(0, &[], h_amp());
+    d.apply1(2, &[], h_c());
+    q.apply1(2, &[], h_amp());
+    d.cx(0, 1);
+    q.flip(1, &[0]);
+    d.t_gate(1);
+    {
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        q.apply1(1, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (s, s)]]);
+    }
+    d.flip(3, &[0, 1]);
+    q.flip(3, &[0, 1]); // ccx
+    d.s_gate(2);
+    q.apply1(2, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (0.0, 1.0)]]);
+    d.swap(1, 3);
+    q.swap(1, 3);
+    d.cz(0, 2);
+    {
+        q.phase_if_all(&[0, 2], (-1.0, 0.0));
+    }
+    d.phase_if_all(&[0, 1, 2], Complex::new(0.0, -1.0));
+    q.phase_if_all(&[0, 1, 2], (0.0, -1.0));
     assert_agree(&d, &q, n, "corpus");
     // Inverse permutation segment returns both to the pre-segment state
     // structure: apply ccx again (self-inverse) on both.
-    d.flip(2, &[0, 3]); q.flip(2, &[0, 3]);
-    d.flip(2, &[0, 3]); q.flip(2, &[0, 3]);
+    d.flip(2, &[0, 3]);
+    q.flip(2, &[0, 3]);
+    d.flip(2, &[0, 3]);
+    q.flip(2, &[0, 3]);
     assert_agree(&d, &q, n, "corpus+perm round trip");
 }
 
@@ -63,10 +90,17 @@ fn dense_measure_agrees_with_exact_engine_measure() {
         let mut d = DenseState::new(3);
         let mut q = QuantumState::new();
         q.alloc_wires(3);
-        d.apply1(0, &[], h_c()); q.apply1(0, &[], h_amp());
-        d.apply1(2, &[], h_c()); q.apply1(2, &[], h_amp());
-        d.cx(2, 1); q.flip(1, &[2]);
-        d.t_gate(0); { let s = std::f64::consts::FRAC_1_SQRT_2; q.apply1(0, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (s, s)]]); }
+        d.apply1(0, &[], h_c());
+        q.apply1(0, &[], h_amp());
+        d.apply1(2, &[], h_c());
+        q.apply1(2, &[], h_amp());
+        d.cx(2, 1);
+        q.flip(1, &[2]);
+        d.t_gate(0);
+        {
+            let s = std::f64::consts::FRAC_1_SQRT_2;
+            q.apply1(0, &[], [[(1.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (s, s)]]);
+        }
         let (dv, dbits) = d.measure(&[2, 0], draw);
         let (qv, qbits) = q.measure(&[2, 0], draw);
         assert_eq!(dv, qv.to_usize().unwrap(), "draw {draw}: outcome value");
@@ -81,13 +115,18 @@ fn grover_two_qubit_marks_target_like_exact_engine() {
     // probability 1 on |11>. Both engines must show it.
     let run_dense = || {
         let mut d = DenseState::new(2);
-        d.apply1(0, &[], h_c()); d.apply1(1, &[], h_c());
+        d.apply1(0, &[], h_c());
+        d.apply1(1, &[], h_c());
         d.cz(0, 1); // oracle: phase -1 on |11>
-        d.apply1(0, &[], h_c()); d.apply1(1, &[], h_c());
-        d.x_gate(0); d.x_gate(1);
+        d.apply1(0, &[], h_c());
+        d.apply1(1, &[], h_c());
+        d.x_gate(0);
+        d.x_gate(1);
         d.cz(0, 1);
-        d.x_gate(0); d.x_gate(1);
-        d.apply1(0, &[], h_c()); d.apply1(1, &[], h_c());
+        d.x_gate(0);
+        d.x_gate(1);
+        d.apply1(0, &[], h_c());
+        d.apply1(1, &[], h_c());
         d
     };
     let d = run_dense();
@@ -95,12 +134,17 @@ fn grover_two_qubit_marks_target_like_exact_engine() {
     assert!((p[3] - 1.0).abs() < 1e-12, "Grover p(11) = {}", p[3]);
     let mut q = QuantumState::new();
     q.alloc_wires(2);
-    q.apply1(0, &[], h_amp()); q.apply1(1, &[], h_amp());
+    q.apply1(0, &[], h_amp());
+    q.apply1(1, &[], h_amp());
     q.phase_if_all(&[0, 1], (-1.0, 0.0));
-    q.apply1(0, &[], h_amp()); q.apply1(1, &[], h_amp());
-    q.flip(0, &[]); q.flip(1, &[]);
+    q.apply1(0, &[], h_amp());
+    q.apply1(1, &[], h_amp());
+    q.flip(0, &[]);
+    q.flip(1, &[]);
     q.phase_if_all(&[0, 1], (-1.0, 0.0));
-    q.flip(0, &[]); q.flip(1, &[]);
-    q.apply1(0, &[], h_amp()); q.apply1(1, &[], h_amp());
+    q.flip(0, &[]);
+    q.flip(1, &[]);
+    q.apply1(0, &[], h_amp());
+    q.apply1(1, &[], h_amp());
     assert_agree(&d, &q, 2, "grover");
 }

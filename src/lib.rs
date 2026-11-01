@@ -8,6 +8,7 @@ pub mod action;
 pub mod bigint;
 pub mod cc;
 pub mod certificate;
+pub mod dense;
 pub mod cliargs;
 mod coherent_typing;
 pub mod device;

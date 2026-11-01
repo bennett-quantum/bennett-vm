@@ -108,6 +108,17 @@ impl Catalog {
         if choice == CleanupRealisation::Reverse {
             return self.walk(field(c, "body")?, env, out, next, active);
         }
+        let resolved;
+        let pair = if pair.get("input_request").is_some() {
+            resolved = env
+                .source_history
+                .as_ref()
+                .ok_or_else(|| err("missing source history"))?
+                .resolve_call_inputs(pair, env)?;
+            &resolved
+        } else {
+            pair
+        };
         if field(pair, "perm")? != &Json::Bool(true) {
             return Err(err("recompute requires a permutation computing sequence"));
         }

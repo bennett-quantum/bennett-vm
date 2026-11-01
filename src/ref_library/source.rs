@@ -17,7 +17,7 @@ fn inverse(body: Vec<Json>) -> Json {
         ("body", Json::Arr(body)),
     ])
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Region {
     address: usize,
     cell: usize,
@@ -31,7 +31,8 @@ struct WholePair {
     target: String,
     perm: bool,
 }
-struct Source {
+#[derive(Clone, Debug)]
+pub(super) struct Source {
     symbol: String,
     points: BTreeMap<usize, String>,
     widths: BTreeMap<String, usize>,
@@ -42,6 +43,12 @@ struct Source {
     cleanup_sites: BTreeMap<String, usize>,
     history: Vec<Instr>,
     images: BTreeMap<String, String>,
+    readonly: BTreeSet<String>,
+    history_replay: bool,
+}
+struct HistoryDomain<'a> {
+    iterations: &'a [usize],
+    branches: BTreeMap<String, usize>,
 }
 impl Catalog {
     /// Form a structured source action from resolved classical parameters,
@@ -239,6 +246,8 @@ pub(super) fn action_body(
         cleanup_sites: BTreeMap::new(),
         history: vec![],
         images: object.data.clone(),
+        readonly: f.lists[1].iter().map(|p| p.name.clone()).collect(),
+        history_replay: false,
     };
 
     for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -269,6 +278,7 @@ pub(super) fn action_body(
     source.history = instructions.clone();
     source.collect_regions(&instructions)?;
     source.declarations(&instructions)?;
+    env.source_history = Some(Rc::new(source.clone()));
     let mut body = source.sequence(&instructions, adjoint, env)?;
     for (name, width, class, state) in source.declarations.iter().rev() {
         body = vec![Json::obj(vec![
@@ -590,6 +600,8 @@ impl Source {
     ) -> Result<Vec<Json>, String> {
         // Local region creation is hoisted in ordinary source formation. Its
         // fresh history instead prepares/restores the declared image here.
+        let mut source = self.clone();
+        source.history_replay = true;
         let mut body = vec![];
         let mut chunk = vec![];
         for i in rows {
@@ -600,7 +612,7 @@ impl Source {
             if adjoint {
                 chunk.reverse();
             }
-            body.extend(self.raw_sequence(&chunk, adjoint, false, env)?);
+            body.extend(source.raw_sequence(&chunk, adjoint, false, env)?);
             chunk.clear();
             let name = &i.operands[0];
             let image = i
@@ -623,7 +635,7 @@ impl Source {
         if adjoint {
             chunk.reverse();
         }
-        body.extend(self.raw_sequence(&chunk, adjoint, false, env)?);
+        body.extend(source.raw_sequence(&chunk, adjoint, false, env)?);
         Ok(body)
     }
     // Recover exact pre-call target values from their source computation,
@@ -638,10 +650,9 @@ impl Source {
         adjoint: bool,
         env: &Bindings,
     ) -> Option<Vec<Instr>> {
-        // Predicate lowering recurses over a lexical slice, but acquisitions
-        // before that slice still own the exact pre-call target version. Use
-        // the enclosing source history when this call is in that flat domain;
-        // nested loop/branch domains retain their local history obligations.
+        // Generated traversal projects enclosing fixed-loop/branch histories
+        // into this domain first. Predicate slices still retain the enclosing
+        // prefix, including acquisitions before the lexical scope.
         let history = if self.history.iter().any(|i| i.line == compute.line) {
             self.history.as_slice()
         } else {
@@ -651,10 +662,10 @@ impl Source {
         if adjoint {
             prefix.reverse();
         }
-        prefix.truncate(prefix.iter().position(|i| i.line == cleanup.line)?);
+        prefix.truncate(prefix.iter().rposition(|i| i.line == cleanup.line)?);
         prefix.retain(|i| i.op != "qregion");
         prefix.splice(0..0, self.locals.iter());
-        let compute_at = prefix.iter().position(|i| i.line == compute.line)?;
+        let compute_at = prefix.iter().rposition(|i| i.line == compute.line)?;
         let acquisition = |i: &Instr, target: &str| {
             if !adjoint {
                 matches!(i.op.as_str(), "qalloc" | "qcopy" | "qload")
@@ -796,6 +807,216 @@ impl Source {
         }
         Some(rows)
     }
+    /// Resolve only when the carrier is generated: enclosing loop indices are
+    /// not known while forming the source recipe (and a zero-trip body is inert).
+    pub(super) fn resolve_call_inputs(&self, pair: &Json, env: &Bindings) -> Result<Json, String> {
+        let request = field(pair, "input_request")?;
+        let compute_line = field(request, "compute")?
+            .as_usize()
+            .ok_or_else(|| err("invalid computing line"))?;
+        let cleanup_line = field(request, "cleanup")?
+            .as_usize()
+            .ok_or_else(|| err("invalid cleanup line"))?;
+        let adjoint = field(request, "adjoint")? == &Json::Bool(true);
+        let targets = arr(field(request, "targets")?)?
+            .iter()
+            .map(|n| string(n).map(String::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        fn find(rows: &[Instr], line: usize) -> Option<&Instr> {
+            rows.iter().find_map(|i| {
+                if i.line == line {
+                    Some(i)
+                } else {
+                    i.nested.iter().find_map(|a| find(a, line))
+                }
+            })
+        }
+        let compute =
+            find(&self.history, compute_line).ok_or_else(|| err("missing source compute"))?;
+        let cleanup =
+            find(&self.history, cleanup_line).ok_or_else(|| err("missing source cleanup"))?;
+        fn branches(rows: &[Instr], line: usize, known: &mut BTreeMap<String, usize>) -> bool {
+            for i in rows {
+                if i.line == line {
+                    return true;
+                }
+                for (arm, rows) in i.nested.iter().enumerate() {
+                    if branches(rows, line, known) {
+                        if i.op == "qif" {
+                            known.insert(i.operands[0].clone(), arm);
+                        }
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        let mut known = BTreeMap::new();
+        branches(&self.history, cleanup_line, &mut known);
+        // Only read-only conditions prove the same arm in earlier iterations.
+        // Mutable predicates retain the general version-reconstruction obligation.
+        known.retain(|name, _| self.readonly.contains(name));
+        let domain = HistoryDomain {
+            iterations: &env.source_iterations,
+            branches: known,
+        };
+        let mut history = vec![];
+        let formed = self
+            .project_history(
+                &self.history,
+                Some(cleanup_line),
+                adjoint,
+                &domain,
+                0,
+                &mut history,
+            )
+            .is_some();
+        if adjoint {
+            history.reverse();
+        }
+        let mut source = self.clone();
+        source.history = history;
+        let inputs = formed
+            .then(|| source.call_inputs(&[], compute, cleanup, &targets, adjoint, env))
+            .flatten();
+        let mut result = pair.clone();
+        let Json::Obj(p) = &mut result else {
+            return Err(err("invalid call cleanup"));
+        };
+        let mut local = env.clone();
+        let env = &mut local;
+        p.insert("recompute_supported".into(), Json::Bool(inputs.is_some()));
+        if let Some(inputs) = inputs {
+            let allocations = inputs
+                .iter()
+                .filter_map(|i| {
+                    let name = if i.op == "qregion" {
+                        i.operands.first()
+                    } else if !adjoint && matches!(i.op.as_str(), "qalloc" | "qcopy" | "qload") {
+                        i.lhs.first()
+                    } else if adjoint {
+                        match i.op.as_str() {
+                            "qfree" => i.operands.first(),
+                            "quncopy" => i.operands.get(1),
+                            "qunload" => i.operands.get(2),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }?;
+                    let (width, class) = if let Some(r) = self.regions.get(name) {
+                        (self.region_width(r).ok()?, "any".to_string())
+                    } else {
+                        let (_, w, c, state) =
+                            self.declarations.iter().find(|(n, ..)| n == name)?;
+                        if state != "clean" {
+                            return None;
+                        }
+                        (*w, c.clone())
+                    };
+                    Some(Json::obj(vec![
+                        ("name", text(name)),
+                        ("width", num(width)),
+                        ("class", text(class)),
+                    ]))
+                })
+                .collect();
+            p.insert("allocations".into(), Json::Arr(allocations));
+            p.insert(
+                "targets".into(),
+                Json::Arr(targets.iter().map(text).collect()),
+            );
+            let initialising = self.input_history(&inputs, adjoint, env)?;
+            p.insert("initialising".into(), Json::Arr(initialising.clone()));
+            p.insert(
+                "uninitialising".into(),
+                Json::Arr(vec![inverse(initialising)]),
+            );
+        }
+        Ok(result)
+    }
+
+    /// Project the executed prefix at one generated source coordinate. Completed
+    /// fixed loops replay their full history; the containing loop contributes
+    /// exactly its earlier iterations and the selected current prefix. A containing
+    /// qif contributes only the active arm. Its else predicate is already inverted
+    /// by ref.qif: retain that external version change for the dependency check.
+    fn project_history(
+        &self,
+        rows: &[Instr],
+        stop: Option<usize>,
+        adjoint: bool,
+        domain: &HistoryDomain<'_>,
+        depth: usize,
+        out: &mut Vec<Instr>,
+    ) -> Option<()> {
+        fn contains(i: &Instr, line: usize) -> bool {
+            i.line == line || i.nested.iter().flatten().any(|i| contains(i, line))
+        }
+        let ordered = if adjoint {
+            rows.iter().rev().collect::<Vec<_>>()
+        } else {
+            rows.iter().collect()
+        };
+        for i in ordered {
+            if stop == Some(i.line) {
+                out.push(i.clone());
+                return Some(());
+            }
+            let containing = stop.is_some_and(|line| contains(i, line));
+            if i.op == "qloop" && i.operands.len() == 1 {
+                let count = i.operands[0].parse::<usize>().ok()?;
+                let prior = if containing {
+                    let iteration = *domain.iterations.get(depth)?;
+                    if iteration >= count {
+                        return None;
+                    }
+                    if adjoint {
+                        count - 1 - iteration
+                    } else {
+                        iteration
+                    }
+                } else {
+                    count
+                };
+                for _ in 0..prior {
+                    self.project_history(&i.nested[0], None, adjoint, domain, depth + 1, out)?;
+                }
+                if containing {
+                    return self.project_history(
+                        &i.nested[0],
+                        stop,
+                        adjoint,
+                        domain,
+                        depth + 1,
+                        out,
+                    );
+                }
+            } else if containing && i.op == "qif" {
+                let arm = i
+                    .nested
+                    .iter()
+                    .position(|a| a.iter().any(|i| contains(i, stop.unwrap())))?;
+                if arm == 1 {
+                    let mut inversion = i.clone();
+                    inversion.op = "x".into();
+                    inversion.nested.clear();
+                    out.push(inversion);
+                }
+                return self.project_history(&i.nested[arm], stop, adjoint, domain, depth, out);
+            } else if i.op == "qif" && domain.branches.contains_key(&i.operands[0]) {
+                let arm = domain.branches[&i.operands[0]];
+                self.project_history(&i.nested[arm], None, adjoint, domain, depth, out)?;
+            } else if containing {
+                // Bounded-while/cross-domain histories are tracked by c5.
+                return None;
+            } else {
+                out.push(i.clone());
+            }
+        }
+        stop.is_none().then_some(())
+    }
+
     fn whole_pairs(
         &self,
         instructions: &[Instr],
@@ -937,6 +1158,26 @@ impl Source {
                 vec![invocation(
                     "qpred.scope",
                     vec![text(&i.operands[0]), Json::Arr(nested)],
+                )]
+            } else if self.history_replay && i.op == "qif" {
+                // Reconstruct the written history, not cleanup policy inside
+                // that history: replaying a prior pair is not a new carrier.
+                let body = vec![invocation(
+                    "qif",
+                    vec![
+                        text(&i.operands[0]),
+                        Json::Arr(self.raw_sequence(&i.nested[0], false, false, env)?),
+                        Json::Arr(self.raw_sequence(&i.nested[1], false, false, env)?),
+                    ],
+                )];
+                if adjoint { vec![inverse(body)] } else { body }
+            } else if self.history_replay && i.op == "qloop" && i.operands.len() == 1 {
+                vec![invocation(
+                    "qloop",
+                    vec![
+                        num(i.operands[0].parse::<usize>().map_err(err)?),
+                        Json::Arr(self.raw_sequence(&i.nested[0], adjoint, false, env)?),
+                    ],
                 )]
             } else {
                 self.instruction(i, adjoint, env)?
@@ -1136,76 +1377,15 @@ impl Source {
                             if let Json::Obj(c) = &mut pair
                                 && let Some(Json::Obj(p)) = c.get_mut("$cleanup")
                             {
-                                let inputs = self.call_inputs(
-                                    instructions,
-                                    partner,
-                                    i,
-                                    targets,
-                                    adjoint,
-                                    env,
-                                );
                                 p.insert(
-                                    "recompute_supported".into(),
-                                    Json::Bool(inputs.is_some()),
+                                    "input_request".into(),
+                                    Json::obj(vec![
+                                        ("compute", num(partner.line)),
+                                        ("cleanup", num(i.line)),
+                                        ("adjoint", Json::Bool(adjoint)),
+                                        ("targets", Json::Arr(targets.iter().map(text).collect())),
+                                    ]),
                                 );
-                                if let Some(inputs) = inputs {
-                                    let allocations = inputs
-                                        .iter()
-                                        .filter_map(|i| {
-                                            let name = if i.op == "qregion" {
-                                                i.operands.first()
-                                            } else if !adjoint
-                                                && matches!(
-                                                    i.op.as_str(),
-                                                    "qalloc" | "qcopy" | "qload"
-                                                )
-                                            {
-                                                i.lhs.first()
-                                            } else if adjoint {
-                                                match i.op.as_str() {
-                                                    "qfree" => i.operands.first(),
-                                                    "quncopy" => i.operands.get(1),
-                                                    "qunload" => i.operands.get(2),
-                                                    _ => None,
-                                                }
-                                            } else {
-                                                None
-                                            }?;
-                                            let (width, class) =
-                                                if let Some(r) = self.regions.get(name) {
-                                                    (self.region_width(r).ok()?, "any".to_string())
-                                                } else {
-                                                    let (_, w, c, state) = self
-                                                        .declarations
-                                                        .iter()
-                                                        .find(|(n, ..)| n == name)?;
-                                                    if state != "clean" {
-                                                        return None;
-                                                    }
-                                                    (*w, c.clone())
-                                                };
-                                            Some(Json::obj(vec![
-                                                ("name", text(name)),
-                                                ("width", num(width)),
-                                                ("class", text(class)),
-                                            ]))
-                                        })
-                                        .collect();
-                                    p.insert("allocations".into(), Json::Arr(allocations));
-                                    p.insert(
-                                        "targets".into(),
-                                        Json::Arr(targets.iter().map(text).collect()),
-                                    );
-                                    let initialising = self.input_history(&inputs, adjoint, env)?;
-                                    p.insert(
-                                        "initialising".into(),
-                                        Json::Arr(initialising.clone()),
-                                    );
-                                    p.insert(
-                                        "uninitialising".into(),
-                                        Json::Arr(vec![inverse(initialising)]),
-                                    );
-                                }
                             }
                             if let Some(control) = control {
                                 vec![invocation(

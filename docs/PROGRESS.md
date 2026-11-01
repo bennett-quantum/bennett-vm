@@ -1,3 +1,10 @@
+# 47t-c source invocation addressing — 2026-11-01
+Resume: c IN PROGRESS; finish K64 emitted support partition/domains and K65 paired cleanup carriers, then d, b, hsd, clw. a zero-width addressing still waits on ISA 7js.
+Ordinary source-action rows carry interface-hash program-point chains, per-row generated ordinals/call occurrences and source-loop iteration vectors; source adjoints retain forward addresses. Raw catalog ordinal compatibility is preserved.
+Selectors implement instance/call_index without added specificity, last-entered-oracle coordinates, non-step wildcard rules and kind/cleanup isolation. Paths validate support spellings, loop bounds, formed fixed keys and semantic edges; lift.call adds none.
+K77 round-7 acceptance recorded: b is OPEN, ordered after c/d. No oracle descriptors/schedule executor, no child closure, ISA edits, fixture weakening, dependencies or pushes in this pass.
+Final interpreter/JIT each 197 PASS / 0 FAIL / 0 ignored (before 188/0), including differential each 18/0 unchanged; fmt/strict Clippy/whitespace green. Evidence .tmp/47t-c-gate-*.log and totals JSON.
+
 # 47t-a automatic source assembly and admission audit — 2026-11-01
 Resume: 47t-a remains IN PROGRESS, now dependent on ISA b-isa-spec-7js (A=0 coherent memory source addressing); c/d/hsd/clw not started. Work b only after a/c/d under the updated K77 contract.
 Adds deterministic link::resolve assembly, exact source/metadata merges and transitive rehashing; imported rows execute through the resolved graph. Original attached documents remain available for d/clw composition.

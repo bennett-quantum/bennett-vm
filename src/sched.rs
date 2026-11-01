@@ -9,22 +9,64 @@ use target::{arr, field, keys, string};
 fn error(s: impl std::fmt::Display) -> String {
     format!("§11: E_SCHEDULE_INFEASIBLE: {s}")
 }
-#[derive(Clone, Debug)]
+/// Oracle coordinates at one invocation level. Non-step support has no step.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Coordinate {
+    pub step: Option<usize>,
+    pub phase: String,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Point {
     pub symbol: String,
     pub point: String,
     pub iteration: Vec<usize>,
+    pub instance: Vec<usize>,
+    pub call_index: Option<usize>,
+    /// Coordinates of an entered oracle, used only when this is a proper prefix.
+    /// Action calls have None and preserve the containing oracle level.
+    pub oracle: Option<Coordinate>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OperationKind {
+    #[default]
+    Gate,
+    Alloc,
+    Release,
+    Classical,
+    Start,
+    Cleanup,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Operation {
     pub path: Vec<Point>,
+    /// Coordinates at the root level, never substituted for a nested budget.
     pub step: Option<usize>,
     pub phase: String,
     pub generated: usize,
+    pub kind: OperationKind,
+}
+#[derive(Clone, Debug)]
+pub struct PathSelector {
+    pub symbol: String,
+    pub point: String,
+    pub iteration: Option<Vec<usize>>,
+    pub instance: Option<Vec<usize>>,
+    pub call_index: Option<usize>,
+}
+impl From<(String, String, Option<Vec<usize>>)> for PathSelector {
+    fn from((symbol, point, iteration): (String, String, Option<Vec<usize>>)) -> Self {
+        Self {
+            symbol,
+            point,
+            iteration,
+            instance: None,
+            call_index: None,
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Selector {
-    pub path: Vec<(String, String, Option<Vec<usize>>)>,
+    pub path: Vec<PathSelector>,
     pub step: Option<usize>,
     pub phase: Option<String>,
     pub generated: Option<usize>,
@@ -33,25 +75,40 @@ impl Selector {
     pub fn specificity(&self) -> (usize, usize, bool, bool, bool) {
         (
             self.path.len(),
-            self.path.iter().filter(|p| p.2.is_some()).count(),
+            self.path.iter().filter(|p| p.iteration.is_some()).count(),
             self.step.is_some(),
             self.phase.is_some(),
             self.generated.is_some(),
         )
     }
     fn matches(&self, op: &Operation) -> bool {
+        let entered = op
+            .path
+            .iter()
+            .take(self.path.len().min(op.path.len().saturating_sub(1)))
+            .filter_map(|p| p.oracle.as_ref())
+            .next_back();
+        let step = entered.map_or(op.step, |c| c.step);
+        let phase = entered.map_or(op.phase.as_str(), |c| c.phase.as_str());
         self.path.len() <= op.path.len()
             && self.path.iter().zip(&op.path).all(|(p, q)| {
-                p.0 == q.symbol && p.1 == q.point && p.2.as_ref().is_none_or(|i| i == &q.iteration)
+                p.symbol == q.symbol
+                    && p.point == q.point
+                    && p.iteration.as_ref().is_none_or(|i| i == &q.iteration)
+                    && p.instance.as_ref().is_none_or(|i| i == &q.instance)
+                    && p.call_index.is_none_or(|i| q.call_index == Some(i))
             })
-            && self.step.is_none_or(|s| op.step == Some(s))
-            && self.phase.as_ref().is_none_or(|p| p == &op.phase)
+            && self.step.is_none_or(|s| step == Some(s))
+            && self.phase.as_ref().is_none_or(|p| p == phase)
             && self.generated.is_none_or(|g| g == op.generated)
     }
     pub fn parse(e: &Json) -> Result<Self, String> {
         let mut path = vec![];
         for p in arr(field(e, "path")?)? {
-            keys(p, &["symbol", "point", "iteration"])?;
+            keys(
+                p,
+                &["symbol", "point", "iteration", "instance", "call_index"],
+            )?;
             let iteration = field(p, "iteration")?;
             let iter = if iteration.as_str() == Some("*") {
                 None
@@ -63,11 +120,15 @@ impl Selector {
                         .collect::<Result<_, _>>()?,
                 )
             };
-            path.push((
-                string(field(p, "symbol")?)?.into(),
-                string(field(p, "point")?)?.into(),
-                iter,
-            ));
+            let instance = p.get("instance").map(wild_array).transpose()?.flatten();
+            let call_index = p.get("call_index").map(wild_int).transpose()?.flatten();
+            path.push(PathSelector {
+                symbol: string(field(p, "symbol")?)?.into(),
+                point: string(field(p, "point")?)?.into(),
+                iteration: iter,
+                instance,
+                call_index,
+            });
         }
         let step = wild_int(field(e, "step")?)?;
         if step == Some(0) {
@@ -85,6 +146,43 @@ impl Selector {
             generated: wild_int(field(e, "generated")?)?,
         })
     }
+}
+fn wild_array(v: &Json) -> Result<Option<Vec<usize>>, String> {
+    if v.as_str() == Some("*") {
+        return Ok(None);
+    }
+    arr(v)?
+        .iter()
+        .map(|v| {
+            v.as_usize()
+                .ok_or(error("expected nonnegative integer array"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+/// Select one decision kind, preserving original array positions. Start applies
+/// to emitted leaves only; a cleanup carrier never enters the timing stream.
+pub fn select_kind(
+    entries: &[(OperationKind, Selector)],
+    op: &Operation,
+    kind: OperationKind,
+) -> Result<Option<usize>, String> {
+    if (op.kind == OperationKind::Cleanup && kind != OperationKind::Cleanup)
+        || (op.kind != OperationKind::Cleanup && kind == OperationKind::Cleanup)
+        || (kind != OperationKind::Start && kind != op.kind)
+    {
+        return Ok(None);
+    }
+    let applicable = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, (k, _))| *k == kind)
+        .collect::<Vec<_>>();
+    let selectors = applicable
+        .iter()
+        .map(|(_, (_, s))| s.clone())
+        .collect::<Vec<_>>();
+    select(&selectors, op).map(|selected| selected.map(|i| applicable[i].0))
 }
 fn wild_int(v: &Json) -> Result<Option<usize>, String> {
     if v.as_str() == Some("*") {
@@ -175,27 +273,144 @@ pub fn object_schedule(obj: &Object) -> Result<Option<Json>, String> {
         .ok_or(error("schedule line missing"))?;
     json::parse(raw).map(Some)
 }
-fn points(obj: &Object, name: &str) -> Vec<(String, usize)> {
-    fn walk(v: &[crate::object::Instr], depth: usize, out: &mut Vec<usize>) {
+struct SourcePoint<'a> {
+    instruction: &'a crate::object::Instr,
+    loops: Vec<usize>,
+}
+fn points(f: &crate::object::Function) -> Vec<(String, SourcePoint<'_>)> {
+    fn walk<'a>(v: &'a [crate::object::Instr], loops: &[usize], out: &mut Vec<SourcePoint<'a>>) {
         for i in v {
-            out.push(depth);
+            out.push(SourcePoint {
+                instruction: i,
+                loops: loops.to_vec(),
+            });
+            let mut nested = loops.to_vec();
+            if i.op == "qloop" {
+                // Source admission has already checked the canonical literal.
+                nested.push(i.operands[0].parse().expect("admitted qloop bound"));
+            }
             for arm in &i.nested {
-                walk(arm, depth + usize::from(i.op == "qloop"), out);
+                walk(arm, &nested, out);
             }
         }
     }
     let mut out = vec![];
-    for b in &obj.function(name).unwrap().blocks {
-        let mut depths = vec![];
-        walk(&b.instrs, 0, &mut depths);
+    for b in &f.blocks {
+        let mut flat = vec![];
+        walk(&b.instrs, &[], &mut flat);
         out.extend(
-            depths
-                .into_iter()
+            flat.into_iter()
                 .enumerate()
-                .map(|(i, d)| (format!("{}:{i}", b.name), d)),
+                .map(|(i, p)| (format!("{}:{i}", b.name), p)),
         );
     }
     out
+}
+/// Only semantic region calls open an invocation edge. In particular neither
+/// lift.call, recipe composition nor a symbol-like operand on another row does.
+fn semantic_targets(i: &crate::object::Instr) -> Vec<&str> {
+    if [
+        "action_call",
+        "oracle_call",
+        "adj",
+        "ctl",
+        "lift.oracle_call",
+        "lift.oracle_uncall",
+        "qinplace",
+    ]
+    .contains(&i.op.as_str())
+    {
+        i.operands
+            .iter()
+            .filter_map(|s| s.strip_prefix('@'))
+            .collect()
+    } else {
+        vec![]
+    }
+}
+fn validate_path(
+    selector: &Selector,
+    doc: &Json,
+    object: &Object,
+    ids: &Identities,
+) -> Result<(), String> {
+    use crate::object::FnKind;
+    let mut oracle = doc
+        .get("bindings")
+        .and_then(|b| b.get("region"))
+        .and_then(Json::as_str)
+        .filter(|n| object.function(n).is_some_and(|f| f.kind == FnKind::Oracle));
+    for (i, p) in selector.path.iter().enumerate() {
+        let name = ids
+            .interface
+            .iter()
+            .find(|(_, h)| **h == p.symbol)
+            .map(|(n, _)| n)
+            .ok_or(error("path symbol is not in object"))?;
+        let f = object
+            .function(name)
+            .ok_or(error("path symbol is not a function"))?;
+        if f.kind == FnKind::Oracle {
+            oracle = Some(name);
+        }
+        if let Some(key) = &p.instance {
+            if f.kind == FnKind::Lproc {
+                let root = oracle.ok_or(error("lproc instance has no enclosing oracle"))?;
+                if !crate::instances::for_oracle(object, root)?
+                    .iter()
+                    .any(|v| v.symbol == *name && v.key == *key)
+                {
+                    return Err(error("instance key is not formed in enclosing oracle"));
+                }
+            } else if !key.is_empty() {
+                return Err(error("instance must be [] outside lproc"));
+            }
+        }
+        if p.point.starts_with('$') {
+            if f.kind != FnKind::Oracle
+                || !["$construct", "$step", "$commit", "$release"].contains(&p.point.as_str())
+            {
+                return Err(error("invalid reserved support point"));
+            }
+            if p.iteration.as_ref().is_some_and(|v| !v.is_empty())
+                || p.call_index.is_some()
+                || i + 1 < selector.path.len()
+            {
+                return Err(error(
+                    "support point has no source iterations or callee edge",
+                ));
+            }
+            continue;
+        }
+        let source_points = points(f);
+        let point = source_points
+            .iter()
+            .find(|(n, _)| *n == p.point)
+            .map(|(_, p)| p)
+            .ok_or_else(|| error(format!("path point {} is not in @{name}", p.point)))?;
+        if let Some(it) = &p.iteration {
+            if it.len() != point.loops.len() {
+                return Err(error("iteration length differs from loop nesting depth"));
+            }
+            if it.iter().zip(&point.loops).any(|(i, n)| i >= n) {
+                return Err(error("iteration outside source qloop domain"));
+            }
+        }
+        let targets = semantic_targets(point.instruction);
+        if p.call_index.is_some_and(|n| n >= targets.len()) {
+            return Err(error("call_index outside semantic-call domain"));
+        }
+        if let Some(next) = selector.path.get(i + 1)
+            && !targets
+                .iter()
+                .enumerate()
+                .filter(|(n, _)| p.call_index.is_none_or(|c| c == *n))
+                .any(|(_, callee)| ids.interface.get(*callee) == Some(&next.symbol))
+        {
+            return Err(error("path is not an invocation chain"));
+        }
+    }
+    Ok(())
 }
 pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
     let check = || -> Result<(), String> {
@@ -256,61 +471,7 @@ pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result
                 }
                 _ => unreachable!(),
             }
-            for (i, (symbol, point, it)) in selector.path.iter().enumerate() {
-                let name = ids
-                    .interface
-                    .iter()
-                    .find(|(_, h)| *h == symbol)
-                    .map(|(n, _)| n)
-                    .or_else(|| {
-                        ids.closure
-                            .iter()
-                            .find(|(_, h)| h.as_ref() == Some(symbol))
-                            .map(|(n, _)| n)
-                    })
-                    .ok_or(error("path symbol is not in object"))?;
-                if object.function(name).is_none() {
-                    return Err(error("path symbol is not a function"));
-                }
-                let depth = points(object, name)
-                    .into_iter()
-                    .find(|p| &p.0 == point)
-                    .map(|p| p.1)
-                    .ok_or_else(|| error(format!("path point {point} is not in @{name}")))?;
-                if it.as_ref().is_some_and(|it| it.len() != depth) {
-                    return Err(error("iteration length differs from loop nesting depth"));
-                }
-                if i + 1 < selector.path.len() {
-                    let next = &selector.path[i + 1].0;
-                    let (block, ordinal) = point.rsplit_once(':').unwrap();
-                    let b = object.function(name).unwrap().block(block).unwrap();
-                    let mut flat = vec![];
-                    fn flatten<'a>(
-                        v: &'a [crate::object::Instr],
-                        out: &mut Vec<&'a crate::object::Instr>,
-                    ) {
-                        for i in v {
-                            out.push(i);
-                            for arm in &i.nested {
-                                flatten(arm, out);
-                            }
-                        }
-                    }
-                    flatten(&b.instrs, &mut flat);
-                    let ins = flat[ordinal.parse::<usize>().unwrap()];
-                    if !ins
-                        .operands
-                        .iter()
-                        .filter_map(|s| s.strip_prefix('@'))
-                        .any(|callee| {
-                            ids.interface.get(callee) == Some(next)
-                                || ids.closure.get(callee).and_then(Option::as_ref) == Some(next)
-                        })
-                    {
-                        return Err(error("path is not an invocation chain"));
-                    }
-                }
-            }
+            validate_path(&selector, doc, object, ids)?;
         }
         Ok(())
     };

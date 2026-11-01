@@ -14,21 +14,23 @@ fn specificity_is_lexicographic_and_document_order_independent() {
         symbol: "a".repeat(64),
         point: "entry:0".into(),
         iteration: vec![0],
+        ..Point::default()
     };
     let op = Operation {
         path: vec![point.clone()],
         step: Some(1),
         phase: "fwd".into(),
         generated: 0,
+        ..Operation::default()
     };
     let a = Selector {
-        path: vec![(point.symbol.clone(), point.point.clone(), Some(vec![0]))],
+        path: vec![(point.symbol.clone(), point.point.clone(), Some(vec![0])).into()],
         step: None,
         phase: None,
         generated: None,
     };
     let b = Selector {
-        path: vec![(point.symbol, point.point, None)],
+        path: vec![(point.symbol, point.point, None).into()],
         step: Some(1),
         phase: None,
         generated: None,
@@ -119,12 +121,14 @@ fn lower_specificity_ties_do_not_invalidate_unique_maximum() {
         symbol: "a".repeat(64),
         point: "entry:0".into(),
         iteration: vec![],
+        ..Point::default()
     };
     let op = Operation {
         path: vec![point.clone()],
         step: Some(1),
         phase: "fwd".into(),
         generated: 0,
+        ..Operation::default()
     };
     let low = Selector {
         path: vec![],
@@ -133,7 +137,7 @@ fn lower_specificity_ties_do_not_invalidate_unique_maximum() {
         generated: None,
     };
     let high = Selector {
-        path: vec![(point.symbol, point.point, Some(vec![]))],
+        path: vec![(point.symbol, point.point, Some(vec![])).into()],
         step: None,
         phase: None,
         generated: None,

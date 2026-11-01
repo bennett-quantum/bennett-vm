@@ -82,6 +82,11 @@ pub struct Bindings {
     registry: Option<Rc<Registry>>,
     call_index: Rc<Cell<usize>>,
     active_symbols: Rc<RefCell<Vec<String>>>,
+    source_point: Option<crate::sched::Point>,
+    source_next: Rc<Cell<usize>>,
+    source_iterations: Vec<usize>,
+    reverse_iterations: bool,
+    source_formed: bool,
 }
 impl Bindings {
     /// Reparse the canonical source before constructing a linked registry;
@@ -90,6 +95,20 @@ impl Bindings {
         let (object, identities) = crate::load(&object.text, true)?;
         self.registry = Some(Rc::new(Registry { object, identities }));
         Ok(())
+    }
+    fn address(&self, kind: crate::sched::OperationKind) -> Option<crate::sched::Operation> {
+        self.source_point.as_ref().map(|p| {
+            let ordinal = self.source_next.get();
+            self.source_next.set(ordinal + 1);
+            let mut p = p.clone();
+            p.iteration = self.source_iterations.clone();
+            crate::sched::Operation {
+                path: vec![p],
+                generated: ordinal,
+                kind,
+                ..Default::default()
+            }
+        })
     }
     fn add_controls(&mut self, wires: impl IntoIterator<Item = String>) {
         for wire in wires {
@@ -116,7 +135,10 @@ impl Bindings {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Leaf {
+    /// Flat raw-recipe index retained for the library expansion API. Source
+    /// schedule ordinals are per source point in address.generated.
     pub ordinal: usize,
+    pub address: Option<crate::sched::Operation>,
     pub operation: String,
     pub wires: Vec<String>,
     pub controls: Vec<String>,
@@ -146,6 +168,13 @@ impl Leaf {
             s => s,
         }
         .into();
+        if let Some(address) = &mut self.address {
+            address.kind = match address.kind {
+                crate::sched::OperationKind::Alloc => crate::sched::OperationKind::Release,
+                crate::sched::OperationKind::Release => crate::sched::OperationKind::Alloc,
+                kind => kind,
+            };
+        }
         if let Some(a) = &mut self.angle {
             *a ^= 1 << 63;
         }
@@ -261,7 +290,18 @@ impl Catalog {
         active: &mut Vec<String>,
     ) -> Result<(), String> {
         for c in arr(body)? {
-            if let Some(g) = c.get("gate") {
+            if let Some(p) = c.get("$source") {
+                let mut local = env.clone();
+                local.source_point = Some(crate::sched::Point {
+                    symbol: string(field(p, "symbol")?)?.into(),
+                    point: string(field(p, "point")?)?.into(),
+                    ..Default::default()
+                });
+                local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
+                local.call_index = Rc::new(Cell::new(0));
+                local.source_next = Rc::new(Cell::new(0));
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if let Some(g) = c.get("gate") {
                 let op = string(g)?;
                 if !crate::action::is_gate_name(op) {
                     return Err(err("unknown gate"));
@@ -291,6 +331,7 @@ impl Catalog {
                 };
                 out.push(Leaf {
                     ordinal: *next,
+                    address: env.address(crate::sched::OperationKind::Gate),
                     operation: op.into(),
                     wires: ws,
                     controls: env.controls.clone(),
@@ -350,6 +391,7 @@ impl Catalog {
                 );
                 out.push(Leaf {
                     ordinal: *next,
+                    address: env.address(crate::sched::OperationKind::Alloc),
                     operation: "alloc".into(),
                     wires: ws,
                     controls: vec![],
@@ -369,6 +411,7 @@ impl Catalog {
                 let a = a.borrow();
                 out.push(Leaf {
                     ordinal: *next,
+                    address: env.address(crate::sched::OperationKind::Release),
                     operation: "release".into(),
                     wires: a.wires.clone(),
                     controls: vec![],
@@ -394,6 +437,7 @@ impl Catalog {
                         if value & (1 << bit) != 0 {
                             out.push(Leaf {
                                 ordinal: *next,
+                                address: env.address(crate::sched::OperationKind::Gate),
                                 operation: "x".into(),
                                 wires: vec![ws[byte * 8 + bit].clone()],
                                 controls: vec![],
@@ -440,6 +484,7 @@ impl Catalog {
                 };
                 out.push(Leaf {
                     ordinal: *next,
+                    address: env.address(crate::sched::OperationKind::Classical),
                     operation,
                     wires: vec![],
                     controls: vec![],
@@ -458,6 +503,22 @@ impl Catalog {
                 let to = scalar(field(c, "to")?, env)?.usize()?;
                 for i in from..to {
                     let mut local = env.clone();
+                    if env.source_point.is_some()
+                        && ((active.last().map(String::as_str) == Some("qloop")
+                            && name == "iteration")
+                            || (active.last().map(String::as_str) == Some("qloop.while")
+                                && name == "i"))
+                    {
+                        local.source_iterations.push(
+                            if env.reverse_iterations
+                                && active.last().map(String::as_str) == Some("qloop")
+                            {
+                                to - 1 - i
+                            } else {
+                                i
+                            },
+                        );
+                    }
                     local
                         .values
                         .insert(name.into(), Bound::Integer(R::from(i as u64)));
@@ -489,6 +550,10 @@ impl Catalog {
                 let mut cap = *cap.clone();
                 cap.add_controls(env.controls.clone());
                 cap.call_index = env.call_index.clone();
+                cap.source_point = env.source_point.clone();
+                cap.source_next = env.source_next.clone();
+                cap.source_iterations = env.source_iterations.clone();
+                cap.reverse_iterations = env.reverse_iterations;
                 cap.active_symbols = env.active_symbols.clone();
                 // Captured actual syntax is finite; repeating a higher-order
                 // recipe here is not a cycle in declared recipe dependencies.
@@ -535,6 +600,11 @@ impl Catalog {
                 let acquire = c.get("acquire").is_some();
                 out.push(Leaf {
                     ordinal: *next,
+                    address: env.address(if acquire {
+                        crate::sched::OperationKind::Alloc
+                    } else {
+                        crate::sched::OperationKind::Release
+                    }),
                     operation: if acquire { "alloc" } else { "release" }.into(),
                     wires: a.wires.clone(),
                     controls: vec![],
@@ -598,6 +668,14 @@ impl Catalog {
                 callee.active_symbols.borrow_mut().pop();
                 result?;
                 for leaf in &mut out[start..] {
+                    if let (Some(caller), Some(address)) =
+                        (env.source_point.as_ref(), leaf.address.as_mut())
+                    {
+                        let mut edge = caller.clone();
+                        edge.iteration = env.source_iterations.clone();
+                        edge.call_index = Some(call_index);
+                        address.path.insert(0, edge);
+                    }
                     leaf.invocation.insert(
                         0,
                         SemanticCall {
@@ -629,6 +707,10 @@ impl Catalog {
                 let mut local = bind_formals(fs, args, env, cap)?;
                 local.add_controls(env.controls.clone());
                 local.call_index = env.call_index.clone();
+                local.source_point = env.source_point.clone();
+                local.source_next = env.source_next.clone();
+                local.source_iterations = env.source_iterations.clone();
+                local.reverse_iterations = env.reverse_iterations;
                 local.active_symbols = env.active_symbols.clone();
                 self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
             } else {
@@ -921,7 +1003,7 @@ fn bind_formals(
                     for t in ts {
                         keys(t, &["parameters", "body"])?;
                         validate_formals(arr(field(t, "parameters")?)?)?;
-                        syntax(field(t, "body")?)?;
+                        syntax_inner(field(t, "body")?, outer.source_formed)?;
                     }
                     Bound::Templates(a.clone(), Box::new(outer.clone()))
                 }
@@ -930,7 +1012,7 @@ fn bind_formals(
                 if let Some(Bound::Body(b, e)) = a.as_str().and_then(|n| outer.values.get(n)) {
                     Bound::Body(b.clone(), e.clone())
                 } else {
-                    syntax(a)?;
+                    syntax_inner(a, outer.source_formed)?;
                     Bound::Body(a.clone(), Box::new(outer.clone()))
                 }
             }
@@ -1285,6 +1367,9 @@ fn wires(j: &Json, e: &Bindings) -> Result<Vec<String>, String> {
 /// Check the closed syntax even in unused constructor bodies. The authenticated
 /// catalog may contain constructors whose execution remains explicitly staged.
 fn syntax(body: &Json) -> Result<(), String> {
+    syntax_inner(body, false)
+}
+fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
     for c in arr(body)? {
         let variants: [(&str, &[&str]); 17] = [
             ("gate", &["gate", "wires", "params"]),
@@ -1305,6 +1390,11 @@ fn syntax(body: &Json) -> Result<(), String> {
             ("acquire", &["acquire"]),
             ("relinquish", &["relinquish"]),
         ];
+        if source_formed && c.get("$source").is_some() {
+            keys(c, &["$source", "body"])?;
+            syntax_inner(field(c, "body")?, true)?;
+            continue;
+        }
         let allowed = variants
             .iter()
             .find(|(k, _)| c.get(k).is_some())
@@ -1317,7 +1407,7 @@ fn syntax(body: &Json) -> Result<(), String> {
             return Err(err("inverse must be true"));
         }
         if let Some(b) = c.get("body") {
-            syntax(b)?;
+            syntax_inner(b, source_formed)?;
         }
     }
     Ok(())

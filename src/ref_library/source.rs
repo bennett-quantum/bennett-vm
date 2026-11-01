@@ -25,6 +25,8 @@ struct Region {
     local: bool,
 }
 struct Source {
+    symbol: String,
+    points: BTreeMap<usize, String>,
     widths: BTreeMap<String, usize>,
     regions: BTreeMap<String, Region>,
     declarations: Vec<(String, usize, String, String)>,
@@ -150,6 +152,7 @@ pub(super) fn action_body(
     adjoint: bool,
     env: &mut Bindings,
 ) -> Result<Json, String> {
+    env.source_formed = true;
     let f = object
         .function(name)
         .ok_or_else(|| err("unresolved linked action"))?;
@@ -158,7 +161,40 @@ pub(super) fn action_body(
             "unavailable.reason: linked oracle construction staged in bennett-vm-47t",
         ));
     }
+    let registry = env
+        .registry
+        .as_ref()
+        .ok_or_else(|| err("source registry missing"))?;
+    let symbol = registry
+        .identities
+        .interface
+        .get(name)
+        .ok_or_else(|| err("source interface identity missing"))?
+        .clone();
+    let mut points = BTreeMap::new();
+    fn enumerate(
+        i: &Instr,
+        block: &str,
+        ordinal: &mut usize,
+        points: &mut BTreeMap<usize, String>,
+    ) {
+        points.insert(i.line, format!("{block}:{}", *ordinal));
+        *ordinal += 1;
+        for arm in &i.nested {
+            for i in arm {
+                enumerate(i, block, ordinal, points);
+            }
+        }
+    }
+    for block in &f.blocks {
+        let mut ordinal = 0;
+        for i in &block.instrs {
+            enumerate(i, &block.name, &mut ordinal, &mut points);
+        }
+    }
     let mut source = Source {
+        symbol,
+        points,
         widths: BTreeMap::new(),
         regions: BTreeMap::new(),
         declarations: vec![],
@@ -366,7 +402,21 @@ impl Source {
                 ));
                 index = end + 1;
             } else {
-                out.extend(self.instruction(i, adjoint, env)?);
+                let body = self.instruction(i, adjoint, env)?;
+                out.push(Json::obj(vec![
+                    (
+                        "$source",
+                        Json::obj(vec![
+                            ("symbol", text(&self.symbol)),
+                            ("point", text(&self.points[&i.line])),
+                            (
+                                "reverse_iterations",
+                                Json::Bool(adjoint && i.op == "qloop" && i.operands.len() == 1),
+                            ),
+                        ]),
+                    ),
+                    ("body", Json::Arr(body)),
+                ]));
                 index += 1;
             }
         }

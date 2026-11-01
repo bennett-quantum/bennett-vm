@@ -61,8 +61,9 @@ recorded in [HANDOFF.md](HANDOFF.md) and [PROGRESS](docs/PROGRESS.md), not dupli
 here. Object execution is ISA 0.8; ISA 0.9 is consumed only as a partial capability
 (`SPEC_VERSIONS.toml`, section `isa_0_9`), with the remaining slices tracked in beads.
 
-Milestone 4 remains **partial and blocked** on the unpublished §11 `ref` expansion
-library and undefined `eps_decade` indexing. Target-backed structured actions and
+Milestone 4 remains **partial and blocked**: ISA 0.8 never published its §11 `ref`
+expansion library (ISA 0.9 publishes ref-0.9; consuming it is tracked under
+`bennett-vm-47t`) and `eps_decade` indexing is undefined (`cxg`). Target-backed structured actions and
 native QRAM execute actual native operations. Designated dirty pools, explicit
 accuracy-request batches, class capacities and actual sequential event accounting
 are implemented. Target-backed CLI output and immutable launch snapshots expose

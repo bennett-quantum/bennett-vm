@@ -208,6 +208,11 @@ fn nan_keys(env: &Map<Key, Seq<Value>>) -> Map<Key, ()> {
         .map(|(k, _)| (k.clone(), ()))
         .collect()
 }
+/// `measure` and its `measure.iN` form (§3.3): every test of "is this a
+/// measure frame" goes through the base opcode.
+fn is_measure(op: &str) -> bool {
+    op.split('.').next() == Some("measure")
+}
 fn pure(op: &str) -> bool {
     matches!(
         op.split('.').next().unwrap(),
@@ -320,10 +325,15 @@ impl Data {
                     .allocation_at_or_before(&p.sub(&u(1)))
                     .is_some_and(|e| e.live && *p <= e.base.add(&e.size)))
     }
-    fn read(&self, p: &BigUint, n: usize) -> Vec<u8> {
-        (0..n)
-            .map(|i| *self.memory.get(&p.add(&u(i as u64))).unwrap_or(&0))
-            .collect()
+    /// The transfer buffer is host memory: a length no host can allocate is
+    /// a host-limit diagnostic, never a panic.
+    fn read(&self, p: &BigUint, n: usize) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(n)
+            .map_err(|e| format!("host limit: §7.1 transfer of {n} bytes: {e}"))?;
+        bytes.extend((0..n).map(|i| *self.memory.get(&p.add(&u(i as u64))).unwrap_or(&0)));
+        Ok(bytes)
     }
     fn write(&mut self, p: &BigUint, bytes: &[u8]) {
         for (i, b) in bytes.iter().enumerate() {
@@ -681,7 +691,7 @@ impl Machine {
             pure: pure(&ins.op) && fault.is_none(),
             reversed: false,
             marker: ins.op == "uncall" && fault.is_none(),
-            measured: ins.op == "measure" && fault.is_none(),
+            measured: is_measure(&ins.op) && fault.is_none(),
         });
         self.steps += 1;
         Ok(())
@@ -765,7 +775,7 @@ impl Machine {
                 }
                 if base == "load" {
                     let mut v = BigUint::zero();
-                    for (i, b) in self.data.read(&p, w / 8).iter().enumerate() {
+                    for (i, b) in self.data.read(&p, w / 8)?.iter().enumerate() {
                         v = v.bitor(&u(*b as u64).shl(i * 8));
                     }
                     result = Some(Value::int(w, v));
@@ -915,7 +925,7 @@ impl Machine {
                     return Ok(Some(7));
                 }
                 let size = usize::try_from(n).map_err(|_| "host limit: request size")?;
-                let payload = self.data.read(&p, size);
+                let payload = self.data.read(&p, size)?;
                 let reply = self
                     .replies
                     .get(self.reply_pos)
@@ -995,6 +1005,10 @@ impl Machine {
                     return Ok(Some(4));
                 }
                 let ws = h.wires.clone();
+                // §3.3: measure.iN of a qreg[*] checks N before measuring.
+                if op != "measure" && width()? != ws.len() {
+                    return Ok(Some(4));
+                }
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
                 let (v, bits) = self.quantum.measure(&ws, draw);
@@ -1007,7 +1021,11 @@ impl Machine {
                 ]));
                 result = Some(Value::int(ws.len(), v));
             }
-            "action_call" | "oracle_call" | "adj" | "ctl" => self.region(ins)?,
+            "action_call" | "oracle_call" | "adj" | "ctl" => {
+                if let Some(code) = self.region(ins)? {
+                    return Ok(Some(code));
+                }
+            }
             _ => return Err(format!("unimplemented: {op} (milestone 2)")),
         }
         if let Some(v) = result {
@@ -1049,7 +1067,7 @@ impl Machine {
         // Form and validate the event from entry state before any device or
         // memory mutation. Entropy comes from the supplied entropy, never the tape.
         let bytes = match (dev, op) {
-            ("console", "write") | ("block", "write") => self.data.read(&u(p), n),
+            ("console", "write") | ("block", "write") => self.data.read(&u(p), n)?,
             ("clock", "read") => self.data.clock.to_le_bytes().to_vec(),
             ("entropy", "read") => {
                 self.entropy[self.data.entropy_pos..self.data.entropy_pos + n].to_vec()
@@ -1091,13 +1109,15 @@ impl Machine {
         self.data.tape.push(event);
         Ok(None)
     }
-    fn region(&mut self, ins: &Instr) -> Result<(), String> {
+    /// A region call. `Ok(Some(code))` is the §3.3 CC trap / R fault, taken
+    /// before any effect, including any view consumption.
+    fn region(&mut self, ins: &Instr) -> Result<Option<u64>, String> {
         let mut xs = ins.operands.as_slice();
         let mut op = ins.op.as_str();
         let mut adjoint = false;
-        let mut controls = vec![];
+        let mut control = None;
         if op == "ctl" {
-            controls = self.wires(&xs[0])?;
+            control = Some(xs[0].clone());
             op = &xs[1];
             xs = &xs[2..];
         }
@@ -1108,22 +1128,54 @@ impl Machine {
         }
         let name = xs[0].trim_start_matches('@').to_string();
         let mut used = vec![];
-        let mut bundles = |text: &str| -> Result<Vec<Vec<usize>>, String> {
-            list(text)?
-                .iter()
-                .map(|n| {
-                    used.push(n.clone());
-                    self.wires(n)
-                })
-                .collect()
+        used.extend(control.clone());
+        let is_action = op == "action_call";
+        if !is_action && op != "oracle_call" {
+            return Err(err(format!("invalid region call {op}")));
+        }
+        for text in if is_action { &xs[1..4] } else { &xs[2..3] } {
+            used.extend(list(text)?);
+        }
+        if !is_action {
+            used.extend([xs[3].clone(), xs[4].clone()]);
+            used.extend(list(&xs[5])?);
+        }
+        // Every operand live (a view included): §3.3, a use of a consumed or
+        // viewed register through any name traps.
+        if used.iter().any(|n| self.id(&action::base_name(n)).is_err()) {
+            return Ok(Some(4));
+        }
+        let controls = match &control {
+            Some(n) => self.wires(n)?,
+            None => vec![],
         };
-        let invocation = if op == "action_call" {
+        let bundles = |text: &str| -> Result<Vec<Vec<usize>>, String> {
+            list(text)?.iter().map(|n| self.wires(n)).collect()
+        };
+        let (invocation, slots) = if is_action {
             let muts = bundles(&xs[1])?;
             let inputs = bundles(&xs[2])?;
             let mem = bundles(&xs[3])?;
             let sig = crate::validate::action_sig(&self.obj, &name)?;
+            if slot_widths_differ(&muts, &sig.muts)
+                || slot_widths_differ(&inputs, &sig.ins)
+                || region_widths_differ(&mem, &sig.mem)
+            {
+                return Ok(Some(4));
+            }
+            let slots = OperandSlots {
+                written: muts
+                    .iter()
+                    .chain(mem_with_role(&mem, &sig.mem, false))
+                    .collect(),
+                read_only: inputs
+                    .iter()
+                    .chain(mem_with_role(&mem, &sig.mem, true))
+                    .collect(),
+            }
+            .overlap(&controls);
             let regions = mem
-                .into_iter()
+                .iter()
                 .zip(&sig.mem)
                 .map(|(ws, (a, w, _))| RegionWires {
                     cells: ws.chunks(*w).map(|s| s.to_vec()).collect(),
@@ -1131,49 +1183,72 @@ impl Machine {
                     w: *w,
                 })
                 .collect();
-            let args = self
-                .operands(&list(&xs[4])?)
-                .map_err(|_| err("invalid action argument"))?;
-            Invocation::Action {
-                name,
-                muts,
-                inputs,
-                regions,
-                args,
-                adjoint,
-                controls,
-            }
-        } else if op == "oracle_call" {
+            let args = match self.operands(&list(&xs[4])?) {
+                Ok(args) => args,
+                Err(code) => return Ok(Some(code)),
+            };
+            (
+                Invocation::Action {
+                    name,
+                    muts,
+                    inputs,
+                    regions,
+                    args,
+                    adjoint,
+                    controls,
+                },
+                slots,
+            )
+        } else {
             let inputs = bundles(&xs[2])?;
             let target = self.wires(&xs[3])?;
             let fault = self.wires(&xs[4])?;
-            let mem_names = list(&xs[5])?;
-            let mem = mem_names
-                .iter()
-                .map(|n| self.wires(n))
-                .collect::<Result<Vec<_>, _>>()?;
-            used.extend([xs[3].clone(), xs[4].clone()]);
-            used.extend(mem_names);
-            let budget = match self.read(&xs[1]).map_err(|_| err("missing oracle token"))? {
-                Value::Token(b) | Value::TokenId(_, b) => b,
-                _ => return Err(err("oracle call requires token")),
-            };
-            let args = self
-                .operands(&list(&xs[6])?)
-                .map_err(|_| err("invalid oracle argument"))?;
-            Invocation::Oracle {
-                name,
-                inputs,
-                target,
-                fault,
-                mem,
-                args,
-                budget,
-                controls,
+            let mem = bundles(&xs[5])?;
+            let sig = crate::validate::oracle_sig(&self.obj, &name)?;
+            if slot_widths_differ(&inputs, &sig.ins)
+                || target.len() != sig.tgt
+                || fault.len() != sig.fault
+                || region_widths_differ(&mem, &sig.mem)
+            {
+                return Ok(Some(4));
             }
-        } else {
-            return Err(err(format!("invalid region call {op}")));
+            let slots = OperandSlots {
+                written: [&target, &fault]
+                    .into_iter()
+                    .chain(mem_with_role(&mem, &sig.mem, false))
+                    .collect(),
+                read_only: inputs
+                    .iter()
+                    .chain(mem_with_role(&mem, &sig.mem, true))
+                    .collect(),
+            }
+            .overlap(&controls);
+            let budget = match self.read(&xs[1]) {
+                Ok(Value::Token(b) | Value::TokenId(_, b)) => b,
+                Ok(_) => return Err(err("oracle call requires token")),
+                Err(code) => return Ok(Some(code)),
+            };
+            let args = match self.operands(&list(&xs[6])?) {
+                Ok(args) => args,
+                Err(code) => return Ok(Some(code)),
+            };
+            (
+                Invocation::Oracle {
+                    name,
+                    inputs,
+                    target,
+                    fault,
+                    mem,
+                    args,
+                    budget,
+                    controls,
+                },
+                slots,
+            )
         };
+        if slots {
+            return Ok(Some(4));
+        }
         apply_invocation(&self.obj, &mut self.quantum, &invocation)?;
         record_quantum(&mut self.quantum_events, invocation.clone());
         self.pending_region = Some(invocation);
@@ -1186,8 +1261,56 @@ impl Machine {
                 self.data.handles.get_mut(&parent).unwrap().viewed = false;
             }
         }
-        Ok(())
+        Ok(None)
     }
+}
+/// The wire sets filling a region call's slots, by what the call does to them.
+struct OperandSlots<'a> {
+    written: Vec<&'a Vec<usize>>,
+    read_only: Vec<&'a Vec<usize>>,
+}
+impl OperandSlots<'_> {
+    /// §3.3: slots are pairwise disjoint; an explicit control is disjoint from
+    /// targets and consumed/produced operands, a read-only input may overlap it.
+    fn overlap(&self, controls: &[usize]) -> bool {
+        let mut seen = BTreeSet::new();
+        let slots_overlap = self
+            .written
+            .iter()
+            .chain(&self.read_only)
+            .flat_map(|slot| slot.iter())
+            .any(|w| !seen.insert(*w));
+        slots_overlap
+            || self
+                .written
+                .iter()
+                .flat_map(|slot| slot.iter())
+                .any(|w| controls.contains(w))
+    }
+}
+fn slot_widths_differ(bundles: &[Vec<usize>], widths: &[usize]) -> bool {
+    bundles.len() != widths.len() || bundles.iter().zip(widths).any(|(b, w)| b.len() != *w)
+}
+/// §3.3 binding: a register fills a `region[A,W]` slot iff its width is 2^A·W.
+fn region_widths_differ(mem: &[Vec<usize>], slots: &[(usize, usize, String)]) -> bool {
+    mem.len() != slots.len()
+        || mem.iter().zip(slots).any(|(ws, (a, w, _))| {
+            (*a as u32) >= usize::BITS
+                || 1usize
+                    .checked_shl(*a as u32)
+                    .and_then(|n| n.checked_mul(*w))
+                    != Some(ws.len())
+        })
+}
+fn mem_with_role<'a>(
+    mem: &'a [Vec<usize>],
+    slots: &'a [(usize, usize, String)],
+    read_only: bool,
+) -> impl Iterator<Item = &'a Vec<usize>> {
+    mem.iter()
+        .zip(slots)
+        .filter(move |(_, (_, _, role))| (role == "in") == read_only)
+        .map(|(ws, _)| ws)
 }
 fn list(text: &str) -> Result<Vec<String>, String> {
     crate::validate::list_operand(text)
@@ -1548,7 +1671,8 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     ];
     let reversing = mode == Mode::Reverse || opts.flags.contains("reverse");
     if reversing {
-        if mode == Mode::Program && m.fault.is_some() {
+        // 0.9 §10 K6: FAILED -> REVERSED. 0.8's eligibility is COMPLETED only.
+        if mode == Mode::Program && m.fault.is_some() && obj.isa == "0.8" {
             return Err("§10: E_INVALID_STATE: cannot reverse a FAILED run".into());
         }
         if m.history.iter().any(|f| f.measured) {
@@ -2070,9 +2194,10 @@ impl RuntimeRun {
         if !m.data.valid(&p, &u(n)) {
             return None;
         }
+        // An unallocatable payload is not a request: executing the row reports it.
         Some((
             i.operands[0].clone(),
-            m.data.read(&p, usize::try_from(n).ok()?),
+            m.data.read(&p, usize::try_from(n).ok()?).ok()?,
         ))
     }
     pub(crate) fn reply(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -2087,7 +2212,7 @@ impl RuntimeRun {
     pub(crate) fn step(&mut self) -> Result<(), String> {
         let m = &mut self.machine;
         if let Some(a) = m.stack.last()
-            && m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op == "measure"
+            && is_measure(&m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op)
         {
             use std::io::Read;
             let mut bs = [0u8; 8];
@@ -2220,6 +2345,18 @@ mod scaling_tests {
         let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
         let resources = Resources::new(&obj).unwrap();
         RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap()
+    }
+
+    #[test]
+    fn launch_measure_with_width_suffix_draws_like_measure() {
+        // bennett-vm-4ke: Runtime::step supplies the draw for both spellings.
+        for op in ["measure", "measure.i1"] {
+            let mut run = run_for(&format!("q = qreg.new any 1\nr = {op} q\nret r"));
+            run.step().unwrap();
+            run.step().unwrap();
+            assert_eq!(run.machine.draws.len(), 1, "{op}");
+            assert!(run.measured(), "{op}");
+        }
     }
 
     #[test]

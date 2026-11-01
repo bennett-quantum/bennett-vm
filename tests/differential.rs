@@ -5,6 +5,9 @@
 //! `BENNETT_ISA_REF` / `BENNETT_FIXTURES`. A missing oracle is a failing
 //! test, never a skip.
 
+#[allow(dead_code)]
+#[path = "support/source09.rs"]
+mod source09;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -1217,6 +1220,472 @@ fn cc_oracle_xor_budgets_controls_and_arguments() {
                     ]),
                 );
             }
+        }
+    }
+}
+
+// ---- VM defect beads from the 2026-11-01 CC review and differential harness ----
+
+/// A signed object at `version` ("0.8" or "0.9") in a per-test file.
+fn signed_object(label: &str, version: &str, functions: &str) -> String {
+    let text = source09::source_at(version, functions);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".tmp")
+        .join(format!("{label}-{version}-{}.bisa", std::process::id()));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, text).unwrap();
+    let path = path.display().to_string();
+    // The reference has neither measure.iN nor qreg[*] yet (b-isa-spec-fuk.7) and
+    // miscomputes 0.9 layout identities (b-isa-spec-7fd): such objects are judged
+    // by the 0.9 text.
+    if !functions.contains("measure.i")
+        && !functions.contains("qreg[*]")
+        && !(version == "0.9" && functions.contains("region["))
+    {
+        assert_bytes(label, &s(&["check", &path]));
+    }
+    let checked = raw_run(Path::new(vm()), &s(&["check", &path]), "interpreter");
+    assert!(checked.status.success(), "{label}: {}", show(&checked));
+    path
+}
+
+/// The JSON of one successful VM run under `engine`, with fail-loud context.
+fn vm_json(engine: &str, args: &[String]) -> bennett_vm::json::Json {
+    let out = raw_run(Path::new(vm()), args, engine);
+    assert!(out.status.success(), "{engine} {args:?}: {}", show(&out));
+    bennett_vm::json::parse(std::str::from_utf8(&out.stdout).unwrap().trim()).unwrap()
+}
+
+const ENGINES: [&str; 2] = ["interpreter", "jit"];
+
+const SPINNING_ORACLE: &str = "perm_action @perm (t:wire mut) () () () ()\n^entry():\nx t\noracle @orc (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nqjump ^entry\n";
+
+/// bennett-vm-erb: §5.2 writes survive a later action_call on another register.
+#[test]
+fn oracle_fault_code_survives_a_later_action_call() {
+    let measured = signed_object(
+        "erb-measure",
+        "0.8",
+        &format!(
+            "{SPINNING_ORACLE}fn cc @main (tk:token) (r0:i4) () () ()\n^entry():\nq = qreg.new any 1\no = qreg.new any 1\nf = qreg.new any 4\noracle_call @orc tk (q) o f () ()\naction_call @perm (q) () () ()\nm = measure f\nret m"
+        ),
+    );
+    let args = s(&["run-cc", &measured, "main", "--arg", "token:64"]);
+    assert_outcome("erb measure", &args);
+    for engine in ENGINES {
+        let json = vm_json(engine, &args);
+        let m = &json.get("measurements").unwrap().as_arr().unwrap()[0];
+        assert_eq!(m.get("bits").unwrap().as_str(), Some("1000"), "{engine}");
+    }
+    let freed = signed_object(
+        "erb-free",
+        "0.8",
+        &format!(
+            "{SPINNING_ORACLE}fn cc @main (tk:token) () () () ()\n^entry():\nq = qreg.new any 1\no = qreg.new any 1\nf = qreg.new any 4\noracle_call @orc tk (q) o f () ()\naction_call @perm (q) () () ()\nqreg.free f\nret"
+        ),
+    );
+    let args = s(&["run-cc", &freed, "main", "--arg", "token:64"]);
+    assert_outcome("erb unclean free", &args);
+    for engine in ENGINES {
+        let json = vm_json(engine, &args);
+        assert_eq!(json.get("fault").unwrap().as_u64(), Some(4), "{engine}");
+    }
+    let reversed = signed_object(
+        "erb-reverse",
+        "0.8",
+        &format!(
+            "{SPINNING_ORACLE}fn cc @main (tk:token) () () () ()\n^entry():\nq = qreg.new any 1\no = qreg.new any 1\nf = qreg.new any 4\noracle_call @orc tk (q) o f () ()\naction_call @perm (q) () () ()\nret"
+        ),
+    );
+    let args = s(&["reverse", &reversed, "main", "--arg", "token:64"]);
+    assert_outcome("erb reverse", &args);
+    for engine in ENGINES {
+        let json = vm_json(engine, &args);
+        assert_eq!(
+            json.get("equals_entry"),
+            Some(&bennett_vm::json::Json::Bool(true)),
+            "{engine}"
+        );
+    }
+}
+
+const ALIAS_PRELUDE: &str = "perm_action @flip (t:wire mut) () () () ()\n^entry():\nx t\naction @flip4 (t:wire[4] mut) () () () ()\n^entry():\nx t[0]\naction @cxact (t:wire mut) (c:wire in) () () ()\n^entry():\ncx c t\naction @two (a:wire mut, b:wire mut) () () () ()\n^entry():\nx a\nx b\naction @ins (t:wire mut) (c:wire in, d:wire in) () () ()\n^entry():\nccx c d t\noracle @orc (x:wire[4] in) (t:wire[4]) (f:wire[4]) () ()\n^entry():\nlift.retval x\noracle @orc1 (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x\n";
+
+/// Every region-call shape whose slots are filled by two names of one register.
+const REGION_PRELUDE: &str = "action @reg_mut (t:wire mut) () (m:region[0,1] mut) () ()\n^entry():\nx t\naction @reg_in (t:wire mut) () (m:region[0,1] in) () ()\n^entry():\nx t\n";
+
+const ALIAS_CALLS: [(&str, &str); 6] = [
+    ("mut-in", "action_call @cxact (a) (b) () ()"),
+    ("mut-mut", "action_call @two (a, b) () () ()"),
+    ("in-in", "action_call @ins (c) (a, b) () ()"),
+    ("ctl-target", "ctl a action_call @flip (b) () () ()"),
+    ("ctl-in-legal", "ctl a action_call @cxact (c) (b) () ()"),
+    ("adj-ctl-target", "ctl a adj action_call @flip (b) () () ()"),
+];
+
+/// bennett-vm-3tx: §3.3 region-call ledger row and "Registers, handles and
+/// aliases": overlap is a trap before any effect, a read-only control overlap
+/// is legal.
+#[test]
+fn region_call_overlaps_trap_before_any_effect() {
+    for (name, call) in ALIAS_CALLS {
+        for (kind, version) in [("cc", "0.9"), ("r", "0.9"), ("cc", "0.8")] {
+            let path = signed_object(
+                &format!("3tx-{name}-{kind}"),
+                version,
+                &format!(
+                    "{ALIAS_PRELUDE}fn {kind} @g (a:qreg[1], b:qreg[1], c:qreg[1]) () () () ()\n^entry():\n{call}\nret\nfn cc @main () (r:i1, s:i1) () () ()\n^entry():\nq = qreg.new any 1\nw = qreg.new any 1\naction_call @flip (q) () () ()\ncall @g q q w\nr = measure q\ns = measure w\nret r s"
+                ),
+            );
+            for command in ["run-cc", "run-program"] {
+                assert_outcome(
+                    &format!("3tx {name} {kind} {version} {command}"),
+                    &s(&[command, &path, "main", "--draws", "0.1,0.1"]),
+                );
+            }
+            if version == "0.9" {
+                let args = s(&["run-cc", &path, "main", "--draws", "0.1,0.1"]);
+                for engine in ENGINES {
+                    let json = vm_json(engine, &args);
+                    let expected = if name == "ctl-in-legal" {
+                        None
+                    } else {
+                        Some(4)
+                    };
+                    assert_eq!(
+                        json.get("fault").unwrap().as_u64(),
+                        expected,
+                        "{engine} {name} {kind}"
+                    );
+                }
+            }
+        }
+    }
+    // Reversal of a run that trapped restores the register; the oracle slots
+    // and registers used through a stale or viewed alias trap likewise.
+    let bodies = [
+        (
+            "oracle-in-tgt",
+            "oracle_call @orc tk (a) b c () ()",
+            Some(4),
+        ),
+        (
+            "oracle-tgt-fault",
+            "oracle_call @orc tk (c) a b () ()",
+            Some(4),
+        ),
+        (
+            "oracle-in-fault",
+            "oracle_call @orc tk (a) c b () ()",
+            Some(4),
+        ),
+        ("mut-mem", "action_call @reg_mut (e) () (f) ()", Some(4)),
+        (
+            "ctl-mem-in-legal",
+            "ctl e action_call @reg_in (d) () (f) ()",
+            None,
+        ),
+        (
+            "viewed-alias",
+            "v = qreg.slice a 0 1\naction_call @flip4 (b) () () ()\naction_call @flip (v) () () ()",
+            Some(4),
+        ),
+        (
+            "freed-alias",
+            "qreg.free a\naction_call @flip4 (b) () () ()",
+            Some(4),
+        ),
+        (
+            "ctl-mem-mut",
+            "ctl e action_call @reg_mut (d) () (f) ()",
+            Some(4),
+        ),
+        (
+            "ctl-oracle-tgt",
+            "ctl e oracle_call @orc1 tk (d) f z () ()",
+            Some(4),
+        ),
+        (
+            "ctl-oracle-in-legal",
+            "ctl e oracle_call @orc1 tk (f) d z () ()",
+            None,
+        ),
+        (
+            "ctl-view-consumed",
+            "vw = qreg.slice c 0 1\nctl vw action_call @flip (d) () () ()\naction_call @flip4 (c) () () ()\naction_call @flip4 (c) () () ()",
+            None,
+        ),
+    ];
+    for (name, body, expected) in bodies {
+        let path = signed_object(
+            &format!("3tx-{name}"),
+            "0.9",
+            &format!(
+                "{ALIAS_PRELUDE}{}fn cc @g (tk:token, a:qreg[4], b:qreg[4], c:qreg[4], d:qreg[1], z:qreg[4], e:qreg[1], f:qreg[1]) () () () ()\n^entry():\n{body}\nret\nfn cc @main (tk:token) () () () ()\n^entry():\nq = qreg.new any 4\nw = qreg.new any 4\nd = qreg.new any 1\nz = qreg.new any 4\no = qreg.new any 1\ncall @g tk q q w d z o o\nret",
+                if body.contains("reg_") {
+                    REGION_PRELUDE
+                } else {
+                    ""
+                }
+            ),
+        );
+        // A 0.9 layout defeats the reference's identity check (b-isa-spec-7fd):
+        // those shapes are judged by the §3.3 text alone.
+        for command in ["run-cc", "reverse", "run-program"] {
+            let mut args = s(&[command, &path, "main", "--arg", "token:64"]);
+            if command == "run-program" {
+                args.push("--reverse".into());
+            }
+            if !body.contains("reg_") {
+                assert_outcome(&format!("3tx {name} {command}"), &args);
+            }
+        }
+        let args = s(&["run-cc", &path, "main", "--arg", "token:64"]);
+        for engine in ENGINES {
+            let json = vm_json(engine, &args);
+            assert_eq!(
+                json.get("fault").unwrap().as_u64(),
+                expected,
+                "{engine} {name}"
+            );
+        }
+    }
+    // §3.3 binding: a qreg[*] of the wrong width at a slot traps, §4.9 a use with
+    // no current instance likewise; measure.iN checks N before measuring, no draw.
+    let path = signed_object(
+        "3tx-dynamic",
+        "0.9",
+        &format!(
+            "{ALIAS_PRELUDE}fn cc @dynamic (q:qreg[*]) () () () ()\n^entry():\naction_call @flip (q) () () ()\nret\nfn cc @width () () () () ()\n^entry():\nq = qreg.new any 2\ncall @dynamic q\nret\nfn cc @measure3 (q:qreg[*]) (r:i3) () () ()\n^entry():\nr = measure.i3 q\nret r\nfn cc @measure2 (q:qreg[*]) (r:i2) () () ()\n^entry():\nr = measure.i2 q\nret r\nfn cc @bad_measure () (r:i3) () () ()\n^entry():\nq = qreg.new any 2\nr = call @measure3 q\nret r\nfn cc @good_measure () (r:i2) () () ()\n^entry():\nq = qreg.new any 2\nr = call @measure2 q\nret r\nfn cc @no_instance (c:i1) () () () ()\n^entry():\nq = qreg.new any 1\nbr c ^define() ^use()\n^define():\nw = qreg.new any 1\nbr ^use()\n^use():\naction_call @flip (w) () () ()\nret"
+        ),
+    );
+    for (entry, extra, fault) in [
+        ("width", vec![], Some(4)),
+        ("bad_measure", vec![], Some(4)),
+        ("good_measure", vec![], None),
+        ("no_instance", vec!["--arg", "0"], Some(4)),
+    ] {
+        let mut args = s(&["run-cc", &path, entry, "--draws", "0.1"]);
+        args.extend(s(&extra));
+        for engine in ENGINES {
+            let json = vm_json(engine, &args);
+            assert_eq!(
+                json.get("fault").unwrap().as_u64(),
+                fault,
+                "{engine} {entry}"
+            );
+            assert_eq!(
+                json.get("measurements").unwrap().as_arr().unwrap().len(),
+                usize::from(entry == "good_measure"),
+                "{engine} {entry}"
+            );
+        }
+    }
+}
+
+fn bell_measure_program(measure: &str) -> String {
+    format!(
+        "action @bell (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\ncx t[0] t[1]\nfn cc @measurement () (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @bell (q) () () ()\nr = {measure} q\nret r\nfn cc @measuring () (r:i2) () () ()\n^entry():\nr = call @measurement\nret r\nfn cc @bad_uncall () (r:i2) () () ()\n^entry():\nr = call @measuring\nuncall @measuring () (r)\nret r"
+    )
+}
+
+/// bennett-vm-4ke: measure.iN is a measure for §7.4 uncall and §10 reversal.
+#[test]
+fn measure_with_width_suffix_blocks_uncall_and_reversal() {
+    let path = signed_object("4ke", "0.9", &bell_measure_program("measure.i2"));
+    // The reference has no measure.iN yet (b-isa-spec-fuk.7): the 0.9 text is the
+    // oracle here, and the plain-measure twin of the same program is differential.
+    let plain = signed_object("4ke-plain", "0.8", &bell_measure_program("measure"));
+    for entry in ["measurement", "measuring", "bad_uncall"] {
+        for command in ["run-cc", "reverse", "run-program"] {
+            assert_outcome(
+                &format!("4ke plain {command} {entry}"),
+                &s(&[command, &plain, entry, "--draws", "0.1"]),
+            );
+            // Same outcome as the plain twin, up to the operator spelling.
+            let args = |p: &str| s(&[command, p, entry, "--draws", "0.1"]);
+            for engine in ENGINES {
+                let twin = raw_run(Path::new(vm()), &args(&plain), engine);
+                let suffixed = raw_run(Path::new(vm()), &args(&path), engine);
+                assert_eq!(
+                    twin.status.code(),
+                    suffixed.status.code(),
+                    "{engine} {command} {entry}\n{}",
+                    show(&suffixed)
+                );
+            }
+        }
+    }
+    let args = s(&["run-cc", &path, "bad_uncall", "--draws", "0.1"]);
+    for engine in ENGINES {
+        let json = vm_json(engine, &args);
+        assert_eq!(json.get("fault").unwrap().as_u64(), Some(4), "{engine}");
+        let out = raw_run(
+            Path::new(vm()),
+            &s(&["reverse", &path, "measuring", "--draws", "0.1"]),
+            engine,
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains("E_NOT_REVERSIBLE"),
+            "{engine}: {}",
+            show(&out)
+        );
+    }
+}
+
+/// bennett-vm-w63: 0.9 §10 FAILED -> REVERSED through run-program; 0.8's
+/// eligibility is COMPLETED only and stays.
+#[test]
+fn failed_runs_reverse_through_run_program_at_0_9() {
+    let functions = "fn cc @boom () (r:i64) () () ()\n^entry():\nx = const.i64 1\ny = const.i64 0\nr = udiv x y\nret r\nfn r @inner (d:i64) (r:i64) () () ()\n^entry():\nx = const.i64 1\nr = udiv x d\nret r\nfn cc @nested () (r:i64) () () ()\n^entry():\nd = const.i64 0\nq = qreg.new any 1\nr = call @inner d\nret r\nfn cc @measured () (r:i1, s:i64) () () ()\n^entry():\nq = qreg.new any 1\nr = measure q\nd = const.i64 0\ns = call @inner d\nret r s";
+    for version in ["0.8", "0.9"] {
+        let path = signed_object("w63", version, functions);
+        for entry in ["boom", "nested", "measured"] {
+            for flags in [&["--reverse"][..], &[][..]] {
+                let mut args = s(&["run-program", &path, entry, "--draws", "0.1"]);
+                args.extend(s(flags));
+                assert_outcome(&format!("w63 {version} {entry} {flags:?}"), &args);
+            }
+            assert_outcome(
+                &format!("w63 {version} reverse {entry}"),
+                &s(&["reverse", &path, entry, "--draws", "0.1"]),
+            );
+        }
+    }
+    let path = signed_object("w63-engines", "0.9", functions);
+    let args = s(&["run-program", &path, "nested", "--reverse"]);
+    for engine in ENGINES {
+        let json = vm_json(engine, &args);
+        assert_eq!(json.get("status").unwrap().as_str(), Some("REVERSED"));
+        assert_eq!(
+            json.get("equals_entry"),
+            Some(&bennett_vm::json::Json::Bool(true)),
+            "{engine}"
+        );
+    }
+    let path = signed_object("w63-engines-08", "0.8", functions);
+    let args = s(&["run-program", &path, "nested", "--reverse"]);
+    for engine in ENGINES {
+        let out = raw_run(Path::new(vm()), &args, engine);
+        assert!(!out.status.success(), "{engine}: {}", show(&out));
+    }
+}
+
+/// bennett-vm-w63 through the §10 ABI: bennett_reverse of a FAILED run.
+#[test]
+fn launch_reverse_accepts_failed_runs_at_0_9() {
+    use bennett_vm::launch::*;
+    const OK: i32 = 0;
+    const INVALID: i32 = 8;
+    const NOT_REVERSIBLE: i32 = 9;
+    let functions = "fn r @inner (d:i64) (r:i64) () () ()\n^entry():\nx = const.i64 1\nr = udiv x d\nret r\nfn cc @nested () (r:i64) () () ()\n^entry():\nd = const.i64 0\nq = qreg.new any 1\nr = call @inner d\nret r\nfn cc @measured () (r:i1, s:i64) () () ()\n^entry():\nq = qreg.new any 1\nr = measure q\nd = const.i64 0\ns = call @inner d\nret r s";
+    for (version, entry, expected) in [
+        ("0.9", "nested", OK),
+        ("0.9", "measured", NOT_REVERSIBLE),
+        ("0.8", "nested", INVALID),
+    ] {
+        let text = source09::source_at(version, functions);
+        unsafe {
+            let mut p = std::ptr::null_mut();
+            let status = bennett_load(text.as_ptr(), text.len(), std::ptr::null(), 0, &mut p);
+            assert_eq!(status, OK, "{version}");
+            let mut args = std::ptr::null_mut();
+            assert_eq!(bennett_args_new(0, &mut args), OK);
+            let name = std::ffi::CString::new(entry).unwrap();
+            let mut run = 0;
+            let status = bennett_run(p, name.as_ptr(), args, std::ptr::null(), 0, &mut run);
+            assert_eq!(status, OK);
+            let (mut result, mut request) = (std::ptr::null_mut(), std::ptr::null_mut());
+            assert_eq!(bennett_wait(p, run, &mut result, &mut request), OK);
+            assert_eq!(bennett_result_nfaults(result), 1);
+            assert_eq!(bennett_result_fault(result, 0), 5);
+            assert_eq!(bennett_reverse(p, run), expected, "{version} {entry}");
+            if expected == OK {
+                // REVERSED: a second reversal is the state error, not a repeat.
+                assert_eq!(bennett_reverse(p, run), INVALID, "{version} {entry}");
+            }
+            assert_eq!(bennett_run_close(p, run), OK);
+            bennett_result_free(result);
+            bennett_args_free(args);
+            assert_eq!(bennett_unload(p), OK);
+        }
+    }
+}
+
+/// bennett-vm-h6j: a transfer no host can allocate is a diagnostic (exit 1),
+/// never a panic.
+#[test]
+fn unallocatable_transfers_are_diagnostics_not_panics() {
+    for fixture in ["r21/cc-length.bisa", "r21/r-length.bisa"] {
+        let path = fx(fixture);
+        for command in ["run-cc", "reverse", "run-program"] {
+            let args = s(&[command, &path, "f"]);
+            assert_outcome(&format!("h6j {command} {fixture}"), &args);
+            for engine in ENGINES {
+                let out = raw_run(Path::new(vm()), &args, engine);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if command == "run-program" && fixture.starts_with("r21/r-") {
+                    continue;
+                }
+                assert!(
+                    out.status.code() == Some(1) && stderr.contains("host limit"),
+                    "{engine} {command} {fixture}: {}",
+                    show(&out)
+                );
+            }
+        }
+    }
+}
+
+/// bennett-vm-dwj: §4.1 K17, the first outcome whose cumulative weight is
+/// strictly greater than draw x total, judged exactly at a CDF tie.
+#[test]
+fn measurement_draws_compare_exact_born_weights() {
+    let functions = "action @single (t:wire mut) () () () ()\n^entry():\nh t\naction @h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[1]\naction @h0h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nh t[1]\naction @bell (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\ncx t[0] t[1]\naction @phase (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nrz 0.5 t[0]\nh t[0]\nry 1.0 t[1]\nfn cc @one (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h1 (q) () () ()\nr = measure q\nret r\nfn cc @two (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h0h1 (q) () () ()\nr = measure q\nret r\nfn cc @bell_m (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @bell (q) () () ()\nr = measure q\nret r\nfn cc @angle (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @phase (q) () () ()\nr = measure q\nret r\nfn cc @sequence (a:i64) (r:i1, s:i1) () () ()\n^entry():\nq = qreg.new any 1\nw = qreg.new any 1\naction_call @single (q) () () ()\naction_call @single (w) () () ()\nr = measure q\ns = measure w\nret r s";
+    for version in ["0.8", "0.9"] {
+        let path = signed_object("dwj", version, functions);
+        for entry in ["one", "two", "bell_m", "angle"] {
+            for draw in [
+                "0.0",
+                "0.125",
+                "0.25",
+                "0.375",
+                "0.5",
+                "0.75",
+                "0.875",
+                "0.9999999",
+            ] {
+                assert_outcome(
+                    &format!("dwj {version} {entry} {draw}"),
+                    &s(&["run-cc", &path, entry, "--arg", "0", "--draws", draw]),
+                );
+            }
+        }
+        for draws in ["0.5,0.5", "0.0,0.5", "0.5,0.25", "0.25,0.75"] {
+            assert_outcome(
+                &format!("dwj {version} sequence {draws}"),
+                &s(&["run-cc", &path, "sequence", "--arg", "0", "--draws", draws]),
+            );
+        }
+    }
+    let path = signed_object("dwj-engines", "0.8", functions);
+    for (entry, draw, bits) in [
+        ("one", "0.5", "01"),
+        ("two", "0.25", "01"),
+        ("two", "0.5", "10"),
+        ("two", "0.75", "11"),
+        ("bell_m", "0.5", "11"),
+    ] {
+        let args = s(&["run-cc", &path, entry, "--arg", "0", "--draws", draw]);
+        for engine in ENGINES {
+            let json = vm_json(engine, &args);
+            let m = &json.get("measurements").unwrap().as_arr().unwrap()[0];
+            assert_eq!(
+                m.get("bits").unwrap().as_str(),
+                Some(bits),
+                "{engine} {entry} {draw}"
+            );
         }
     }
 }

@@ -663,13 +663,15 @@ pub unsafe extern "C" fn bennett_resume(p: *mut bennett_program_t, r: u64) -> i3
 pub unsafe extern "C" fn bennett_reverse(p: *mut bennett_program_t, r: u64) -> i32 {
     status(|| {
         let p = get_mut(p)?;
+        // 0.9 §10 K6: FAILED -> REVERSED. 0.8's eligibility is COMPLETED only.
+        let failed_reversible = p.obj.isa != "0.8";
         let resources = &mut p.resources;
         let run = p
             .runs
             .get_mut(&r)
             .ok_or_else(|| error(INVALID, "§10: unknown run"))?;
-        if run.state != State::Completed {
-            return Err(error(INVALID, "§10: reverse requires COMPLETED"));
+        if !(run.state == State::Completed || (run.state == State::Failed && failed_reversible)) {
+            return Err(error(INVALID, "§10: reverse requires COMPLETED or FAILED"));
         }
         if run.runtime.measured() {
             return Err(error(

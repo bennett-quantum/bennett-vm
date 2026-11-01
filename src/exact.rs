@@ -167,6 +167,44 @@ impl Exact {
     pub fn is_zero(&self) -> bool {
         self.0.is_empty()
     }
+    /// The complex conjugate: exp(i a) -> exp(-i a), i -> -i, sqrt(2) fixed.
+    pub fn conj(&self) -> Self {
+        let mut x = Self::zero();
+        for ((a, s, i), c) in &self.0 {
+            x.insert((a.neg(), *s, *i), if *i { c.neg() } else { c.clone() });
+        }
+        x
+    }
+    /// The sign of a real value (-1, 0, 1). Zero is exact: the terms c sqrt(2)^s
+    /// i^j exp(i a) with distinct dyadic a are linearly independent over the
+    /// algebraic numbers (Lindemann-Weierstrass), so a nonzero sum is nonzero.
+    /// Without phases, p + q sqrt(2) is decided exactly; with them the nonzero
+    /// value is compared numerically.
+    pub fn real_sign(&self) -> i32 {
+        if self.is_zero() {
+            return 0;
+        }
+        let zero = Dyad::int(0);
+        if self.0.keys().all(|(a, _, i)| *a == zero && !*i) {
+            let get = |s: bool| self.0.get(&(zero.clone(), s, false));
+            let sign = |d: Option<&Dyad>| d.map_or(0, |d| if d.neg { -1 } else { 1 });
+            let (p, q) = (get(false), get(true));
+            let (sp, sq) = (sign(p), sign(q));
+            if sp == 0 || sq == 0 || sp == sq {
+                return if sp != 0 { sp } else { sq };
+            }
+            // p + q sqrt(2) with opposite signs: compare p^2 with 2 q^2.
+            let (p, q) = (p.unwrap(), q.unwrap());
+            let p_dominates = !p.mul(p).add(&q.mul(q).twice().neg()).neg;
+            return if p_dominates { sp } else { sq };
+        }
+        let (re, im) = self.value();
+        assert!(
+            re.is_finite() && im.abs() <= 1e-6 * re.abs().max(1.),
+            "§4.1: Born weight must be real: {re} + {im}i"
+        );
+        if re > 0. { 1 } else { -1 }
+    }
     pub fn value(&self) -> (f64, f64) {
         let mut re = 0.;
         let mut im = 0.;
@@ -211,6 +249,22 @@ mod tests {
         let (re, im) = p.mul(&p).value();
         assert!(re.is_finite() && im.is_finite());
         assert!((re * re + im * im - 1.).abs() < 2e-12);
+    }
+    #[test]
+    fn conjugate_products_and_signs_are_exact() {
+        let h = Exact::sqrt_half();
+        // |1/sqrt(2)|^2 is exactly 1/2, unlike the binary64 square.
+        assert_eq!(h.mul(&h.conj()), Exact::pair(0.5, 0.));
+        let phase = Exact::rotation("ry", 1.0)[0][0].clone();
+        let i_phase = phase.mul(&Exact::pair(0., 1.));
+        assert_eq!(i_phase.mul(&i_phase.conj()), phase.mul(&phase.conj()));
+        assert_eq!(Exact::zero().real_sign(), 0);
+        assert_eq!(Exact::pair(-0.25, 0.).real_sign(), -1);
+        // sqrt(2)/2 - 1/2 > 0 and sqrt(2)/2 - 3/4 < 0.
+        assert_eq!(h.add(&Exact::pair(-0.5, 0.)).real_sign(), 1);
+        assert_eq!(h.add(&Exact::pair(-0.75, 0.)).real_sign(), -1);
+        assert_eq!(h.neg().add(&Exact::pair(0.75, 0.)).real_sign(), 1);
+        assert_eq!(phase.mul(&phase.conj()).real_sign(), 1);
     }
     #[test]
     fn exact_inverse_cancellation() {

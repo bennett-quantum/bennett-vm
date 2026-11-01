@@ -31,6 +31,8 @@ struct Source {
     regions: BTreeMap<String, Region>,
     declarations: Vec<(String, usize, String, String)>,
     locals: Vec<Instr>,
+    computations: BTreeMap<String, Instr>,
+    cleanup_sites: BTreeMap<String, usize>,
 }
 impl Catalog {
     /// Form a structured source action from resolved classical parameters,
@@ -44,6 +46,23 @@ impl Catalog {
         adjoint: bool,
         inherited_controls: usize,
     ) -> Result<Vec<Leaf>, String> {
+        self.lower_action_with_cleanup(object, name, params, adjoint, inherited_controls, &[])
+            .map(|e| e.leaves)
+    }
+    /// Select whole explicit cleanup pairs before expanding them. This source
+    /// trace boundary does not claim target realisation or schedule admission.
+    /// Direct copy/load pairs and adjacent empty lifetime/no-output-call pairs
+    /// are currently realised. Other explicit pairs leave a marked default
+    /// trace; supplying cleanup choices for them reports unavailable mechanics.
+    pub fn lower_action_with_cleanup(
+        &self,
+        object: &Object,
+        name: &str,
+        params: &Json,
+        adjoint: bool,
+        inherited_controls: usize,
+        entries: &[CleanupEntry],
+    ) -> Result<ActionExpansion, String> {
         let f = object
             .function(name)
             .ok_or_else(|| err(format!("unresolved action @{name}")))?;
@@ -53,6 +72,7 @@ impl Catalog {
         let types = f.lists[3].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
         crate::invocation::decode_args(params, &types, object.ptr_width)?;
         let mut env = Bindings::new();
+        env.cleanup.entries = Rc::new(entries.to_vec());
         for p in f.lists[0].iter().chain(&f.lists[1]) {
             let Type::Wire(width) = p.ty else {
                 return Err(err("non-wire source interface"));
@@ -95,7 +115,13 @@ impl Catalog {
         env.add_controls(wires(&text("$controls"), &env)?);
         env.link(object)?;
         let body = action_body(object, name, adjoint, &mut env)?;
-        self.expand("adj", &[body], &env)
+        let leaves = self.expand("adj", &[body], &env)?;
+        let cleanups = env.cleanup.carriers.borrow().clone();
+        Ok(ActionExpansion {
+            leaves,
+            cleanups,
+            cleanup_pairing_complete: !env.cleanup.incomplete.get(),
+        })
     }
 }
 pub(super) fn interface(object: &Object, name: &str) -> Result<Vec<Json>, String> {
@@ -199,6 +225,8 @@ pub(super) fn action_body(
         regions: BTreeMap::new(),
         declarations: vec![],
         locals: vec![],
+        computations: BTreeMap::new(),
+        cleanup_sites: BTreeMap::new(),
     };
 
     for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -341,6 +369,15 @@ impl Source {
     }
     fn declarations(&mut self, instructions: &[Instr]) -> Result<(), String> {
         for i in instructions {
+            if matches!(i.op.as_str(), "qcopy" | "qload") {
+                self.computations.insert(i.lhs[0].clone(), i.clone());
+            }
+            if i.op == "quncopy" {
+                self.cleanup_sites.insert(i.operands[1].clone(), i.line);
+            }
+            if i.op == "qunload" {
+                self.cleanup_sites.insert(i.operands[2].clone(), i.line);
+            }
             let allocation = match i.op.as_str() {
                 "qalloc" | "qborrow" => Some((
                     i.operands[1].parse::<usize>().map_err(err)?,
@@ -386,6 +423,45 @@ impl Source {
         env: &mut Bindings,
     ) -> Result<Vec<Json>, String> {
         let mut out = vec![];
+        let mut empty_pairs = BTreeMap::new();
+        for pair in instructions.windows(2) {
+            if matches!(pair[0].op.as_str(), "qalloc" | "qborrow")
+                && matches!(pair[1].op.as_str(), "qfree" | "qreturn")
+                && pair[0].lhs.first() == pair[1].operands.first()
+            {
+                empty_pairs.insert(pair[0].line, pair[1].clone());
+                empty_pairs.insert(pair[1].line, pair[0].clone());
+            }
+        }
+        let mut empty_calls = BTreeMap::new();
+        for pair in instructions.windows(2) {
+            if !pair
+                .iter()
+                .all(|i| matches!(i.op.as_str(), "action_call" | "adj" | "ctl"))
+            {
+                continue;
+            }
+            let (a, ca, oa, aa) = crate::action::normalize_call(&pair[0])?;
+            let (b, cb, ob, ab) = crate::action::normalize_call(&pair[1])?;
+            if a || !b || ca != cb || oa != ob || aa != ab || oa != "action_call" {
+                continue;
+            }
+            let registry = env
+                .registry
+                .as_ref()
+                .ok_or_else(|| err("source registry missing"))?;
+            let f = registry
+                .object
+                .function(aa[0].trim_start_matches('@'))
+                .ok_or_else(|| err("missing paired callee"))?;
+            if !f.lists[0].is_empty() || f.lists[2].iter().any(|p| p.role.as_deref() != Some("in"))
+            {
+                continue;
+            }
+            let perm = f.kind == FnKind::PermAction;
+            empty_calls.insert(pair[0].line, (pair[1].clone(), perm));
+            empty_calls.insert(pair[1].line, (pair[0].clone(), perm));
+        }
         let mut index = 0;
         while index < instructions.len() {
             let i = &instructions[index];
@@ -416,6 +492,41 @@ impl Source {
                 index = end + 1;
             } else {
                 let body = self.instruction(i, adjoint, env)?;
+                let body = if let Some(partner) = empty_pairs.get(&i.line) {
+                    if matches!(
+                        (i.op.as_str(), adjoint),
+                        ("qfree" | "qreturn", false) | ("qalloc" | "qborrow", true)
+                    ) {
+                        let compute = if adjoint { i } else { partner };
+                        let target = &compute.lhs[0];
+                        let computing = self.instruction(compute, false, env)?;
+                        vec![self.pair_annotation(
+                            target,
+                            &self.points[&partner.line],
+                            computing,
+                            body,
+                            compute.op == "qalloc",
+                        )]
+                    } else {
+                        body
+                    }
+                } else if let Some((partner, perm)) = empty_calls.get(&i.line) {
+                    let (inverse, _, _, _) = crate::action::normalize_call(i)?;
+                    if inverse ^ adjoint {
+                        let computing = self.instruction(partner, adjoint, env)?;
+                        vec![self.pair_annotation(
+                            "",
+                            &self.points[&partner.line],
+                            computing,
+                            body,
+                            *perm,
+                        )]
+                    } else {
+                        body
+                    }
+                } else {
+                    self.cleanup_pair(i, adjoint, body, env)?
+                };
                 out.push(Json::obj(vec![
                     (
                         "$source",
@@ -437,6 +548,95 @@ impl Source {
             out.reverse();
         }
         Ok(out)
+    }
+    fn pair_annotation(
+        &self,
+        target: &str,
+        point: &str,
+        computing: Vec<Json>,
+        body: Vec<Json>,
+        perm: bool,
+    ) -> Json {
+        Json::obj(vec![
+            (
+                "$cleanup",
+                Json::obj(vec![
+                    ("target", text(target)),
+                    ("point", text(point)),
+                    ("computing", Json::Arr(computing)),
+                    ("perm", Json::Bool(perm)),
+                ]),
+            ),
+            ("body", Json::Arr(body)),
+        ])
+    }
+    fn defer_cleanup(&self, body: Vec<Json>, _env: &Bindings) -> Result<Vec<Json>, String> {
+        // Preserve generation staging: an unresolved pair inside a zero-trip
+        // source loop is not an operation and cannot reject any policy.
+        Ok(vec![Json::obj(vec![
+            ("$cleanup_pending", Json::Bool(true)),
+            ("body", Json::Arr(body)),
+        ])])
+    }
+    fn cleanup_pair(
+        &self,
+        i: &Instr,
+        adjoint: bool,
+        body: Vec<Json>,
+        env: &mut Bindings,
+    ) -> Result<Vec<Json>, String> {
+        let target = match (i.op.as_str(), adjoint) {
+            ("quncopy", false) => Some(&i.operands[1]),
+            ("qunload", false) => Some(&i.operands[2]),
+            ("qcopy" | "qload", true) => Some(&i.lhs[0]),
+            _ => None,
+        };
+        let Some(target) = target else {
+            let release = matches!(
+                (i.op.as_str(), adjoint),
+                ("qfree" | "qreturn", false) | ("qalloc" | "qborrow", true)
+            );
+            let call = matches!(i.op.as_str(), "action_call" | "adj" | "ctl")
+                && (crate::action::normalize_call(i)?.0 ^ adjoint);
+            return if release || call {
+                self.defer_cleanup(body, env)
+            } else {
+                Ok(body)
+            };
+        };
+        let Some(compute) = self.computations.get(target) else {
+            return self.defer_cleanup(body, env);
+        };
+        if !adjoint {
+            let expected = if compute.op == "qcopy" {
+                vec![compute.operands[0].clone(), target.clone()]
+            } else {
+                vec![
+                    compute.operands[0].clone(),
+                    compute.operands[1].clone(),
+                    target.clone(),
+                ]
+            };
+            if i.operands != expected {
+                return self.defer_cleanup(body, env);
+            }
+        }
+        let line = if adjoint {
+            let Some(line) = self.cleanup_sites.get(target) else {
+                return self.defer_cleanup(body, env);
+            };
+            *line
+        } else {
+            compute.line
+        };
+        let computing = self.instruction(compute, false, env)?;
+        Ok(vec![self.pair_annotation(
+            target,
+            &self.points[&line],
+            computing,
+            body,
+            true,
+        )])
     }
     fn instruction(
         &self,

@@ -65,6 +65,7 @@ impl Bindings {
         self.coordinate = other.coordinate.clone();
         self.oracle_address = other.oracle_address.clone();
         self.row_spaces = other.row_spaces.clone();
+        self.cleanup = other.cleanup.clone();
     }
 }
 impl Catalog {

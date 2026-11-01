@@ -316,6 +316,7 @@ fn semantic_targets(i: &crate::object::Instr) -> Vec<&str> {
         "ctl",
         "lift.oracle_call",
         "lift.oracle_uncall",
+        "lift.perm_call",
         "qinplace",
     ]
     .contains(&i.op.as_str())

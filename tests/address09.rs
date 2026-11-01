@@ -348,3 +348,31 @@ fn k49_fixed_rows_have_instances_but_lift_call_never_opens_an_edge() {
             .contains("invocation chain")
     );
 }
+#[test]
+fn lifted_permutation_calls_open_semantic_edges_and_have_one_occurrence() {
+    let (obj, ids) = load(
+        "oracle @root (x:wire[1] in) (t:wire[1]) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.mov x\nlift.perm_call @flip (r) () () ()\nlift.retval r\nperm_action @flip (y:wire[1] mut) () () () ()\n^entry():\nx y",
+    );
+    let mut doc = document(&ids.interface["root"], "entry:1", j("[]"), j("[]"), j("0"));
+    sched::validate_entries(&doc, &obj, &ids).unwrap();
+    if let Json::Obj(d) = &mut doc
+        && let Json::Arr(entries) = d.get_mut("entries").unwrap()
+        && let Json::Obj(e) = &mut entries[0]
+        && let Json::Arr(path) = e.get_mut("path").unwrap()
+    {
+        path.push(j(&format!(
+            r#"{{"symbol":"{}","point":"entry:0","iteration":[],"instance":[]}}"#,
+            ids.interface["flip"]
+        )));
+    }
+    sched::validate_entries(&doc, &obj, &ids).unwrap();
+    assert!(
+        sched::validate_entries(
+            &document(&ids.interface["root"], "entry:1", j("[]"), j("[]"), j("1")),
+            &obj,
+            &ids
+        )
+        .unwrap_err()
+        .contains("call_index")
+    );
+}

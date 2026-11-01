@@ -1,3 +1,10 @@
+# 47t-c K65 direct-pair carriers — 2026-11-01
+Resume: c IN PROGRESS; ISA b-isa-spec-5cd must settle multirow recompute source ownership; finish general pair binding and bound-library occurrence validation before d, b, hsd, clw. a zero-width item remains pending ISA 7js.
+Direct copy/load pairs select a non-emitting ordinal-0 carrier before expansion; reverse/recompute preserve controls, nested containing paths and source-loop/adjoint coordinates. Adjacent empty lifetime/no-output-call pairs retain carriers even with no leaves.
+Default manually written inverse sequences remain executable as source traces, marked cleanup_pairing_complete=false; helper policies cannot silently realise an incomplete pair; zero-trip unresolved pairs do not reject. lift.perm_call now validates its semantic edge and occurrence 0.
+Final interpreter/JIT each 210/0/0 (session baseline 197/0/0), differential each 18/0 unchanged; fmt/strict Clippy/whitespace green. Nine cleanup tests plus lifted-edge witness; .tmp/c-final3-*.log/totals, with pinned reference CLI.
+ISA 5cd quotes K65 and both multirow emitted-leaf ownership readings; export-only spec commit 566a988, no spec text edited. No bead closed; no new Cargo dependencies, test/fixture weakening or push; later children untouched.
+
 # 47t-c K64 emitted support partition — 2026-11-01
 Resume: c IN PROGRESS; K65 whole-pair carriers and remaining source/bound-library semantic-call validation precede d, b, hsd, clw; a zero-width item still waits on ISA 7js.
 Source-derived oracle/instance row maps annotate the authenticated construction with separate construct/step/commit/release spaces, per-step/phase support counters and shared Rows/Next row counters; raw leaves/charges/order stay identical.

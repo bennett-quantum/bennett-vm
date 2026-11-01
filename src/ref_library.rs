@@ -1,6 +1,8 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
 mod address;
+mod cleanup;
+pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
 mod source;
 use crate::{
     json::{self, Json},
@@ -91,6 +93,7 @@ pub struct Bindings {
     oracle_address: Option<Rc<address::OracleAddress>>,
     row_spaces: Vec<address::RowSpace>,
     coordinate: crate::sched::Coordinate,
+    cleanup: cleanup::CleanupContext,
 }
 impl Bindings {
     /// Reparse the canonical source before constructing a linked registry;
@@ -312,6 +315,10 @@ impl Catalog {
                 local.call_index = Rc::new(Cell::new(0));
                 local.source_next = Rc::new(Cell::new(0));
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if c.get("$cleanup_pending").is_some() {
+                self.walk_pending_cleanup(c, env, out, next, active)?;
+            } else if c.get("$cleanup").is_some() {
+                self.walk_cleanup(c, env, out, next, active)?;
             } else if let Some(g) = c.get("gate") {
                 let op = string(g)?;
                 if !crate::action::is_gate_name(op) {
@@ -659,6 +666,13 @@ impl Catalog {
                 };
                 callee.registry = Some(registry.clone());
                 callee.coordinate = env.coordinate.clone();
+                callee.cleanup = env.cleanup.clone();
+                if let Some(caller) = &env.source_point {
+                    let mut edge = caller.clone();
+                    edge.iteration = env.source_iterations.clone();
+                    edge.call_index = Some(env.call_index.get());
+                    callee.cleanup.prefix.push(edge);
+                }
                 callee.declarations = env.declarations.clone();
                 callee.active_symbols = env.active_symbols.clone();
                 callee.add_controls(env.controls.clone());
@@ -1409,6 +1423,22 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
         ];
         if source_formed && c.get("$source").is_some() {
             keys(c, &["$source", "body"])?;
+            syntax_inner(field(c, "body")?, true)?;
+            continue;
+        }
+        if source_formed && c.get("$cleanup_pending").is_some() {
+            keys(c, &["$cleanup_pending", "body"])?;
+            if field(c, "$cleanup_pending")? != &Json::Bool(true) {
+                return Err(err("invalid pending source cleanup"));
+            }
+            syntax_inner(field(c, "body")?, true)?;
+            continue;
+        }
+        if source_formed && c.get("$cleanup").is_some() {
+            keys(c, &["$cleanup", "body"])?;
+            let pair = field(c, "$cleanup")?;
+            keys(pair, &["target", "point", "computing", "perm"])?;
+            syntax_inner(field(pair, "computing")?, true)?;
             syntax_inner(field(c, "body")?, true)?;
             continue;
         }

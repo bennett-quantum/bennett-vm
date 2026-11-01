@@ -474,6 +474,16 @@ fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
 }
 
 fn assert_map(text: &str, params: &str, budget: [u64; 4], inputs: &[(&str, usize)], cases: usize) {
+    assert_map_choice(text, params, budget, inputs, cases, None);
+}
+fn assert_map_choice(
+    text: &str,
+    params: &str,
+    budget: [u64; 4],
+    inputs: &[(&str, usize)],
+    cases: usize,
+    choice: Option<CleanupRealisation>,
+) {
     use bennett_vm::{bigint::BigUint, value::Budget};
     let (obj, _) = bennett_vm::load(text, false).unwrap();
     let catalog = Catalog::published().unwrap();
@@ -492,9 +502,24 @@ fn assert_map(text: &str, params: &str, budget: [u64; 4], inputs: &[(&str, usize
         budget[0], budget[1], budget[2], budget[3]
     ))
     .unwrap();
+    let entries = choice
+        .into_iter()
+        .map(|realisation| CleanupEntry {
+            selector: Selector::parse(
+                &json::parse(r#"{"path":[],"step":"*","phase":"*","generated":0}"#).unwrap(),
+            )
+            .unwrap(),
+            realisation,
+        })
+        .collect::<Vec<_>>();
     let e = catalog
-        .lower_oracle_with_cleanup(&obj, "root", &parameters, &context, 0, &[])
+        .lower_oracle_with_cleanup(&obj, "root", &parameters, &context, 0, &entries)
         .unwrap();
+    if let Some(choice) = choice {
+        assert!(e.cleanup_pairing_complete);
+        assert!(!e.cleanups.is_empty());
+        assert!(e.cleanups.iter().all(|c| c.realisation == choice));
+    }
     let target = match obj.function("root").unwrap().lists[1][0].ty {
         bennett_vm::object::Type::Wire(w) => w,
         _ => panic!(),
@@ -764,6 +789,122 @@ fn source_indirect_rows_keep_canonical_interior_targets_and_instance_ranges() {
         "oracle @root (a:wire[4] in) (t:wire[4]) (f:wire[4]) () ()\nregs { r:reg[4] }\n^entry():\nr = lift.call @jump (a)\nlift.retval r\nlproc @jump (a:reg[4]) (r:reg[4]) () () ()\n^entry():\nqjumpr a\n^done():\nr = lift.const.i4 9\nlift.ret r",
     ));
     assert_map(&text, "[]", [5, 0, 16, 2], &[("a", 4)], 16);
+}
+
+#[test]
+fn indirect_pair_carriers_execute_computed_cycles_under_controls_and_adjoints() {
+    for body in [
+        "pc = lift.label ^done\none = lift.const.i4 1\npc = lift.add pc one\nlift.oracle_call @id tk (x) r fr () ()\nqjumpr pc\n^done():\nr = lift.mov x\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval x",
+        "pc = lift.label ^body\nqjumpr pc\n^body():\nlift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nqjumpr pc",
+    ] {
+        let text = support::source(&format!(
+            "oracle @outer (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs {{ r:reg[1], fr:reg[4], pc:reg[4], one:reg[4] }}\n^entry():\n{body}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+        ));
+        let (obj, ids) = bennett_vm::load(&text, false).unwrap();
+        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["outer"], if body.contains("^done") {"done:1"} else {"body:1"})).unwrap();
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = Catalog::published()
+                .unwrap()
+                .lower_oracle_with_cleanup(
+                    &obj,
+                    "outer",
+                    &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
+                    &json::parse(r#"{"token":["8","0","0","0"]}"#).unwrap(),
+                    1,
+                    &[CleanupEntry {
+                        selector: Selector::parse(&selector).unwrap(),
+                        realisation: choice,
+                    }],
+                )
+                .unwrap();
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 16);
+            assert!(e.cleanups.iter().all(
+                    |c| c.realisation == choice && c.controls.contains(&"$controls[0]".into())
+                ));
+            for adjoint in [false, true] {
+                let leaves = if adjoint {
+                    e.leaves
+                        .iter()
+                        .rev()
+                        .cloned()
+                        .map(|mut leaf| {
+                            leaf.operation = match leaf.operation.as_str() {
+                                "alloc" => "release".into(),
+                                "release" => "alloc".into(),
+                                _ => leaf.operation,
+                            };
+                            leaf
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    e.leaves.clone()
+                };
+                for bits in 0..128 {
+                    let mut state = std::collections::BTreeMap::from([
+                        ("x[0]".into(), bits & 1 != 0),
+                        ("t[0]".into(), bits & 2 != 0),
+                        ("$controls[0]".into(), bits & 64 != 0),
+                    ]);
+                    for i in 0..4 {
+                        state.insert(format!("f[{i}]"), bits & (4 << i) != 0);
+                    }
+                    let mut expected = state.clone();
+                    if bits & 64 != 0 {
+                        if body.contains("^done") {
+                            *expected.get_mut("t[0]").unwrap() ^= bits & 1 != 0;
+                        } else {
+                            *expected.get_mut("f[0]").unwrap() ^= true;
+                        }
+                    }
+                    assert_eq!(
+                        replay(&leaves, state),
+                        expected,
+                        "{adjoint} {choice:?} {bits}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn indirect_lproc_pairs_keep_canonical_instance_offsets_and_fault_exits() {
+    // Two fixed keys put ^done at distinct canonical row indices. A local
+    // numeric zero is outside either worker, and must fault rather than enter
+    // the oracle or another instance. Both retain authenticated source pairs.
+    for jump in ["pc", "zero"] {
+        let path = if jump == "pc" {
+            "qjumpr pc\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.ret x"
+        } else {
+            "lift.oracle_uncall @id tk (x) r fr () ()\nqjumpr zero\n^done():\nlift.ret x"
+        };
+        let text = stack_layout(&support::source(&format!(
+            "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, a:i1, b:i1)\nregs {{ r:reg[1] }}\n^entry():\nqbranch x ^left ^right\n^left():\nr = lift.call @work (x) (tk) (a) ()\nqjump ^end\n^right():\nr = lift.call @work (x) (tk) (b) ()\nqjump ^end\n^end():\nlift.retval r\nlproc @work (x:reg[1]) (r:reg[1]) (tk:token) (a:i1) ()\nregs {{ fr:reg[4], pc:reg[5], zero:reg[5] }}\n^entry():\npc = lift.label ^done\nzero = lift.const.i5 0\nlift.oracle_call @id tk (x) r fr () ()\n{path}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+        )));
+        // Mutually exclusive calls still execute both fixed keys across x=0/1,
+        // with one eight-cell activation record rather than two live records.
+        let text = support::sign(&text.replace("\"S_cells\":4", "\"S_cells\":3"));
+        let (obj, _) = bennett_vm::load(&text, false).unwrap();
+        let mut bindings = bennett_vm::ref_library::Bindings::new();
+        bindings.address_oracle(&obj, "root").unwrap();
+        let pairs = bindings.oracle_cleanup_pairs().unwrap();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].cleanup_point.instance, [0, 1]);
+        assert_eq!(pairs[1].cleanup_point.instance, [0, 2]);
+        // Source execution and complete private release, including the second
+        // instance's distinct canonical target and the out-of-range fault.
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            assert_map_choice(
+                &text,
+                r#"[["1","0","0","0"],"0","1"]"#,
+                [10, 0, 8, 2],
+                &[("x", 1)],
+                2,
+                Some(choice),
+            );
+        }
+    }
 }
 #[test]
 fn source_permutation_rows_use_the_semantic_callee_and_source_adjoint() {

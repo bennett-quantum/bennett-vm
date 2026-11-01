@@ -1,0 +1,351 @@
+//! Fresh cleanup traversal owns contiguous caller spaces (ISA pass X/K80).
+#[path = "support/source09.rs"]
+mod support;
+use bennett_vm::{
+    json::{self, Json},
+    ref_library::{Catalog, CleanupEntry, CleanupRealisation},
+    sched::Selector,
+};
+
+fn replay_identity(e: &bennett_vm::ref_library::ActionExpansion, values: &[(&str, bool)]) {
+    let mut state = values
+        .iter()
+        .map(|(n, v)| (n.to_string(), *v))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let original = state.clone();
+    for l in &e.leaves {
+        match l.operation.as_str() {
+            "alloc" => {
+                for w in &l.wires {
+                    assert!(state.insert(w.clone(), false).is_none());
+                }
+            }
+            "release" => {
+                for w in &l.wires {
+                    assert_eq!(state.remove(w), Some(false));
+                }
+            }
+            "x" | "cx" | "ccx" | "mcx" => {
+                let (target, controls) = l.wires.split_last().unwrap();
+                if controls.iter().chain(&l.controls).all(|w| state[w]) {
+                    *state.get_mut(target).unwrap() ^= true;
+                }
+            }
+            "swap" => {
+                if l.controls.iter().all(|w| state[w]) {
+                    let (a, b) = (state[&l.wires[0]], state[&l.wires[1]]);
+                    state.insert(l.wires[0].clone(), b);
+                    state.insert(l.wires[1].clone(), a);
+                }
+            }
+            op => panic!("unexpected {op}"),
+        }
+    }
+    assert_eq!(state, original);
+}
+
+fn recompute(
+    functions: &str,
+    point: &str,
+    adjoint: bool,
+) -> bennett_vm::ref_library::ActionExpansion {
+    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
+    let selector = json::parse(&format!(
+        r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,
+        ids.interface["root"]
+    )).unwrap();
+    Catalog::published()
+        .unwrap()
+        .lower_action_with_cleanup(
+            &object,
+            "root",
+            &Json::Arr(vec![]),
+            adjoint,
+            0,
+            &[CleanupEntry {
+                selector: Selector::parse(&selector).unwrap(),
+                realisation: CleanupRealisation::Recompute,
+            }],
+        )
+        .unwrap()
+}
+
+#[test]
+fn fresh_primitive_uncomputation_has_emitted_ordinals_not_raw_inverse_ordinals() {
+    let functions = "action @root (x:wire mut, z:wire mut) () () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:0" } else { "entry:5" },
+            adjoint,
+        );
+        let replacement = &e.leaves[3..];
+        assert_eq!(
+            replacement
+                .iter()
+                .map(|l| l.address.as_ref().unwrap().generated)
+                .collect::<Vec<_>>(),
+            (0..8).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            replacement
+                .iter()
+                .map(|l| l.operation.as_str())
+                .collect::<Vec<_>>(),
+            ["alloc", "cx", "cx", "cx", "cx", "cx", "release", "release"]
+        );
+    }
+}
+
+#[test]
+fn fresh_call_uncomputation_has_separate_ordered_occurrences_and_callee_spaces() {
+    let functions = "action @root (x:wire mut, z:wire mut) () () () ()\n^entry():\nd = qalloc any 1\naction_call @copy (d) (x) () ()\naction_call @copy (d) (z) () ()\nadj action_call @copy (d) (z) () ()\nadj action_call @copy (d) (x) () ()\nqfree d\nperm_action @copy (t:wire mut) (s:wire in) () () ()\n^entry():\ncx s t";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:0" } else { "entry:5" };
+        let e = recompute(functions, point, adjoint);
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 1);
+        let replacement = &e.leaves[3..];
+        let calls = replacement
+            .iter()
+            .filter(|l| !l.invocation.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls
+                .iter()
+                .map(|l| l.invocation[0].call_index)
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
+        for (index, l) in calls.iter().enumerate() {
+            let a = l.address.as_ref().unwrap();
+            assert_eq!(a.path[0].point, point);
+            assert_eq!(a.path[0].call_index, Some(index));
+            assert_eq!(a.path[1].point, "entry:0");
+            assert_eq!(a.path[1].call_index, None);
+            assert_eq!(a.generated, 0);
+            assert_eq!(l.invocation[0].adjoint, index >= 2);
+        }
+        let caller = replacement
+            .iter()
+            .filter(|l| l.invocation.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            caller
+                .iter()
+                .map(|l| l.address.as_ref().unwrap().generated)
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
+    }
+}
+
+#[test]
+fn nonempty_call_recompute_restores_exact_nonzero_pre_call_inputs() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in) () () ()\n^entry():\nd = qcopy x\nctl p action_call @flip (d) (z) () ()\nctl p adj action_call @flip (d) (z) () ()\nx z\nx z\nquncopy x d\nperm_action @flip (t:wire mut) (s:wire in) () () ()\n^entry():\ncx s t\nx t";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:1" } else { "entry:2" };
+        let e = recompute(functions, point, adjoint);
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 2);
+        let selected = e
+            .cleanups
+            .iter()
+            .find(|c| c.address.path[0].point == point)
+            .unwrap();
+        assert_eq!(selected.controls, ["p[0]"]);
+        for input in 0..8 {
+            let mut state = std::collections::BTreeMap::from([
+                ("x[0]".to_string(), input & 1 != 0),
+                ("z[0]".to_string(), input & 2 != 0),
+                ("p[0]".to_string(), input & 4 != 0),
+            ]);
+            let original = state.clone();
+            for l in &e.leaves {
+                match l.operation.as_str() {
+                    "alloc" => {
+                        for w in &l.wires {
+                            assert!(state.insert(w.clone(), false).is_none());
+                        }
+                    }
+                    "release" => {
+                        for w in &l.wires {
+                            assert_eq!(state.remove(w), Some(false));
+                        }
+                    }
+                    "x" | "cx" => {
+                        let active = l.controls.iter().all(|c| state[c])
+                            && (l.operation == "x" || state[&l.wires[0]]);
+                        if active {
+                            *state.get_mut(l.wires.last().unwrap()).unwrap() ^= true;
+                        }
+                    }
+                    op => panic!("unexpected {op}"),
+                }
+            }
+            assert_eq!(state, original, "input={input}, adjoint={adjoint}");
+        }
+    }
+}
+
+#[test]
+fn copy_and_load_multirow_pairs_replace_the_entire_written_inverse() {
+    for load in [false, true] {
+        let (compute, cleanup) = if load {
+            ("d = qload db x", "qunload db x d")
+        } else {
+            ("d = qcopy x", "quncopy x d")
+        };
+        let functions = format!(
+            "action @root (x:wire mut, z:wire mut) () (db:region[1,1] in) () ()\n^entry():\n{compute}\ncx z d\ncx z d\n{cleanup}"
+        );
+        for adjoint in [false, true] {
+            let point = if adjoint { "entry:0" } else { "entry:3" };
+            let e = recompute(&functions, point, adjoint);
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 1);
+            // The first written inverse row must disappear in recompute too.
+            let old_inverse = if adjoint { "entry:1" } else { "entry:2" };
+            assert!(
+                e.leaves
+                    .iter()
+                    .all(|l| l.address.as_ref().unwrap().path[0].point != old_inverse)
+            );
+            for bits in 0..16 {
+                let mut state = std::collections::BTreeMap::from([
+                    ("x[0]".to_string(), bits & 1 != 0),
+                    ("z[0]".to_string(), bits & 2 != 0),
+                    ("db[0]".to_string(), bits & 4 != 0),
+                    ("db[1]".to_string(), bits & 8 != 0),
+                ]);
+                let original = state.clone();
+                for l in &e.leaves {
+                    match l.operation.as_str() {
+                        "alloc" => {
+                            for w in &l.wires {
+                                assert!(state.insert(w.clone(), false).is_none());
+                            }
+                        }
+                        "release" => {
+                            for w in &l.wires {
+                                assert_eq!(state.remove(w), Some(false));
+                            }
+                        }
+                        "x" | "cx" | "ccx" | "mcx" => {
+                            let (target, controls) = l.wires.split_last().unwrap();
+                            if controls.iter().chain(&l.controls).all(|w| state[w]) {
+                                *state.get_mut(target).unwrap() ^= true;
+                            }
+                        }
+                        op => panic!("unexpected {op}"),
+                    }
+                }
+                assert_eq!(
+                    state, original,
+                    "load={load}, adjoint={adjoint}, bits={bits}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_loop_computation_replay_uses_carrier_coordinates_only() {
+    let functions = "action @root (x:wire mut) () () () ()\nregs {} bounds {2,2}\n^entry():\nd = qalloc fast 1\nqloop 2 {\ncx x d\n}\nqloop 2 {\ncx x d\n}\nqfree d";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:0" } else { "entry:5" };
+        let e = recompute(functions, point, adjoint);
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 1);
+        assert_eq!(e.leaves.len(), 11);
+        for (ordinal, leaf) in e.leaves[3..].iter().enumerate() {
+            let a = leaf.address.as_ref().unwrap();
+            assert_eq!(a.path[0].point, point);
+            assert_eq!(a.path[0].iteration, []);
+            assert_eq!(a.generated, ordinal);
+        }
+        assert!(
+            e.leaves
+                .iter()
+                .filter(|l| l.operation == "alloc")
+                .all(|l| l.class.as_deref() == Some("fast"))
+        );
+        for x in [false, true] {
+            replay_identity(&e, &[("x[0]", x)]);
+        }
+    }
+}
+
+#[test]
+fn fresh_nested_conditional_inverse_has_contiguous_caller_ordinals() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in) () () ()\n^entry():\nd = qalloc any 1\nqif p {\ncx x d\n} {\ncx z d\n}\nqif p {\ncx x d\n} {\ncx z d\n}\nqfree d";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:0" } else { "entry:7" };
+        let e = recompute(functions, point, adjoint);
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 1);
+        let leaves = e
+            .leaves
+            .iter()
+            .filter(|l| l.address.as_ref().unwrap().path[0].point == point)
+            .collect::<Vec<_>>();
+        assert!(!leaves.is_empty());
+        assert_eq!(
+            leaves
+                .iter()
+                .map(|l| l.address.as_ref().unwrap().generated)
+                .collect::<Vec<_>>(),
+            (0..leaves.len()).collect::<Vec<_>>()
+        );
+        for bits in 0..8 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                ],
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_target_call_recompute_restores_all_pre_call_values() {
+    let functions = "action @root (x:wire mut, z:wire mut) () () () ()\n^entry():\nd = qcopy x\ne = qcopy z\naction_call @pair (d, e) () () ()\nadj action_call @pair (d, e) () () ()\nx z\nx z\nquncopy z e\nquncopy x d\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\nswap a b\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:2" } else { "entry:3" },
+            adjoint,
+        );
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 3);
+        for bits in 0..4 {
+            replay_identity(&e, &[("x[0]", bits & 1 != 0), ("z[0]", bits & 2 != 0)]);
+        }
+    }
+}
+
+#[test]
+fn pre_call_input_reconstruction_keeps_original_predicate_scopes() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in) () () ()\n^entry():\nd = qcopy x\ne = qcopy z\nqpred p\nx d\nqunpred p\naction_call @mix (d, e) () () ()\nadj action_call @mix (d, e) () () ()\nqpred p\nx d\nqunpred p\nx z\nx z\nquncopy z e\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:5" } else { "entry:6" },
+            adjoint,
+        );
+        assert!(e.cleanup_pairing_complete);
+        for bits in 0..8 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                ],
+            );
+        }
+    }
+}

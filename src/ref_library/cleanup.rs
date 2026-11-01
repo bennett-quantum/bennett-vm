@@ -118,13 +118,7 @@ impl Catalog {
         }
         let name = string(field(pair, "target")?)?;
         if name.is_empty() {
-            let computing = field(pair, "computing")?.clone();
-            let mut body = arr(&computing)?.to_vec();
-            body.push(Json::obj(vec![
-                ("inverse", Json::Bool(true)),
-                ("body", computing),
-            ]));
-            return self.walk(&Json::Arr(body), env, out, next, active);
+            return self.walk_call_recompute(pair, env, out, next, active);
         }
         let Some(Bound::Allocation(target)) = env.values.get(name) else {
             return Err(err("cleanup target is not a bound allocation"));
@@ -137,6 +131,7 @@ impl Catalog {
         let class = target.class.clone();
         drop(target);
         let mut local = env.clone();
+        local.replaying_cleanup = true;
         let original = format!("$cleanup.original.{name}");
         if local.values.contains_key(&original) {
             return Err(err("cleanup alias collision"));
@@ -156,10 +151,7 @@ impl Catalog {
                 ]),
             ),
         ]));
-        fresh.push(Json::obj(vec![
-            ("inverse", Json::Bool(true)),
-            ("body", computing),
-        ]));
+        fresh.extend(arr(field(pair, "uncomputing")?)?.iter().cloned());
         let body = Json::Arr(vec![
             Json::obj(vec![
                 ("declare", Json::Str(name.into())),
@@ -171,5 +163,79 @@ impl Catalog {
             Json::obj(vec![("relinquish", Json::Str(original))]),
         ]);
         self.walk(&body, &mut local, out, next, active)
+    }
+
+    fn walk_call_recompute(
+        &self,
+        pair: &Json,
+        env: &Bindings,
+        out: &mut Vec<Leaf>,
+        next: &mut usize,
+        active: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let mut local = env.clone();
+        local.replaying_cleanup = true;
+        let mut targets = vec![];
+        for name in arr(field(pair, "targets")?)? {
+            let name = string(name)?;
+            let Some(Bound::Allocation(a)) = local.values.remove(name) else {
+                return Err(err("call recompute needs a source-owned target allocation"));
+            };
+            let allocation = a.borrow();
+            if allocation.state != "clean" {
+                return Err(err("call recompute needs a clean owned target"));
+            }
+            let alias = format!("$cleanup.original.{name}");
+            if local.values.contains_key(&alias) {
+                return Err(err("call cleanup alias collision"));
+            }
+            targets.push((
+                name.to_string(),
+                alias.clone(),
+                allocation.width,
+                allocation.class.clone(),
+            ));
+            drop(allocation);
+            local.values.insert(alias, Bound::Allocation(a));
+        }
+        let xor = |targets: &[(String, String, usize, String)]| {
+            targets
+                .iter()
+                .map(|(name, original, width, _)| {
+                    Json::obj(vec![
+                        ("invoke", Json::Str("bind.qxor".into())),
+                        (
+                            "args",
+                            Json::Arr(vec![
+                                Json::u64(*width as u64),
+                                Json::Str(name.clone()),
+                                Json::Str(original.clone()),
+                            ]),
+                        ),
+                    ])
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut body = arr(field(pair, "initialising")?)?.to_vec();
+        body.extend(arr(field(pair, "computing")?)?.iter().cloned());
+        body.extend(xor(&targets));
+        body.extend(arr(field(pair, "uncomputing")?)?.iter().cloned());
+        // The call's adjoint restores its exact pre-call value, which need
+        // not be zero. Restore it before uncomputing the fresh input history.
+        body.extend(xor(&targets));
+        body.extend(arr(field(pair, "uninitialising")?)?.iter().cloned());
+        for (name, _, width, class) in targets.iter().rev() {
+            body = vec![Json::obj(vec![
+                ("declare", Json::Str(name.clone())),
+                ("width", Json::u64(*width as u64)),
+                (
+                    "class",
+                    Json::obj(vec![("class", Json::Str(class.clone()))]),
+                ),
+                ("state", Json::Str("clean".into())),
+                ("body", Json::Arr(body)),
+            ])];
+        }
+        self.walk(&Json::Arr(body), &mut local, out, next, active)
     }
 }

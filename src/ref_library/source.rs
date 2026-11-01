@@ -428,6 +428,18 @@ impl Source {
     // is expanded. Keep the original row wrappers for reverse; recompute is
     // newly instantiated at the release point (see ISA b-isa-spec-5cd).
     fn inverse_rows(a: &Instr, b: &Instr) -> bool {
+        if a.op == b.op
+            && a.operands == b.operands
+            && (a.op == "qif" || (a.op == "qloop" && a.operands.len() == 1))
+        {
+            return a.nested.len() == b.nested.len()
+                && a.nested.iter().zip(&b.nested).all(|(a, b)| {
+                    a.len() == b.len()
+                        && a.iter()
+                            .zip(b.iter().rev())
+                            .all(|(a, b)| Self::inverse_rows(a, b))
+                });
+        }
         if matches!(a.op.as_str(), "action_call" | "adj" | "ctl")
             && matches!(b.op.as_str(), "action_call" | "adj" | "ctl")
         {
@@ -456,6 +468,13 @@ impl Source {
         b.op == inverse
     }
     fn writes_only(i: &Instr, target: &str, env: &Bindings) -> bool {
+        if i.op == "qif" || (i.op == "qloop" && i.operands.len() == 1) {
+            return i
+                .nested
+                .iter()
+                .flatten()
+                .all(|i| Self::writes_only(i, target, env));
+        }
         let is_target = |name: &str| name == target || name.starts_with(&format!("{target}["));
         if matches!(i.op.as_str(), "swap" | "qexch") {
             return i.operands.iter().all(|n| is_target(n));
@@ -476,6 +495,13 @@ impl Source {
         false
     }
     fn permutation_row(i: &Instr, env: &Bindings) -> bool {
+        if i.op == "qif" || (i.op == "qloop" && i.operands.len() == 1) {
+            return i
+                .nested
+                .iter()
+                .flatten()
+                .all(|i| Self::permutation_row(i, env));
+        }
         if matches!(
             i.op.as_str(),
             "x" | "cx" | "ccx" | "mcx" | "swap" | "qxor" | "qexch"
@@ -502,6 +528,64 @@ impl Source {
             })
             || i.nested.iter().flatten().any(|i| Self::mentions(i, target))
     }
+    // Recover exact pre-call target values from their source computation,
+    // rather than treating allocation metadata as a zero-value assertion.
+    // Keep execution order here, including source-adjoint acquisition.
+    fn call_inputs(
+        &self,
+        instructions: &[Instr],
+        compute: &Instr,
+        targets: &[String],
+        adjoint: bool,
+        env: &Bindings,
+    ) -> Option<Vec<Instr>> {
+        let mut prefix = instructions.iter().collect::<Vec<_>>();
+        if adjoint {
+            prefix.reverse();
+        }
+        prefix.truncate(prefix.iter().position(|i| i.line == compute.line)?);
+        let acquisition = |i: &Instr, target: &str| {
+            if !adjoint {
+                matches!(i.op.as_str(), "qalloc" | "qcopy" | "qload")
+                    && i.lhs.first().is_some_and(|n| n == target)
+            } else {
+                match i.op.as_str() {
+                    "qfree" => i.operands.first().is_some_and(|n| n == target),
+                    "quncopy" => i.operands.get(1).is_some_and(|n| n == target),
+                    "qunload" => i.operands.get(2).is_some_and(|n| n == target),
+                    _ => false,
+                }
+            }
+        };
+        let starts = targets
+            .iter()
+            .map(|t| prefix.iter().rposition(|i| acquisition(i, t)))
+            .collect::<Option<Vec<_>>>()?;
+        let mut rows = vec![];
+        for (index, i) in prefix.into_iter().enumerate() {
+            if matches!(i.op.as_str(), "qpred" | "qunpred") {
+                rows.push((*i).clone());
+                continue;
+            }
+            if !targets
+                .iter()
+                .zip(&starts)
+                .any(|(t, start)| index >= *start && Self::mentions(i, t))
+            {
+                continue;
+            }
+            if !targets.iter().any(|t| acquisition(i, t))
+                && !targets.iter().any(|t| Self::writes_only(i, t, env))
+            {
+                return None;
+            }
+            if !targets.iter().any(|t| acquisition(i, t)) && !Self::permutation_row(i, env) {
+                return None;
+            }
+            rows.push((*i).clone());
+        }
+        Some(rows)
+    }
     fn whole_pairs(
         &self,
         instructions: &[Instr],
@@ -510,12 +594,14 @@ impl Source {
     ) -> BTreeMap<usize, WholePair> {
         let mut pairs = BTreeMap::new();
         for (end, release) in instructions.iter().enumerate() {
-            if !matches!(release.op.as_str(), "qfree" | "qreturn") {
-                continue;
-            }
-            let target = &release.operands[0];
+            let target = match release.op.as_str() {
+                "qfree" | "qreturn" => &release.operands[0],
+                "quncopy" => &release.operands[1],
+                "qunload" => &release.operands[2],
+                _ => continue,
+            };
             let Some(start) = instructions[..end].iter().rposition(|i| {
-                matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy")
+                matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload")
                     && i.lhs.first() == Some(target)
             }) else {
                 continue;
@@ -524,9 +610,29 @@ impl Source {
             if (release.op == "qreturn") != (allocation.op == "qborrow") {
                 continue;
             }
+            if release.op == "quncopy"
+                && (allocation.op != "qcopy"
+                    || release.operands != [allocation.operands[0].clone(), target.clone()])
+            {
+                continue;
+            }
+            if release.op == "qunload"
+                && (allocation.op != "qload"
+                    || release.operands
+                        != [
+                            allocation.operands[0].clone(),
+                            allocation.operands[1].clone(),
+                            target.clone(),
+                        ])
+            {
+                continue;
+            }
+            if allocation.op == "qload" && release.op != "qunload" {
+                continue;
+            }
             let mut left = start + 1;
             let mut right = end;
-            if allocation.op == "qcopy" {
+            if allocation.op == "qcopy" && release.op == "qfree" {
                 if right <= left
                     || instructions[right - 1].op != "qxor"
                     || instructions[right - 1].operands
@@ -595,13 +701,42 @@ impl Source {
         env: &mut Bindings,
     ) -> Result<Vec<Json>, String> {
         let mut body = vec![];
-        for i in instructions {
-            let row = self.instruction(i, adjoint, env)?;
+        let mut index = 0;
+        while index < instructions.len() {
+            let i = &instructions[index];
+            let row = if i.op == "qpred" {
+                let mut depth = 1;
+                let mut end = index + 1;
+                while end < instructions.len() {
+                    match instructions[end].op.as_str() {
+                        "qpred" => depth += 1,
+                        "qunpred" => depth -= 1,
+                        _ => {}
+                    }
+                    if depth == 0 {
+                        break;
+                    }
+                    end += 1;
+                }
+                if end == instructions.len() || instructions[end].operands != i.operands {
+                    return Err(err("unmatched input-history predicate scope"));
+                }
+                let nested =
+                    self.raw_sequence(&instructions[index + 1..end], adjoint, source, env)?;
+                index = end;
+                vec![invocation(
+                    "qpred.scope",
+                    vec![text(&i.operands[0]), Json::Arr(nested)],
+                )]
+            } else {
+                self.instruction(i, adjoint, env)?
+            };
             if source {
                 body.push(self.source_annotation(i, adjoint, row));
             } else {
                 body.extend(row);
             }
+            index += 1;
         }
         if adjoint {
             body.reverse();
@@ -700,6 +835,8 @@ impl Source {
             if let Some(pair) = whole_pairs.get(&index) {
                 let computing =
                     self.raw_sequence(&instructions[pair.computing.clone()], adjoint, false, env)?;
+                let uncomputing =
+                    self.raw_sequence(&instructions[pair.computing.clone()], !adjoint, false, env)?;
                 let body =
                     self.raw_sequence(&instructions[index..=pair.cleanup_end], adjoint, true, env)?;
                 let computing_start = if adjoint {
@@ -711,6 +848,7 @@ impl Source {
                     &pair.target,
                     &self.points[&instructions[computing_start].line],
                     computing,
+                    uncomputing,
                     body,
                     pair.perm,
                 );
@@ -755,10 +893,12 @@ impl Source {
                         let compute = if adjoint { i } else { partner };
                         let target = &compute.lhs[0];
                         let computing = self.instruction(compute, false, env)?;
+                        let uncomputing = self.instruction(compute, true, env)?;
                         vec![self.pair_annotation(
                             target,
                             &self.points[&partner.line],
                             computing,
+                            uncomputing,
                             body,
                             compute.op == "qalloc",
                         )]
@@ -769,6 +909,7 @@ impl Source {
                     let (inverse, control, _, _) = crate::action::normalize_call(i)?;
                     if inverse ^ adjoint {
                         let computing = self.instruction(partner, adjoint, env)?;
+                        let uncomputing = self.instruction(partner, !adjoint, env)?;
                         if *regions {
                             self.defer_cleanup(body, env)?
                         } else {
@@ -776,16 +917,41 @@ impl Source {
                                 "",
                                 &self.points[&partner.line],
                                 computing,
+                                uncomputing,
                                 body,
                                 *perm,
                             );
                             if let Json::Obj(c) = &mut pair
                                 && let Some(Json::Obj(p)) = c.get_mut("$cleanup")
                             {
+                                let inputs =
+                                    self.call_inputs(instructions, partner, targets, adjoint, env);
                                 p.insert(
                                     "recompute_supported".into(),
-                                    Json::Bool(targets.is_empty()),
+                                    Json::Bool(inputs.is_some()),
                                 );
+                                if let Some(inputs) = inputs {
+                                    // call_inputs is already in execution order;
+                                    // raw_sequence expects source order.
+                                    let mut inputs = inputs;
+                                    if adjoint {
+                                        inputs.reverse();
+                                    }
+                                    p.insert(
+                                        "targets".into(),
+                                        Json::Arr(targets.iter().map(text).collect()),
+                                    );
+                                    p.insert(
+                                        "initialising".into(),
+                                        Json::Arr(self.raw_sequence(&inputs, adjoint, false, env)?),
+                                    );
+                                    p.insert(
+                                        "uninitialising".into(),
+                                        Json::Arr(
+                                            self.raw_sequence(&inputs, !adjoint, false, env)?,
+                                        ),
+                                    );
+                                }
                             }
                             if let Some(control) = control {
                                 vec![invocation(
@@ -816,6 +982,7 @@ impl Source {
         target: &str,
         point: &str,
         computing: Vec<Json>,
+        uncomputing: Vec<Json>,
         body: Vec<Json>,
         perm: bool,
     ) -> Json {
@@ -826,6 +993,7 @@ impl Source {
                     ("target", text(target)),
                     ("point", text(point)),
                     ("computing", Json::Arr(computing)),
+                    ("uncomputing", Json::Arr(uncomputing)),
                     ("perm", Json::Bool(perm)),
                 ]),
             ),
@@ -892,10 +1060,12 @@ impl Source {
             compute.line
         };
         let computing = self.instruction(compute, false, env)?;
+        let uncomputing = self.instruction(compute, true, env)?;
         Ok(vec![self.pair_annotation(
             target,
             &self.points[&line],
             computing,
+            uncomputing,
             body,
             true,
         )])

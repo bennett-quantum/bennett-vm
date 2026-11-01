@@ -91,7 +91,10 @@ fn whole_multirow_cleanup_has_one_carrier_and_preserves_reverse_row_points() {
         // Newly instantiated recompute leaves belong to the cleanup source
         // instruction; written reverse leaves keep their original row points.
         let leaves = &recompute.leaves[3..];
-        for (n, leaf) in [0, 1, 2, 3, 6, 5, 4, 7].into_iter().zip(leaves) {
+        // Pass X/K80 requires fresh, emitted-order ordinals for the whole
+        // replacement; raw inverse ordinal retention applies only to reversal
+        // of an already expanded trace.
+        for (n, leaf) in (0..8).zip(leaves) {
             let a = leaf.address.as_ref().unwrap();
             assert_eq!(a.path[0].point, c.address.path[0].point);
             assert_eq!(a.generated, n);

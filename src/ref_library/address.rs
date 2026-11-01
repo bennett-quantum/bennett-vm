@@ -62,6 +62,7 @@ impl Bindings {
         self.call_index = other.call_index.clone();
         self.source_iterations = other.source_iterations.clone();
         self.reverse_iterations = other.reverse_iterations;
+        self.replaying_cleanup = other.replaying_cleanup;
         self.coordinate = other.coordinate.clone();
         self.oracle_address = other.oracle_address.clone();
         self.row_spaces = other.row_spaces.clone();

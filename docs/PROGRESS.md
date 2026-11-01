@@ -1,3 +1,10 @@
+# 47t-c exact call inputs and fresh cleanup spaces — 2026-11-01
+Resume: c IN PROGRESS: finish mutable-region/cross-scope/general input histories, lifted oracle-uncall integration and complete bound-library occurrence validation; then d, b, hsd, clw. a still waits on ISA 7js.
+Eight RED/GREEN cleanup_fresh09 tests cover exact nonzero/multiple pre-call targets and their predicate scopes, multirow copy/load pairs, nested literal-loop/qif inverses, fresh call indices and caller ordinals, with finite-domain clean-state replay in both source directions.
+Nonempty call recompute reconstructs source inputs, computes fresh outputs, XORs, uncomputes the call, restores the exact pre-call targets, then uncomputes/releases fresh input history; unknown histories remain explicit obligations, never inferred zero from allocation metadata.
+Ownership follows the now-published Pass X/K80 witness (5cd pending council): reverse retains written row points; recompute uses carrier coordinates, contiguous emitted caller ordinals and separate fresh call indices; callees retain their own spaces. Previous strict inverse-ordinal assertion updated to the normative witness; all tests/fixtures retained.
+FINAL GREEN c-fresh2 sequential interpreter/JIT each 227/0/0 (before 219/0/0), differential each 18/0; fmt/strict all-target Clippy/whitespace pass. Earlier interpreter gate is intermediate; JIT with an unnecessary global audit flag failed its exact diagnostic test, and the full standard JIT rerun passes without any code/test change. No later child, new ISA bead/spec edit, dependency, foreign implementation source, push or Dolt sync.
+
 # 47t-c whole written inverse sequences — 2026-11-01
 Resume: c IN PROGRESS: exact clean-input/nonempty-call recompute, broader inverse patterns, lifted oracle-uncall pairing and full bound-library occurrence validation remain; then d, b, hsd, clw. ol3 CLOSED (a4d1375); a still waits on ISA 7js.
 Target-local qalloc/qcopy computing sequences bind their whole written inverse/release to one carrier before expansion; matched nonempty/nonadjacent action adjoints retain carriers. Controlled-call carriers now include the explicit call control.

@@ -90,6 +90,7 @@ pub struct Bindings {
     source_iterations: Vec<usize>,
     reverse_iterations: bool,
     source_formed: bool,
+    replaying_cleanup: bool,
     oracle_address: Option<Rc<address::OracleAddress>>,
     row_spaces: Vec<address::RowSpace>,
     coordinate: crate::sched::Coordinate,
@@ -305,6 +306,10 @@ impl Catalog {
     ) -> Result<(), String> {
         for c in arr(body)? {
             if let Some(p) = c.get("$source") {
+                if env.replaying_cleanup {
+                    self.walk(field(c, "body")?, env, out, next, active)?;
+                    continue;
+                }
                 let mut local = env.clone();
                 local.source_point = Some(crate::sched::Point {
                     symbol: string(field(p, "symbol")?)?.into(),
@@ -522,6 +527,7 @@ impl Catalog {
                 for i in from..to {
                     let mut local = env.clone();
                     if env.source_point.is_some()
+                        && !env.replaying_cleanup
                         && ((active.last().map(String::as_str) == Some("qloop")
                             && name == "iteration")
                             || (active.last().map(String::as_str) == Some("qloop.while")
@@ -552,6 +558,9 @@ impl Catalog {
                 self.invoke(string(n)?, arr(field(c, "args")?)?, env, out, next, active)?;
             } else if c.get("inverse").is_some() {
                 let start = out.len();
+                let first_leaf = env.source_next.get();
+                let first_call = env.call_index.get();
+                let first_carrier = env.cleanup.carriers.borrow().len();
                 self.walk(field(c, "body")?, env, out, next, active)?;
                 if out[start..].iter().any(|l| l.event.is_some()) {
                     return Err(err("classical inverse requires retained §7.4 history"));
@@ -559,6 +568,36 @@ impl Catalog {
                 out[start..].reverse();
                 for l in &mut out[start..] {
                     l.adjoint();
+                }
+                if env.replaying_cleanup {
+                    // K80 instantiates a fresh caller space in emitted order.
+                    // This does not change raw inverse traversal or the
+                    // independently formed source spaces inside callees.
+                    let end_leaf = env.source_next.get();
+                    let end_call = env.call_index.get();
+                    for l in &mut out[start..] {
+                        if let Some(a) = &mut l.address {
+                            if a.path.len() == 1 {
+                                a.generated = first_leaf + (end_leaf - 1 - a.generated);
+                            } else if let Some(index) = &mut a.path[0].call_index {
+                                *index = first_call + (end_call - 1 - *index);
+                            }
+                        }
+                        if let Some(call) = l.invocation.first_mut() {
+                            call.call_index = first_call + (end_call - 1 - call.call_index);
+                            call.adjoint = !call.adjoint;
+                        }
+                    }
+                    for c in &mut env.cleanup.carriers.borrow_mut()[first_carrier..] {
+                        if let Some(index) = c
+                            .address
+                            .path
+                            .get_mut(env.cleanup.prefix.len())
+                            .and_then(|p| p.call_index.as_mut())
+                        {
+                            *index = first_call + (end_call - 1 - *index);
+                        }
+                    }
                 }
             } else if let Some(n) = c.get("splice") {
                 let Some(Bound::Body(b, cap)) = env.values.get(string(n)?) else {
@@ -1443,11 +1482,16 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
                     "target",
                     "point",
                     "computing",
+                    "uncomputing",
                     "perm",
                     "recompute_supported",
+                    "targets",
+                    "initialising",
+                    "uninitialising",
                 ],
             )?;
             syntax_inner(field(pair, "computing")?, true)?;
+            syntax_inner(field(pair, "uncomputing")?, true)?;
             syntax_inner(field(c, "body")?, true)?;
             continue;
         }

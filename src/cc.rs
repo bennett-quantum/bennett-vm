@@ -2214,12 +2214,57 @@ mod scaling_tests {
     use super::*;
 
     fn run_for(body: &str) -> RuntimeRun {
+        run_for_version(body, "0.8")
+    }
+
+    fn run_for_version(body: &str, version: &str) -> RuntimeRun {
         let source = format!(
-            "bennett-object isa=0.8 object=0.8 launch=0.8 sched=0.8 cert=0.8 coverage=0.8 target=0.8 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\nfn cc @main () () () () ()\n^entry():\n{body}\n"
+            "bennett-object isa={version} object={version} launch={version} sched={version} cert={version} coverage={version} target={version} ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\nfn cc @main () () () () ()\n^entry():\n{body}\n"
         );
         let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
         let resources = Resources::new(&obj).unwrap();
         RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap()
+    }
+
+    #[test]
+    fn typed_measurement_launch_consumes_draw_and_refuses_reverse_atomically() {
+        let mut run = run_for_version("q = qreg.new any 1\na = measure.i1 q\nret", "0.9");
+        run.step().unwrap();
+        run.step().unwrap();
+        assert_eq!(
+            run.machine.draws.len(),
+            1,
+            "launch must provide a draw for measure.iN"
+        );
+        assert_eq!(run.machine.draw_pos, 1);
+        let draw = *run.machine.draws.get(0).unwrap();
+        assert!(draw >= 0.0 && draw < 1.0);
+        assert!(run.measured());
+        assert_eq!(run.measurements().len(), 1);
+        let snapshot = run.snapshot("RUNNING").unwrap();
+        assert!(run.reverse_to(0).unwrap_err().contains("E_NOT_REVERSIBLE"));
+        assert_eq!(run.snapshot("RUNNING").unwrap(), snapshot);
+    }
+
+    #[test]
+    fn failed_typed_measurement_does_not_collapse_or_block_reverse() {
+        let source = "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=64\n\nsection symbols\n{}\n\nsection functions\nfn cc @main (q:qreg[*]) () () () ()\n^entry():\na = measure.i2 q\nret\n";
+        let object = std::sync::Arc::new(crate::object::parse(source).unwrap());
+        let mut resources = Resources::new(&object).unwrap();
+        let id = resources.new_reg(1, "any").unwrap();
+        resources.prepare(id, &[1]);
+        let mut run =
+            RuntimeRun::new(object, &resources, "main", vec![Value::Qreg(id)], vec![]).unwrap();
+        let quantum = run.machine.quantum.clone();
+        run.step().unwrap();
+        assert_eq!(run.fault(), Some(4));
+        assert!(!run.measured());
+        assert!(run.measurements().is_empty());
+        assert_eq!(run.machine.draw_pos, 0);
+        assert!(run.machine.quantum.exact_equals(&quantum));
+        run.reverse_to(0).unwrap();
+        assert_eq!(run.fault(), None);
+        assert!(run.machine.quantum.exact_equals(&quantum));
     }
 
     #[test]

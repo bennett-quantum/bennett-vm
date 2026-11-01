@@ -199,7 +199,7 @@ pub(super) fn action_body(
     let f = object
         .function(name)
         .ok_or_else(|| err("unresolved linked action"))?;
-    if f.kind == FnKind::Oracle && env.oracle_invocation.is_some() {
+    if f.kind == FnKind::Oracle {
         return super::oracle_source::body(object, name, env);
     }
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction) {

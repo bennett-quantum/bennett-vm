@@ -2,6 +2,9 @@
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
 mod address;
 mod cleanup;
+#[cfg(test)]
+#[path = "ref_library/oracle_bindings_tests.rs"]
+mod oracle_bindings_tests;
 mod oracle_cleanup;
 mod oracle_paths;
 mod oracle_source;
@@ -41,6 +44,7 @@ enum Bound {
     Arguments {
         hash: String,
         values: Vec<Bound>,
+        oracle_invocation: Option<Json>,
     },
     Region {
         address: usize,
@@ -727,6 +731,7 @@ impl Catalog {
                 let mut callee = if let Some(Bound::Arguments {
                     hash: bound,
                     values,
+                    oracle_invocation,
                 }) = args.as_str().and_then(|n| env.values.get(n))
                 {
                     if bound != &hash {
@@ -738,12 +743,14 @@ impl Catalog {
                         .zip(values)
                         .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
                         .collect::<Result<_, String>>()?;
+                    bindings.oracle_invocation = oracle_invocation.clone();
                     bindings
                 } else {
-                    bind_formals(&formals, arr(args)?, env, &Bindings::new())?
+                    let mut bindings = bind_formals(&formals, arr(args)?, env, &Bindings::new())?;
+                    bindings.oracle_invocation = env.oracle_invocation.clone();
+                    bindings
                 };
                 callee.registry = Some(registry.clone());
-                callee.oracle_invocation = env.oracle_invocation.clone();
                 callee.coordinate = env.coordinate.clone();
                 callee.cleanup = env.cleanup.clone();
                 if let Some(caller) = &env.source_point {
@@ -1017,6 +1024,7 @@ fn bind_formals(
                 if let Some(Bound::Arguments {
                     hash: bound,
                     values,
+                    oracle_invocation,
                 }) = a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if bound != hash {
@@ -1025,9 +1033,24 @@ fn bind_formals(
                     Bound::Arguments {
                         hash: hash.clone(),
                         values: values.clone(),
+                        oracle_invocation: oracle_invocation.clone(),
                     }
                 } else {
-                    let formals = source::interface(&registry.object, registry.name(hash)?)?;
+                    let name = registry.name(hash)?;
+                    let oracle_invocation = if registry
+                        .object
+                        .function(name)
+                        .is_some_and(|f| f.kind == crate::object::FnKind::Oracle)
+                    {
+                        oracle_source::invocation_budget(
+                            &registry.object,
+                            outer.oracle_invocation.as_ref(),
+                        )?;
+                        outer.oracle_invocation.clone()
+                    } else {
+                        None
+                    };
+                    let formals = source::interface(&registry.object, name)?;
                     let bindings = bind_formals(&formals, arr(a)?, outer, &Bindings::new())?;
                     let values = formals
                         .iter()
@@ -1036,6 +1059,7 @@ fn bind_formals(
                     Bound::Arguments {
                         hash: hash.clone(),
                         values,
+                        oracle_invocation,
                     }
                 }
             }

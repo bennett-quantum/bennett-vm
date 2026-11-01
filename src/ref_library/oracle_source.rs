@@ -136,14 +136,19 @@ impl Catalog {
     }
 }
 
-pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Json, String> {
-    let context = env
-        .oracle_invocation
-        .as_ref()
-        .ok_or_else(|| err("missing oracle_invocation source context"))?;
+pub(super) fn invocation_budget(
+    object: &Object,
+    context: Option<&Json>,
+) -> Result<crate::value::Budget, String> {
+    let context = context.ok_or_else(|| err("missing oracle_invocation source context"))?;
     keys(context, &["token"])?;
     let budget = crate::invocation::decode_budget(field(context, "token")?)?;
     crate::cliargs::validate_budget(object, &budget)?;
+    Ok(budget)
+}
+
+pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Json, String> {
+    let budget = invocation_budget(object, env.oracle_invocation.as_ref())?;
     let f = object
         .function(name)
         .ok_or_else(|| err("source oracle missing"))?;

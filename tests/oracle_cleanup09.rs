@@ -722,3 +722,114 @@ fn source_global_image_and_pinned_entry_survive_store_load_and_fault_reversal() 
         }
     }
 }
+
+#[test]
+fn source_flagged_division_and_fault_rows_preserve_effective_causes_and_prefixes() {
+    for op in ["udiv", "urem", "sdiv", "srem"] {
+        let text = support::source(&format!(
+            "oracle @root (a:wire[2] in, b:wire[2] in) (t:wire[2]) (f:wire[4]) () ()\nregs {{ r:reg[2] }}\n^entry():\nr = lift.{op} a b\nlift.retval r"
+        ));
+        for steps in [1, 2, 3] {
+            assert_map(&text, "[]", [steps, 0, 0, 0], &[("a", 2), ("b", 2)], 16);
+        }
+        let text = support::source(&format!(
+            "oracle @root (a:wire[2] in, b:wire[2] in) (t:wire[2]) (f:wire[4]) () ()\nregs {{ r:reg[2] }}\n^entry():\nr = lift.mov a\nr = lift.{op} r b\nlift.retval r"
+        ));
+        assert_map(&text, "[]", [3, 0, 0, 0], &[("a", 2), ("b", 2)], 16);
+    }
+    for cause in [0, 4, 9] {
+        let text = support::source(&format!(
+            "oracle @root (p:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.faultif p {cause}\nlift.retval p"
+        ));
+        for steps in [0, 1, 2, 3] {
+            assert_map(&text, "[]", [steps, 0, 0, 0], &[("p", 1)], 2);
+        }
+        let text = support::source(&format!(
+            "oracle @root () (t:wire) (f:wire[4]) () ()\n^entry():\nfault {cause}"
+        ));
+        for steps in [0, 1, 2] {
+            assert_map(&text, "[]", [steps, 0, 0, 0], &[], 1);
+        }
+    }
+}
+#[test]
+fn source_indirect_rows_keep_canonical_interior_targets_and_instance_ranges() {
+    let text = support::source(
+        "oracle @root (a:wire[4] in) (t:wire[4]) (f:wire[4]) () ()\nregs { r:reg[4] }\n^entry():\nqjumpr a\n^done():\nr = lift.const.i4 7\nlift.retval r",
+    );
+    for steps in [0, 1, 2, 3, 4] {
+        assert_map(&text, "[]", [steps, 0, 0, 0], &[("a", 4)], 16);
+    }
+    let text = stack_layout(&support::source(
+        "oracle @root (a:wire[4] in) (t:wire[4]) (f:wire[4]) () ()\nregs { r:reg[4] }\n^entry():\nr = lift.call @jump (a)\nlift.retval r\nlproc @jump (a:reg[4]) (r:reg[4]) () () ()\n^entry():\nqjumpr a\n^done():\nr = lift.const.i4 9\nlift.ret r",
+    ));
+    assert_map(&text, "[]", [5, 0, 16, 2], &[("a", 4)], 16);
+}
+#[test]
+fn source_permutation_rows_use_the_semantic_callee_and_source_adjoint() {
+    let text = support::source(
+        "oracle @root (x:wire[2] in) (t:wire[2]) (f:wire[4]) () (a:i1)\nregs { r:reg[2] }\n^entry():\nr = lift.mov x\nlift.perm_call @mix (r) () () (a)\nlift.retval r\nperm_action @mix (r:wire[2] mut) () () (a:i1) ()\n^entry():\nx r[0]\ncx r[0] r[1]",
+    );
+    for a in [0, 1] {
+        for steps in [2, 3] {
+            assert_map(
+                &text,
+                &format!(r#"["{a}"]"#),
+                [steps, 0, 0, 0],
+                &[("x", 2)],
+                4,
+            );
+        }
+    }
+}
+
+#[test]
+fn zero_literal_fault_causes_are_traps_in_source_execution() {
+    use bennett_vm::{bigint::BigUint, value::Budget};
+    for conditional in [false, true] {
+        let rows = if conditional {
+            "lift.faultif p 0\nlift.retval p"
+        } else {
+            "fault 0"
+        };
+        let (obj, _) = bennett_vm::load(
+            &support::source(&format!(
+                "oracle @root (p:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\n{rows}"
+            )),
+            false,
+        )
+        .unwrap();
+        for steps in [0, 1, 2, 3] {
+            for p in [0, 1] {
+                let out = bennett_vm::oracle::run_oracle(
+                    &obj,
+                    "root",
+                    &[BigUint::from_u64(p)],
+                    &mut [],
+                    &[],
+                    Budget {
+                        steps,
+                        heap: 0,
+                        stack: 0,
+                        depth: 0,
+                    },
+                )
+                .unwrap();
+                let expected = if steps == 0 {
+                    1
+                } else if !conditional || p == 1 {
+                    4
+                } else if steps == 1 {
+                    1
+                } else {
+                    0
+                };
+                assert_eq!(
+                    out.code,
+                    BigUint::from_u64(expected),
+                    "{conditional} {steps} {p}"
+                );
+            }
+        }
+    }
+}

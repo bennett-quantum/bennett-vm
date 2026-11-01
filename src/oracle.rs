@@ -1330,6 +1330,12 @@ impl<'o> Machine<'o> {
                     return Ok(None);
                 }
                 Flow::HaltFault(code) => {
+                    // ISA 0.9 §5.4 maps a zero cause to a trap; retain 0.8.
+                    let code = if self.obj.isa == "0.9" && code.is_zero() {
+                        BigUint::from_u64(FAULT_UB_TRAP)
+                    } else {
+                        code
+                    };
                     finished = Some(Outcome {
                         payload: BigUint::zero(),
                         code: code.mask(self.fault_width),

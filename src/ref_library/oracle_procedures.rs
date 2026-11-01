@@ -121,6 +121,14 @@ impl Program {
         }
         Ok(result)
     }
+    pub(super) fn range(&self, k: usize) -> (usize, usize) {
+        let (_, first, end) = self
+            .ranges
+            .iter()
+            .find(|(_, first, end)| k >= *first && k < *end)
+            .unwrap();
+        (*first, *end)
+    }
     fn locations(&self, f: &Function) -> Json {
         Json::Arr(
             crate::oracle::location_widths(f)

@@ -91,7 +91,7 @@ pub(super) fn pairs(f: &Function) -> Result<BTreeMap<usize, usize>, String> {
                 return Err(failure(
                     f,
                     i,
-                    "unavailable.reason: indirect lifted cleanup path proof remains staged in bennett-vm-47t-c2",
+                    "unavailable.reason: indirect lifted cleanup path proof remains staged in bennett-vm-47t-c2.1",
                 ));
             }
             "lift.ret" | "lift.retval" | "fault" => vec![n],

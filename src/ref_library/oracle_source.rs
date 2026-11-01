@@ -1,6 +1,8 @@
 //! Source-built constructor adapter. Raw catalog descriptors never enter here.
 use super::*;
 use crate::object::{FnKind, Instr, Object, Type};
+#[path = "oracle_direct.rs"]
+mod direct;
 #[path = "oracle_memory.rs"]
 mod memory;
 #[path = "oracle_procedures.rs"]
@@ -47,7 +49,7 @@ fn integer(value: String, env: &mut Bindings) -> Result<Json, String> {
 }
 fn staged(i: &Instr) -> String {
     err(format!(
-        "unavailable.reason: source oracle row {} line {} requires the remaining bennett-vm-47t-c2 constructor adapter",
+        "unsupported admitted source oracle row {} line {} has no constructor adapter",
         i.op, i.line
     ))
 }
@@ -314,24 +316,27 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
                     name.to_string()
                 }
             };
-            let list_index = match i.op.as_str() {
-                "lift.oracle_call" | "lift.oracle_uncall" => Some(2),
-                "lift.parmov" => Some(0),
-                "lift.call" => Some(1),
-                _ => None,
+            let list_indices: &[usize] = match i.op.as_str() {
+                "lift.oracle_call" | "lift.oracle_uncall" => &[2],
+                "lift.parmov" => &[0],
+                "lift.call" => &[1],
+                "lift.perm_call" => &[1, 2],
+                _ => &[],
             };
-            if let Some(index) = list_index {
-                i.operands[index] = format!(
-                    "({})",
-                    crate::validate::list_operand(&i.operands[index])?
-                        .iter()
-                        .map(|name| wire(name))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            } else {
+            if list_indices.is_empty() {
                 for operand in &mut i.operands {
                     *operand = wire(operand);
+                }
+            } else {
+                for &index in list_indices {
+                    i.operands[index] = format!(
+                        "({})",
+                        crate::validate::list_operand(&i.operands[index])?
+                            .iter()
+                            .map(|name| wire(name))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                 }
             }
             Ok(i)
@@ -344,6 +349,24 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         let mut row = vec![];
         let mut next = vec![literal(p, n(k + 1), s("$next"))];
         let flag = range("$frame", q - p - 1, 1);
+        if let Some((effect, next)) = direct::row(
+            object,
+            &program,
+            i,
+            k,
+            p,
+            count,
+            sig.fault,
+            &widths,
+            &frame_slots,
+            flag.clone(),
+            succ.clone(),
+            env,
+        )? {
+            templates.push(template(q, effect));
+            successors.push(next_template(q, p, next));
+            continue;
+        }
         if let Some((effect, success)) = stack.row(
             &program,
             i,

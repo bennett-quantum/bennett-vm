@@ -8,12 +8,37 @@ type Wire = (String, usize);
 fn require(ok: bool, why: &str) -> Result<(), String> {
     if ok { Ok(()) } else { Err(err("3.3", why)) }
 }
+#[derive(Clone)]
 struct Schema {
     wires: BTreeMap<String, (usize, bool)>,
     regions: BTreeMap<String, (usize, usize, bool)>,
     args: BTreeMap<String, Type>,
+    locals: BTreeMap<String, bool>,
 }
 impl Schema {
+    fn allocate(&mut self, name: &str, width: usize, borrowed: bool) -> Result<(), String> {
+        require(width > 0, "zero-width local wire")?;
+        require(
+            !self.wires.contains_key(name)
+                && !self.regions.contains_key(name)
+                && !self.args.contains_key(name),
+            "live local name reused",
+        )?;
+        self.wires.insert(name.into(), (width, true));
+        self.locals.insert(name.into(), borrowed);
+        Ok(())
+    }
+    fn release(&mut self, name: &str, borrowed: bool, pred: &[Wire]) -> Result<(), String> {
+        require(
+            self.locals.get(name) == Some(&borrowed),
+            "release requires an owned local of matching allocation kind",
+        )?;
+        let wires = self.bundle(name, self.width(name)?, true)?;
+        self.check_aliases(&wires, &wires, pred)?;
+        self.locals.remove(name);
+        self.wires.remove(name);
+        Ok(())
+    }
     fn bundle(&self, name: &str, width: usize, modified: bool) -> Result<Vec<Wire>, String> {
         let (name, index) = if let Some((base, bit)) = name.split_once('[') {
             (
@@ -172,8 +197,14 @@ impl Schema {
                         self.values(&i.operands[6], &sig.args)?;
                     }
                     self.check_aliases(&all, &modified, &pred)?;
+                    require(
+                        all.iter().all(|wire| !pred.contains(wire)),
+                        "qinplace inputs overlap effective controls",
+                    )?;
                 }
                 "rx" | "ry" | "rz" => {
+                    let target = self.bundle(&i.operands[1], 1, i.op != "rz")?;
+                    self.check_aliases(&target, &target, &pred)?;
                     let angle = &i.operands[0];
                     if self.args.contains_key(angle) {
                         self.value(angle, &Type::F64)?;
@@ -199,23 +230,42 @@ impl Schema {
                     let n = i.operands[1]
                         .parse()
                         .map_err(|_| err("3.3", "invalid allocation width"))?;
-                    self.wires.insert(i.lhs[0].clone(), (n, true));
+                    self.allocate(&i.lhs[0], n, i.op == "qborrow")?;
                 }
                 "qcopy" => {
                     let n = self.width(&i.operands[0])?;
-                    self.wires.insert(i.lhs[0].clone(), (n, true));
+                    self.allocate(&i.lhs[0], n, false)?;
                 }
-                "qload" | "qunload" => {
+                "qfree" | "qreturn" => self.release(&i.operands[0], i.op == "qreturn", &pred)?,
+                "quncopy" => {
+                    let n = self.width(&i.operands[0])?;
+                    let source = self.bundle(&i.operands[0], n, false)?;
+                    let target = self.bundle(&i.operands[1], n, true)?;
+                    self.check_aliases(&[source, target.clone()].concat(), &target, &pred)?;
+                    self.release(&i.operands[1], false, &pred)?;
+                }
+                "qload" | "qunload" | "qstore" | "qexchm" => {
                     let (a, w, _) = self
                         .regions
                         .get(&i.operands[0])
                         .copied()
                         .ok_or_else(|| err("3.3", "load operand is not a region"))?;
-                    self.bundle(&i.operands[1], a, false)?;
+                    let address = self.bundle(&i.operands[1], a, false)?;
                     if i.op == "qload" {
-                        self.wires.insert(i.lhs[0].clone(), (w, true));
+                        self.allocate(&i.lhs[0], w, false)?;
                     } else {
-                        self.bundle(&i.operands[2], w, true)?;
+                        let modified = i.op != "qstore";
+                        let value = self.bundle(&i.operands[2], w, modified)?;
+                        self.check_aliases(
+                            &[address, value.clone()].concat(),
+                            if modified { &value } else { &[] },
+                            &pred,
+                        )?;
+                        if i.op == "qunload" {
+                            self.release(&i.operands[2], false, &pred)?;
+                        } else {
+                            require(self.regions[&i.operands[0]].2, "memory write to in region")?;
+                        }
                     }
                 }
                 "qregion" => {
@@ -225,12 +275,30 @@ impl Schema {
                     let w = i.operands[2]
                         .parse()
                         .map_err(|_| err("3.3", "invalid region cell width"))?;
-                    self.regions.insert(i.operands[0].clone(), (a, w, true));
+                    require(w > 0, "zero-width region cell")?;
+                    if let Some(image) = i.operands.get(3) {
+                        let sig =
+                            crate::validate::signature_of(obj, image.trim_start_matches('@'))?;
+                        let bits = crate::bigint::BigUint::from_u64(w as u64).shl(a);
+                        let bytes = sig
+                            .get("size")
+                            .and_then(|v| v.as_big())
+                            .ok_or_else(|| err("3.3", "region image size missing"))?;
+                        require(bytes.shl(3) == bits, "region image size mismatch")?;
+                    }
+                    require(
+                        self.regions.get(&i.operands[0]) == Some(&(a, w, true)),
+                        "region declaration mismatch",
+                    )?;
                 }
                 "qpred" => pred.extend(self.bundle(&i.operands[0], 1, false)?),
                 "qunpred" => {
-                    pred.pop()
-                        .ok_or_else(|| err("3.3", "predicate underflow"))?;
+                    let wire = self.bundle(&i.operands[0], 1, false)?;
+                    require(
+                        pred.ends_with(&wire) && pred.len() > inherited.len(),
+                        "predicate stack mismatch",
+                    )?;
+                    pred.pop();
                 }
                 "qif" | "qloop" => {
                     let mut ctx = pred.clone();
@@ -243,12 +311,85 @@ impl Schema {
                         ctx.extend(self.bundle(&i.operands[2], n, false)?);
                     }
                     for b in &i.nested {
+                        let before = self.wires.clone();
+                        let locals = self.locals.clone();
                         self.walk(obj, b, &ctx)?;
+                        if i.op == "qloop" {
+                            require(self.wires == before, "loop entry/exit live bindings differ")?;
+                            let trips: usize = i.operands[0]
+                                .parse()
+                                .map_err(|_| err("3.3", "invalid loop bound"))?;
+                            if trips == 0 {
+                                self.locals = locals;
+                            } else if trips > 1 && self.locals != locals {
+                                // A one-trip loop may change allocation ownership while
+                                // keeping its live types. Repeated visits must also typecheck
+                                // their release kinds against the new live ownership.
+                                let after = self.locals.clone();
+                                self.walk(obj, b, &ctx)?;
+                                require(
+                                    self.wires == before && self.locals == after,
+                                    "loop ownership is not stable on repeated visits",
+                                )?;
+                            }
+                        }
                     }
+                }
+                op if crate::action::is_gate_name(op) || matches!(op, "qxor" | "qexch") => {
+                    let diagonal = matches!(op, "s" | "sdg" | "t" | "tdg" | "rz" | "cz");
+                    let (sources, targets) = match op {
+                        "mcx" => (
+                            self.bundles(
+                                &i.operands[0],
+                                &vec![1; list_operand(&i.operands[0])?.len()],
+                                false,
+                            )?,
+                            self.bundle(&i.operands[1], 1, true)?,
+                        ),
+                        "cx" => (
+                            self.bundle(&i.operands[0], 1, false)?,
+                            self.bundle(&i.operands[1], 1, true)?,
+                        ),
+                        "ccx" => (
+                            [
+                                self.bundle(&i.operands[0], 1, false)?,
+                                self.bundle(&i.operands[1], 1, false)?,
+                            ]
+                            .concat(),
+                            self.bundle(&i.operands[2], 1, true)?,
+                        ),
+                        "qxor" | "qexch" => {
+                            let n = self.width(&i.operands[0])?;
+                            let a = self.bundle(&i.operands[0], n, op == "qexch")?;
+                            let b = self.bundle(&i.operands[1], n, true)?;
+                            if op == "qexch" {
+                                (vec![], [a, b].concat())
+                            } else {
+                                (a, b)
+                            }
+                        }
+                        "swap" | "cz" => (
+                            vec![],
+                            [
+                                self.bundle(&i.operands[0], 1, !diagonal)?,
+                                self.bundle(&i.operands[1], 1, !diagonal)?,
+                            ]
+                            .concat(),
+                        ),
+                        _ => (
+                            vec![],
+                            self.bundle(i.operands.last().unwrap(), 1, !diagonal)?,
+                        ),
+                    };
+                    self.check_aliases(&[sources, targets.clone()].concat(), &targets, &pred)?;
                 }
                 _ => {}
             }
         }
+        require(
+            pred == inherited,
+            "predicate stack not empty at structured boundary",
+        )?;
         Ok(())
     }
 }
@@ -260,6 +401,7 @@ pub(crate) fn function(obj: &Object, f: &Function) -> Result<(), String> {
         wires: BTreeMap::new(),
         regions: BTreeMap::new(),
         args: BTreeMap::new(),
+        locals: BTreeMap::new(),
     };
     for (group, ps) in f.lists[..2].iter().enumerate() {
         for p in ps {
@@ -282,11 +424,28 @@ pub(crate) fn function(obj: &Object, f: &Function) -> Result<(), String> {
     f.flat_instrs(&mut flat);
     for i in flat {
         if i.op == "qregion" {
-            s.walk(obj, std::slice::from_ref(i), &[])?;
+            let a = i.operands[1]
+                .parse()
+                .map_err(|_| err("3.3", "invalid region address width"))?;
+            let w = i.operands[2]
+                .parse()
+                .map_err(|_| err("3.3", "invalid region cell width"))?;
+            require(
+                !s.wires.contains_key(&i.operands[0])
+                    && !s.args.contains_key(&i.operands[0])
+                    && s.regions
+                        .insert(i.operands[0].clone(), (a, w, true))
+                        .is_none(),
+                "duplicate local region name",
+            )?;
         }
     }
-    for b in &f.blocks {
-        s.walk(obj, &b.instrs, &[])?;
-    }
+    let body = f
+        .blocks
+        .iter()
+        .flat_map(|b| b.instrs.clone())
+        .collect::<Vec<_>>();
+    s.walk(obj, &body, &[])?;
+    require(s.locals.is_empty(), "local wire lifetime not released")?;
     Ok(())
 }

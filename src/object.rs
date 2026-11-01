@@ -94,7 +94,17 @@ impl Type {
     }
 }
 
+pub fn canonical_int(text: &str) -> bool {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && (digits == "0" || !digits.starts_with('0'))
+}
 pub fn parse_usize(text: &str) -> Result<usize, String> {
+    if !canonical_int(text) {
+        return Err(err("16.1", format!("noncanonical INT {text:?}")));
+    }
+    let text = if text == "-0" { "0" } else { text };
     text.parse::<usize>()
         .map_err(|_| format!("invalid integer {text:?}"))
 }
@@ -422,8 +432,13 @@ pub fn parse(text: &str) -> Result<Object, String> {
     if lines.is_empty() {
         return Err(err("16.2", "malformed object header"));
     }
+    let mut in_data = false;
     for (i, line) in lines.iter().enumerate() {
-        if line.ends_with(' ') || line.ends_with('\t') {
+        if let Some(section) = line.strip_prefix("section ") {
+            in_data = section == "data";
+        }
+        let empty_data = in_data && line.strip_suffix(' ').is_some_and(valid_name);
+        if (line.ends_with(' ') && !empty_data) || line.ends_with('\t') {
             return Err(err(
                 "16.1",
                 format!("trailing whitespace on line {}", i + 1),
@@ -906,6 +921,9 @@ fn parse_params(token: &str) -> Result<Vec<Param>, String> {
         )
     })?;
     let mut out = Vec::new();
+    if inner != split_list(inner).join(", ") {
+        return Err(err("16.1", "noncanonical parameter separators"));
+    }
     for item in split_list(inner) {
         // NAME ":" type (SP role)?
         let mut parts = item.splitn(2, ' ');
@@ -1159,6 +1177,44 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
     }
     let op = rest[0].clone();
     let operands = rest[1..].to_vec();
+    if lhs.iter().any(|name| !valid_name(name)) {
+        return Err(err("16.1", "invalid result name"));
+    }
+    if let Some((_, width)) = op.rsplit_once(".i")
+        && width.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
+        && !canonical_int(width)
+    {
+        return Err(err("16.1", "noncanonical opcode width"));
+    }
+    fn operand(token: &str, float: bool) -> Result<(), String> {
+        if let Some(inner) = paren_inner(token) {
+            if inner != split_list(inner).join(", ") {
+                return Err(err("16.1", "noncanonical operand list"));
+            }
+            for item in split_list(inner) {
+                operand(&item, false)?;
+            }
+        } else if let Some((_, index)) = token.split_once('[') {
+            let index = index
+                .strip_suffix(']')
+                .ok_or_else(|| err("16.1", "invalid index"))?;
+            if !canonical_int(index) {
+                return Err(err("16.1", "noncanonical wire index"));
+            }
+        } else if !float
+            && token.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
+            && !canonical_int(token)
+        {
+            return Err(err("16.1", "noncanonical INT operand"));
+        }
+        Ok(())
+    }
+    for (index, token) in operands.iter().enumerate() {
+        operand(
+            token,
+            index == 0 && matches!(op.as_str(), "rx" | "ry" | "rz"),
+        )?;
+    }
     let mut nested = Vec::new();
     if opens {
         loop {

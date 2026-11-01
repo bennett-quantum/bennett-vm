@@ -122,3 +122,72 @@ fn literal_angles_keep_the_published_float_spelling() {
         assert!(e.contains("16.1"), "{e}");
     }
 }
+
+#[test]
+fn memory_rows_check_shapes_roles_and_disjoint_operands() {
+    let good = source(
+        "action @a (addr:wire[2] mut, v:wire[8] mut) () (m:region[2,8] mut) () ()\n^entry():\nqstore m addr v\nqexchm m addr v\nd = qload m addr\nqunload m addr d",
+    );
+    bennett_vm::load(&good, true).unwrap();
+    for text in [
+        good.replace("qstore m addr v", "qstore m v addr"),
+        good.replace("qexchm m addr v", "qexchm missing addr v"),
+        good.replace("region[2,8] mut", "region[2,8] in"),
+        good.replace("qunload m addr d", "qunload m addr addr"),
+    ] {
+        assert!(bennett_vm::load(&text, true).is_err(), "admitted {text}");
+    }
+}
+#[test]
+fn linear_local_lifetimes_are_checked_even_without_borrow_frames() {
+    for body in [
+        "qfree x",
+        "a = qalloc any 1\nqfree a\nx a",
+        "a = qalloc any 1\na = qalloc any 1\nqfree a",
+        "a = qalloc any 1",
+        "a = qborrow any 1\nqfree a",
+        "a = qalloc any 1\nqreturn a",
+        "qpred x\nqunpred x\nqfree x",
+    ] {
+        let text = source(&format!(
+            "action @a (x:wire mut) () () () ()\n^entry():\n{body}"
+        ));
+        assert!(bennett_vm::load(&text, true).is_err(), "admitted {body}");
+    }
+    let good = source(
+        "action @a (x:wire mut) () () () ()\nregs { } bounds {2}\n^entry():\na = qalloc any 1\nqfree a\na = qalloc any 1\nqfree a\nqloop 2 {\nb = qcopy x\nquncopy x b\n}",
+    );
+    bennett_vm::load(&good, true).unwrap();
+}
+#[test]
+fn function_wide_predicates_and_zero_width_regions_are_checked() {
+    let text = source(
+        "action @a (x:wire mut) (p:wire in) () () ()\n^entry():\nqpred p\n^tail():\nx x\nqunpred p",
+    );
+    bennett_vm::load(&text, true).unwrap();
+    for body in ["qpred x", "qregion m 1 0", "a = qalloc any 0\nqfree a"] {
+        let bad = source(&format!(
+            "action @a (x:wire mut) () () () ()\n^entry():\n{body}"
+        ));
+        assert!(bennett_vm::load(&bad, true).is_err(), "admitted {body}");
+    }
+}
+#[test]
+fn qinplace_inputs_are_disjoint_from_the_effective_control_context() {
+    let text = source(
+        "oracle @f (v:wire in, p:wire in) (t:wire) (fr:wire[4]) () ()\n^entry():\nlift.retval v\noracle @g (v:wire in, p:wire in) (t:wire) (fr:wire[4]) () ()\n^entry():\nlift.retval v\naction @a (x:wire mut) (p:wire in) () (tk:token) ()\n^entry():\nqpred p\nqinplace @f @g tk x (p) () ()\nqunpred p",
+    );
+    let e = bennett_vm::load(&text, true).unwrap_err();
+    assert!(e.contains("qinplace"), "{e}");
+}
+#[test]
+fn one_trip_loop_can_replace_a_returned_borrow_with_an_owned_local() {
+    let one = source(
+        "action @a () () () () ()\nregs {  } bounds {1}\n^entry():\na = qborrow any 1\nqloop 1 {\nqreturn a\na = qalloc any 1\n}\nqfree a",
+    );
+    bennett_vm::load(&one, true).unwrap();
+    let two = one
+        .replace("bounds {1}", "bounds {2}")
+        .replace("qloop 1", "qloop 2");
+    assert!(bennett_vm::load(&two, true).is_err());
+}

@@ -150,3 +150,142 @@ pub fn admit(sources: &[&str], linked: &str) -> Result<Admission, String> {
         resolved_imports,
     })
 }
+
+/// Source resolution result. The original objects retain schedules, certificates
+/// and coverage for the composition/rebinding stage; `object` is the admitted
+/// source graph, not a claim that those documents certify its new identities.
+#[derive(Debug)]
+pub struct Resolution {
+    pub object: Object,
+    pub admission: Admission,
+    pub inputs: Vec<Object>,
+}
+
+/// Resolve every import against the supplied source objects and automatically
+/// assemble a deterministic canonical graph. Re-indexing symbols does not
+/// rewrite function bytes or invent invocation/certificate bindings.
+pub fn resolve(sources: &[&str]) -> Result<Resolution, String> {
+    if sources.is_empty() {
+        return Err(err("9.3", "no input objects"));
+    }
+    let inputs = sources
+        .iter()
+        .map(|s| crate::load(s, false).map(|(o, _)| o))
+        .collect::<Result<Vec<_>, _>>()?;
+    let first = &inputs[0];
+    let mut definitions = BTreeMap::new();
+    let mut functions = BTreeMap::new();
+    let mut data = BTreeMap::new();
+    for input in &inputs {
+        if input.isa != first.isa || input.ptr_width != first.ptr_width {
+            return Err(err("9.3", "input version/pointer width mismatch"));
+        }
+        for (name, symbol) in &input.symbols {
+            if let Some(old) = definitions.insert(name.clone(), symbol.signature.clone())
+                && old != symbol.signature
+            {
+                return Err(err("9.3", format!("unequal duplicate definition @{name}")));
+            }
+        }
+        for f in &input.functions {
+            if let Some(old) = functions.insert(f.name.clone(), f.canonical.clone())
+                && old != f.canonical
+            {
+                return Err(err(
+                    "9.3",
+                    format!("unequal duplicate definition @{}", f.name),
+                ));
+            }
+        }
+        for (name, bytes) in &input.data {
+            if let Some(old) = data.insert(name.clone(), bytes.clone())
+                && old != *bytes
+            {
+                return Err(err("9.3", format!("conflicting data entry @{name}")));
+            }
+        }
+    }
+    for input in &inputs {
+        for (name, import) in &input.imports {
+            let signature = definitions
+                .get(name)
+                .ok_or_else(|| err("9.3", format!("unresolved import @{name}")))?;
+            if signature != &import.signature {
+                return Err(err("9.3", format!("import signature mismatch @{name}")));
+            }
+        }
+    }
+    let symbols = Json::Obj(
+        definitions
+            .iter()
+            .enumerate()
+            .map(|(index, (name, sig))| {
+                (
+                    index.to_string(),
+                    Json::obj(vec![
+                        ("name", Json::Str(name.clone())),
+                        ("kind", sig.get("kind").unwrap().clone()),
+                        ("signature", sig.clone()),
+                        ("interface_hash", Json::Str("0".repeat(64))),
+                    ]),
+                )
+            })
+            .collect(),
+    );
+    let mut text = format!(
+        "{}\n\nsection symbols\n{}\n",
+        first.text.lines().next().unwrap(),
+        symbols.to_jcs()
+    );
+    if !functions.is_empty() {
+        text.push_str(&format!(
+            "\nsection functions\n{}\n",
+            functions.values().cloned().collect::<Vec<_>>().join("\n")
+        ));
+    }
+    if !data.is_empty() {
+        text.push_str("\nsection data\n");
+        for (name, bytes) in &data {
+            text.push_str(&format!("{name} {bytes}\n"));
+        }
+    }
+    for (name, value) in [
+        ("devices", merged_metadata(&inputs, false)?),
+        ("layout", merged_metadata(&inputs, true)?),
+    ] {
+        if let Some(value) = value {
+            text.push_str(&format!("\nsection {name}\n{}\n", value.to_jcs()));
+        }
+    }
+    // Identities change transitively when an unresolved reference is resolved.
+    // Compute them from canonical bytes, then re-admit with the stored hashes.
+    let (object, ids) = crate::load(&text, true)?;
+    let mut symbols = symbols;
+    if let Json::Obj(entries) = &mut symbols {
+        for (index, entry) in entries {
+            let name = object
+                .symbols
+                .values()
+                .find(|s| s.index.to_string() == *index)
+                .unwrap()
+                .name
+                .clone();
+            if let Json::Obj(fields) = entry {
+                fields.insert(
+                    "interface_hash".into(),
+                    Json::Str(ids.interface[&name].clone()),
+                );
+            }
+        }
+    }
+    let start = text.find("section symbols\n").unwrap() + "section symbols\n".len();
+    let end = start + text[start..].find('\n').unwrap();
+    text.replace_range(start..end, &symbols.to_jcs());
+    let admission = admit(sources, &text)?;
+    let (object, _) = crate::load(&text, false)?;
+    Ok(Resolution {
+        object,
+        admission,
+        inputs,
+    })
+}

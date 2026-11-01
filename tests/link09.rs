@@ -105,3 +105,75 @@ fn all_five_import_groups_are_matched_even_when_the_import_is_unused() {
         assert!(e.contains("import signature mismatch"), "{from}: {e}");
     }
 }
+
+#[test]
+fn automatic_resolution_assembles_and_rehashes_canonical_sources() {
+    let (root, provider, _) = objects(3, None);
+    let resolved = link::resolve(&[&root, &provider, &provider]).unwrap();
+    let (obj, ids) = bennett_vm::load(&resolved.object.text, false).unwrap();
+    assert!(obj.imports.is_empty());
+    assert_eq!(obj.functions.len(), 2);
+    assert_eq!(
+        ids.closure["f"].as_ref().unwrap(),
+        &resolved.admission.resolved_imports["f"]
+    );
+    // Input order and repeated providers cannot choose a different assembly.
+    let reordered = link::resolve(&[&provider, &root]).unwrap();
+    assert_eq!(obj.text, reordered.object.text);
+    assert_eq!(ids.object_hash, reordered.admission.identities.object_hash);
+    assert_eq!(
+        obj.function("o").unwrap().canonical,
+        bennett_vm::object::parse(&root)
+            .unwrap()
+            .function("o")
+            .unwrap()
+            .canonical
+    );
+}
+#[test]
+fn automatic_resolution_fails_closed_on_missing_pinned_and_conflicting_sources() {
+    let (root, provider, _) = objects(3, None);
+    assert!(link::resolve(&[&root]).unwrap_err().contains("unresolved"));
+    let (bad, _, _) = objects(3, Some(&"0".repeat(64)));
+    assert!(
+        link::resolve(&[&bad, &provider])
+            .unwrap_err()
+            .contains("pinned")
+    );
+    let changed = sign(&provider.replace("lift.ret n", "r = lift.const.i1 0\nlift.ret r"));
+    assert!(
+        link::resolve(&[&root, &provider, &changed])
+            .unwrap_err()
+            .contains("duplicate")
+    );
+    let (narrow, provider, _) = objects(1, None);
+    assert!(
+        link::resolve(&[&narrow, &provider])
+            .unwrap_err()
+            .contains("index space")
+    );
+}
+#[test]
+fn resolved_source_graph_executes_imported_rows() {
+    use bennett_vm::{bigint::BigUint, oracle, value::Budget};
+    let (root, provider, _) = objects(3, None);
+    let resolved = link::resolve(&[&root, &provider]).unwrap();
+    for x in 0..2 {
+        let outcome = oracle::run_oracle(
+            &resolved.object,
+            "o",
+            &[BigUint::from_u64(x)],
+            &mut [],
+            &[],
+            Budget {
+                steps: 8,
+                heap: 0,
+                stack: 8,
+                depth: 2,
+            },
+        )
+        .unwrap();
+        assert!(outcome.code.is_zero());
+        assert_eq!(outcome.payload, BigUint::from_u64(x));
+    }
+}

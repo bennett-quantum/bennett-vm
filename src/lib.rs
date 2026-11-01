@@ -25,6 +25,7 @@ pub mod link;
 pub mod object;
 pub mod oracle;
 pub mod qcli;
+mod qreg_typing;
 mod qvalidate;
 mod rational;
 pub mod ref_library;

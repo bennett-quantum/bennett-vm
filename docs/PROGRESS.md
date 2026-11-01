@@ -1,3 +1,10 @@
+# 47t-a automatic source assembly and admission audit — 2026-11-01
+Resume: 47t-a remains IN PROGRESS, now dependent on ISA b-isa-spec-7js (A=0 coherent memory source addressing); c/d/hsd/clw not started. Work b only after a/c/d under the updated K77 contract.
+Adds deterministic link::resolve assembly, exact source/metadata merges and transitive rehashing; imported rows execute through the resolved graph. Original attached documents remain available for d/clw composition.
+Audit/regressions cover CC fixed-point typing, qreg view paths and transfers, coherent memory/lifetimes/function-wide predicates/controls, canonical INTs, empty data and device arities; docs/admission09-audit.md records coverage and the unresolved contract.
+ISA 7js filed with both readings, exported and committed issues-only at 7dd1ffd; no spec text/fixtures/Cargo dependencies/pushes. No bead closed and no private A=0 binding introduced.
+Final interpreter/JIT each 188 PASS / 0 FAIL / 0 ignored (before 170/0); differential each 18/0 unchanged. fmt/strict Clippy/whitespace green; .tmp/47t-a-final3-{interpreter,jit}.log and totals JSON.
+
 # K76 public certificate entry-domain guard — 2026-11-01
 Resume: fat CLOSED/green; complete 47t-a automatic resolution/integration and source-wide audit before c, d, hsd, clw. No 47t child closed.
 Public verify_region_claims now independently revalidates source/frame obligations; a region-D identity proof cannot discharge a failed frame-D_F obligation, including library replay.

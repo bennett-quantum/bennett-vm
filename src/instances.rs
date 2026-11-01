@@ -168,6 +168,58 @@ pub(crate) fn validate_groups(f: &Function) -> Result<(), String> {
     {
         return Err(err("16.2", "token/classical suffix on block parameter"));
     }
+    if f.regs.iter().any(|p| !matches!(p.ty, Type::Reg(1..))) {
+        return Err(err("3.3", "location width must be positive"));
+    }
+    if matches!(f.kind, FnKind::Action | FnKind::PermAction) && !f.lists[4].is_empty() {
+        return Err(err("3.3", "action has four parameter groups"));
+    }
+    if !matches!(f.kind, FnKind::Cc | FnKind::R) && f.blocks.iter().any(|b| !b.params.is_empty()) {
+        return Err(err("3.7", "only CC/R blocks have parameters"));
+    }
+    for (group, ps) in f.lists.iter().enumerate() {
+        for p in ps {
+            let valid = match f.kind {
+                FnKind::Oracle => match group {
+                    0 => {
+                        matches!(p.ty, Type::Wire(1..))
+                            && p.role.as_deref().is_none_or(|r| r == "in")
+                    }
+                    1 | 2 => matches!(p.ty, Type::Wire(1..)) && p.role.is_none(),
+                    3 => matches!(p.ty, Type::Region(_, 1..)) && p.role.as_deref() == Some("in"),
+                    4 => {
+                        matches!(p.ty, Type::I(1..=128) | Type::Ptr | Type::F64 | Type::Token)
+                            && p.role.is_none()
+                    }
+                    _ => false,
+                },
+                FnKind::Action | FnKind::PermAction => match group {
+                    0 | 1 => {
+                        matches!(p.ty, Type::Wire(1..))
+                            && p.role
+                                .as_deref()
+                                .is_none_or(|r| r == if group == 0 { "mut" } else { "in" })
+                    }
+                    2 => {
+                        matches!(p.ty, Type::Region(_, 1..))
+                            && matches!(p.role.as_deref(), Some("in" | "mut"))
+                    }
+                    3 => {
+                        matches!(p.ty, Type::I(1..=128) | Type::Ptr | Type::F64 | Type::Token)
+                            && p.role.is_none()
+                    }
+                    _ => false,
+                },
+                _ => true,
+            };
+            if !valid {
+                return Err(err(
+                    "3.3",
+                    "header parameter type/role disagrees with group",
+                ));
+            }
+        }
+    }
     for (group, ps) in f.lists.iter().enumerate() {
         for p in ps {
             if matches!(p.role.as_deref(), Some("token" | "classical"))

@@ -221,8 +221,12 @@ fn validate_signature_schema(sig: &Json, kind: &str, isa: &str) -> Result<(), St
             sig_fields(sig, &["tier", "kind", "params", "results", "abi"], kind)?;
             expect(sig, "tier", kind)?;
             expect(sig, "abi", isa)?;
-            type_strings(sig, "params")?;
-            type_strings(sig, "results")?;
+            for ty in type_strings(sig, "params")?
+                .iter()
+                .chain(&type_strings(sig, "results")?)
+            {
+                crate::typing::valid_type(ty)?;
+            }
         }
         "data" => {
             sig_fields(sig, &["tier", "kind", "size", "abi"], kind)?;
@@ -233,6 +237,19 @@ fn validate_signature_schema(sig: &Json, kind: &str, isa: &str) -> Result<(), St
                 .ok_or_else(|| err("9.1", "data size must be an integer"))?;
         }
         _ => return Err(err("9.1", format!("unknown kind {kind:?}"))),
+    }
+    if isa == "0.9" && matches!(kind, "oracle" | "action" | "perm_action") {
+        for ty in type_strings(sig, "args")? {
+            if !matches!(ty, Type::I(1..=128) | Type::Ptr | Type::F64 | Type::Token) {
+                return Err(err("3.3", "invalid coherent classical argument type"));
+            }
+        }
+        if kind == "oracle" && sig.get("tgt").and_then(|v| v.as_usize()) == Some(0) {
+            return Err(err("3.3", "zero-width oracle target"));
+        }
+    }
+    if kind == "lproc" && sig.get("result").and_then(|v| v.as_usize()) == Some(0) {
+        return Err(err("3.3", "zero-width lproc result"));
     }
     if sig.get("kind").and_then(|k| k.as_str()) != Some(kind) {
         return Err(err(
@@ -897,13 +914,27 @@ const GATES_1: [&str; 6] = ["x", "h", "s", "sdg", "t", "tdg"];
 /// Base mnemonic without type/predicate suffix beyond the first dot part
 /// used by the schema (`icmp.eq` keeps both pieces for `lift.icmp.eq`).
 pub fn is_int_literal(text: &str) -> bool {
-    let t = text.strip_prefix('-').unwrap_or(text);
-    !t.is_empty() && t.bytes().all(|c| c.is_ascii_digit())
+    crate::object::canonical_int(text)
 }
 
 fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
     if obj.isa == "0.9" {
         crate::instances::validate_groups(f)?;
+        if matches!(f.kind, FnKind::Cc | FnKind::R) {
+            if f.lists[2..].iter().any(|ps| !ps.is_empty()) {
+                return Err(err("3.3", "CC/R has only parameters and results"));
+            }
+            for p in f.lists[..2]
+                .iter()
+                .flatten()
+                .chain(f.blocks.iter().flat_map(|b| &b.params))
+            {
+                crate::typing::valid_type(&p.ty)?;
+                if p.role.is_some() {
+                    return Err(err("3.3", "CC/R parameter has a role"));
+                }
+            }
+        }
     } else if f
         .lists
         .iter()

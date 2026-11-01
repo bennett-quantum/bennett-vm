@@ -1008,14 +1008,15 @@ pub fn validate(obj: &Object, f: &Function) -> Result<(), String> {
         }
         Ok(())
     }
-    for b in &f.blocks {
-        walk(&b.instrs, &env, &inputs, &mut vec![])?;
-    }
+    let body = f
+        .blocks
+        .iter()
+        .flat_map(|b| b.instrs.clone())
+        .collect::<Vec<_>>();
+    walk(&body, &env, &inputs, &mut vec![])?;
     if !borrowed.is_empty() {
         let mut analysis = FrameAnalysis::new(obj, f, env)?;
-        for block in &f.blocks {
-            analysis.sequence(&block.instrs, &[], &mut vec![f.name.clone()])?;
-        }
+        analysis.sequence(&body, &[], &mut vec![f.name.clone()])?;
         analysis.flush()?;
     }
     Ok(())

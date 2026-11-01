@@ -1939,6 +1939,17 @@ impl RuntimeRun {
                     m.data
                         .allocation_at_or_before(p)
                         .filter(|e| e.live && *end <= e.base.add(&e.size))
+                        .or_else(|| {
+                            if p == end {
+                                m.data
+                                    .allocation_index
+                                    .get(p)
+                                    .and_then(|i| m.data.table.get(i))
+                                    .filter(|e| e.live)
+                            } else {
+                                None
+                            }
+                        })
                         .map(|e| ResourceKey::Entry(e.base.clone()))
                 } else {
                     None
@@ -2225,6 +2236,21 @@ mod scaling_tests {
         // The former full-map comparison sees NaN != NaN and attempts to
         // serialize it even on an unrelated row. Preserve that diagnostic.
         run.step().unwrap();
+    }
+
+    #[test]
+    fn zero_length_launch_access_locks_its_zero_sized_allocation() {
+        let mut run = run_for("p = const.i64 16\nn = const.i64 0\neffect console.write p n\nret");
+        run.step().unwrap();
+        run.step().unwrap();
+        run.machine.data.add_allocation(Allocation {
+            base: u(16),
+            size: u(0),
+            live: true,
+            pinned: false,
+        });
+        let (keys, _) = run.touches();
+        assert!(keys.contains(&ResourceKey::Entry(u(16))), "{keys:?}");
     }
 
     #[test]

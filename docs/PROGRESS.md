@@ -1,3 +1,10 @@
+# fw8 launch-lock follow-up and final measurements — 2026-11-01
+Resume: fw8 CLOSED; c IN PROGRESS after predicate-spanning checkpoint 806c482. Finish mutable-region/remaining general histories, lifted oracle-uncall and complete bound-library occurrence validation before d, then b.
+RED/GREEN one additional launch-adapter regression: zero-length access to a zero-sized allocation must still lock its allocation entry. The interval index now falls back to the exact live allocation index for that case; no allocation-table scan or CLI execution-path change.
+FINAL GREEN sequential interpreter/JIT each 240/0/0, differential each18/0; fmt, strict all-target Clippy and whitespace pass. Evidence .tmp/fw8-zero-lock-{red,green,final-*}.log and final-totals.json; c checkpoint separately green239/0/0 each.
+Current-tree release n=0/n=1000 interpreter 1.132/1.804 s, JIT 2.225/2.689 s; debug 3.363/11.349 s and 5.466/10.522 s. Native results 0 and 54380828142828 agree; full n=1000 reversals exact in both engines/builds, debug comfortably below300 s. Binary hashes/stdout/times .tmp/fw8-head-measurements.json; earlier saved-binary prefix scaling remains in fw8 block below.
+No new ISA bead/spec edit, dependency, fixture weakening, conformance edit or push. c remains unclosed; d/b unstarted. HANDOFF is current state with real UTC time.
+
 # 47t-c predicate-spanning call inputs — 2026-11-01
 Resume: c IN PROGRESS: mutable-region and remaining cross-scope/general dependency histories, lifted oracle-uncall integration and complete bound-library semantic-call occurrence validation; finish c before d, then b.
 RED: an owned qcopy outside a predicate could not bind a paired call's exact inputs inside it. Input reconstruction now retains enclosing flat source history and balances captured predicate scopes in execution order, including source adjoints; nested loop/branch domains retain their local-history obligations.

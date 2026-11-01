@@ -472,3 +472,134 @@ fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
         "{error}"
     );
 }
+
+fn assert_map(text: &str, params: &str, budget: [u64; 4], inputs: &[(&str, usize)], cases: usize) {
+    use bennett_vm::{bigint::BigUint, value::Budget};
+    let (obj, _) = bennett_vm::load(text, false).unwrap();
+    let catalog = Catalog::published().unwrap();
+    let parameters = json::parse(params).unwrap();
+    let values = bennett_vm::invocation::decode_args(
+        &parameters,
+        &obj.function("root").unwrap().lists[4]
+            .iter()
+            .map(|p| p.ty.clone())
+            .collect::<Vec<_>>(),
+        obj.ptr_width,
+    )
+    .unwrap();
+    let context = json::parse(&format!(
+        r#"{{"token":["{}","{}","{}","{}"]}}"#,
+        budget[0], budget[1], budget[2], budget[3]
+    ))
+    .unwrap();
+    let e = catalog
+        .lower_oracle_with_cleanup(&obj, "root", &parameters, &context, 0, &[])
+        .unwrap();
+    let target = match obj.function("root").unwrap().lists[1][0].ty {
+        bennett_vm::object::Type::Wire(w) => w,
+        _ => panic!(),
+    };
+    for bits in 0..cases {
+        let mut state = std::collections::BTreeMap::new();
+        let mut shift = 0;
+        let mut ins = vec![];
+        for &(name, width) in inputs {
+            let v = (bits >> shift) & ((1 << width) - 1);
+            ins.push(BigUint::from_u64(v as u64));
+            for i in 0..width {
+                state.insert(format!("{name}[{i}]"), v & (1 << i) != 0);
+            }
+            shift += width;
+        }
+        for (name, width) in [("t", target), ("f", 4)] {
+            for i in 0..width {
+                state.insert(format!("{name}[{i}]"), i % 2 == 0);
+            }
+        }
+        let out = bennett_vm::oracle::run_oracle(
+            &obj,
+            "root",
+            &ins,
+            &mut [],
+            &values,
+            Budget {
+                steps: budget[0],
+                heap: budget[1],
+                stack: budget[2],
+                depth: budget[3],
+            },
+        )
+        .unwrap();
+        let mut expected = state.clone();
+        for (name, width, value) in [("t", target, out.payload), ("f", 4, out.code)] {
+            for i in 0..width {
+                *expected.get_mut(&format!("{name}[{i}]")).unwrap() ^= value.bit(i);
+            }
+        }
+        assert_eq!(
+            replay(&e.leaves, state),
+            expected,
+            "input {bits}, budget {budget:?}"
+        );
+    }
+}
+
+#[test]
+fn source_memory_descriptors_restore_heap_table_and_displaced_bytes() {
+    let text = support::source(
+        "oracle @root (x:wire[8] in) (t:wire[8]) (f:wire[4]) () ()\nregs { p:reg[2], n:reg[2], r:reg[8] }\n^entry():\nn = lift.const.i2 1\np = lift.alloc n\nlift.store.i8 p x\nr = lift.load.i8 p\nlift.boundscheck p n\nlift.free p\nlift.retval r",
+    );
+    let text = support::sign(&format!("{}\nsection layout\n{}\n",text.replace("ptr_width=32","ptr_width=2"),json::parse(r#"{"ptr_width":2,"H":2,"A_tab":1,"S_cells":3,"null_size":1,"heap_base":2,"heap_limit_max":1,"globals":{},"interface_regions":{}}"#).unwrap().to_jcs()));
+    for steps in [0, 2, 4, 7, 8] {
+        assert_map(&text, "[]", [steps, 1, 0, 0], &[("x", 8)], 4);
+    }
+    assert_map(&text, "[]", [7, 0, 0, 0], &[("x", 8)], 2);
+}
+
+#[test]
+fn mapped_memory_lifted_cleanup_preserves_interface_cells_for_both_choices() {
+    let raw = support::source(
+        "oracle @root () (t:wire[8]) (f:wire[4]) (m:region[0,8] in) (tk:token)\nregs { r:reg[8], fr:reg[4] }\n^entry():\nlift.oracle_call @read tk () r fr (m) ()\nlift.oracle_uncall @read tk () r fr (m) ()\nlift.retval r\noracle @read () (t:wire[8]) (f:wire[4]) (m:region[0,8] in) ()\nregs { p:reg[2], r:reg[8] }\n^entry():\np = lift.addr @m\nr = lift.load.i8 p\nlift.retval r",
+    );
+    let end = raw.find("\nsection layout").unwrap();
+    let layout = json::parse(r#"{"ptr_width":2,"H":2,"A_tab":1,"S_cells":3,"null_size":1,"heap_base":3,"heap_limit_max":0,"globals":{},"interface_regions":{"root":{"m":{"base":1}},"read":{"m":{"base":2}}}}"#).unwrap();
+    let text = support::sign(&format!(
+        "{}\nsection layout\n{}\n",
+        raw[..end].replace("ptr_width=32", "ptr_width=2"),
+        layout.to_jcs()
+    ));
+    let (obj, ids) = bennett_vm::load(&text, false).unwrap();
+    let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
+    for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+        let e = Catalog::published()
+            .unwrap()
+            .lower_oracle_with_cleanup(
+                &obj,
+                "root",
+                &json::parse(r#"[["3","0","0","0"]]"#).unwrap(),
+                &json::parse(r#"{"token":["3","0","0","0"]}"#).unwrap(),
+                1,
+                &[CleanupEntry {
+                    selector: Selector::parse(&selector).unwrap(),
+                    realisation: choice,
+                }],
+            )
+            .unwrap();
+        assert_eq!(e.cleanups.len(), 6);
+        for byte in [0, 1, 128, 255] {
+            for ctl in [false, true] {
+                let mut state = std::collections::BTreeMap::from([("$controls[0]".into(), ctl)]);
+                for (name, w, v) in [("m", 8, byte), ("t", 8, 165), ("f", 4, 10)] {
+                    for i in 0..w {
+                        state.insert(format!("{name}[{i}]"), v & (1 << i) != 0);
+                    }
+                }
+                assert_eq!(
+                    replay(&e.leaves, state.clone()),
+                    state,
+                    "{choice:?} {byte} {ctl}"
+                );
+            }
+        }
+    }
+}

@@ -1,6 +1,8 @@
 //! Source-built constructor adapter. Raw catalog descriptors never enter here.
 use super::*;
 use crate::object::{FnKind, Instr, Object, Type};
+#[path = "oracle_memory.rs"]
+mod memory;
 fn s(x: impl Into<String>) -> Json {
     Json::Str(x.into())
 }
@@ -93,6 +95,28 @@ impl Catalog {
             env.values
                 .insert(p.name.clone(), Bound::Value(value.clone(), ty));
         }
+        for p in &f.lists[3] {
+            let Type::Region(address, cell) = p.ty else {
+                return Err(err("non-region oracle memory"));
+            };
+            let width = (1usize
+                .checked_shl(address as u32)
+                .ok_or_else(|| err("host limit: region"))?)
+            .checked_mul(cell)
+            .ok_or_else(|| err("host limit: region"))?;
+            env.wire(&p.name, width);
+            let cells = wires(&s(&p.name), &env)?;
+            env.values.insert(
+                p.name.clone(),
+                Bound::Region {
+                    address,
+                    cell,
+                    role: "in".into(),
+                    origin: format!("interface:{}", p.name),
+                    cells,
+                },
+            );
+        }
         env.oracle_invocation = Some(oracle_invocation.clone());
         env.cleanup.entries = Rc::new(entries.to_vec());
         env.wire("$controls", inherited_controls);
@@ -121,16 +145,6 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         .ok_or_else(|| err("source oracle missing"))?;
     if f.kind != FnKind::Oracle {
         return Err(err("source is not an oracle"));
-    }
-    if !f.lists[3].is_empty()
-        || object
-            .layout
-            .as_ref()
-            .is_some_and(|l| !l.globals.is_empty())
-    {
-        return Err(err(
-            "unavailable.reason: oracle memory State/row construction remains in bennett-vm-47t-c2",
-        ));
     }
     if let Some(i) = f
         .blocks
@@ -171,6 +185,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
             slots[j] = slots[j].max(widths[name]);
         }
     }
+    memory::slots(object, &rows, &mut slots)?;
     let q = 2 * p + slots.iter().sum::<usize>() + 1;
     let frame_slots = slots
         .iter()
@@ -205,6 +220,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
     for (name, width) in crate::oracle::location_widths(f) {
         add_state(name, width, n(0));
     }
+    let mut constants = vec![];
     for param in &f.lists[4] {
         if param.ty == Type::Token {
             continue;
@@ -235,8 +251,15 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         widths.insert(param.name.clone(), width);
         let alias = format!("$oracle.value.{}", param.name);
         widths.insert(alias.clone(), width);
-        add_state(alias, width, initial);
+        constants.push(Json::obj(vec![
+            ("alloc", s(&alias)),
+            ("width", n(width)),
+            ("class", s("any")),
+            ("state", s("clean")),
+        ]));
+        constants.push(literal(width, initial, s(alias)));
     }
+    let memory = memory::Memory::new(object, f, budget.heap, env, &mut add_state)?;
     let frames = (0..steps)
         .map(|t| {
             let name = format!("$oracle.frame{t}");
@@ -244,6 +267,40 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
             Json::obj(vec![("index", n(t)), ("frame", s(name))])
         })
         .collect();
+    if let Some(memory) = &memory {
+        let record = state
+            .iter_mut()
+            .find(|r| r.get("storage").and_then(Json::as_str) == Some("$oracle.memory"))
+            .unwrap();
+        if let Json::Obj(fields) = record {
+            fields.insert("I".into(), s(&memory.image));
+        }
+    }
+    let mut order = vec![
+        "$oracle.pc".to_string(),
+        "$oracle.next".into(),
+        "$oracle.faulted".into(),
+        "$oracle.code".into(),
+        "$oracle.result".into(),
+    ];
+    if memory.is_some() {
+        order.extend(["$oracle.used", "$oracle.atop", "$oracle.memory"].map(str::to_string));
+    }
+    order.extend(
+        crate::oracle::location_widths(f)
+            .into_iter()
+            .map(|(name, _)| name),
+    );
+    if memory.is_some() {
+        order.push("$oracle.table".into());
+    }
+    order.extend((0..steps).map(|t| format!("$oracle.frame{t}")));
+    state.sort_by_key(|record| {
+        order
+            .iter()
+            .position(|name| record.get("storage").and_then(Json::as_str) == Some(name))
+            .unwrap()
+    });
     let instantiated = rows
         .iter()
         .map(|i| {
@@ -286,6 +343,15 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
     for (k, i) in rows.iter().enumerate() {
         let mut row = vec![];
         let mut next = vec![literal(p, n(k + 1), s("$next"))];
+        let flag = range("$frame", q - p - 1, 1);
+        if let Some(memory) = &memory
+            && let Some(effect) =
+                memory.row(i, &widths, &frame_slots, flag.clone(), sig.fault, env)?
+        {
+            templates.push(template(q, effect));
+            successors.push(next_template(q, p, fault_next(p, count, k + 1, flag)));
+            continue;
+        }
         match i.op.as_str() {
             "lift.oracle_call" | "lift.oracle_uncall" => {
                 let emitted_call = call(object, i, env)?;
@@ -479,6 +545,19 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
             ("body", Json::Arr(next)),
         ]));
     }
+    if !constants.is_empty() {
+        for t in &mut templates {
+            if let Json::Obj(fields) = t {
+                let Json::Arr(body) = fields.get_mut("body").unwrap() else {
+                    unreachable!()
+                };
+                let mut wrapped = constants.clone();
+                wrapped.append(body);
+                wrapped.push(inv(constants.clone()));
+                *body = wrapped;
+            }
+        }
+    }
     let mut result = Json::Arr(vec![invoke(
         "oracle.construct",
         vec![
@@ -543,4 +622,39 @@ pub(super) fn call(object: &Object, i: &Instr, env: &Bindings) -> Result<Json, S
             Json::Arr(vec![invoke(&i.op, vec![s(hash), Json::Arr(actuals)])]),
         ),
     ]))
+}
+
+fn template(q: usize, body: Vec<Json>) -> Json {
+    Json::obj(vec![
+        (
+            "parameters",
+            Json::Arr(vec![Json::obj(vec![
+                ("name", s("$frame")),
+                ("type", s("wire")),
+                ("width", n(q)),
+            ])]),
+        ),
+        ("body", Json::Arr(body)),
+    ])
+}
+fn next_template(q: usize, p: usize, body: Vec<Json>) -> Json {
+    let mut t = template(q, body);
+    if let Json::Obj(ref mut fields) = t
+        && let Json::Arr(params) = fields.get_mut("parameters").unwrap()
+    {
+        params.push(Json::obj(vec![
+            ("name", s("$next")),
+            ("type", s("wire")),
+            ("width", n(p)),
+        ]));
+    }
+    t
+}
+fn fault_next(p: usize, halt: usize, success: usize, flag: Json) -> Vec<Json> {
+    vec![
+        under(flag.clone(), vec![literal(p, n(halt), s("$next"))]),
+        flip(flag.clone()),
+        under(flag.clone(), vec![literal(p, n(success), s("$next"))]),
+        flip(flag),
+    ]
 }

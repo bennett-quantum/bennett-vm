@@ -10,12 +10,12 @@ fn error(s: impl std::fmt::Display) -> String {
     format!("§11: E_SCHEDULE_INFEASIBLE: {s}")
 }
 /// Oracle coordinates at one invocation level. Non-step support has no step.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Coordinate {
     pub step: Option<usize>,
     pub phase: String,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Point {
     pub symbol: String,
     pub point: String,
@@ -88,8 +88,21 @@ impl Selector {
             .take(self.path.len().min(op.path.len().saturating_sub(1)))
             .filter_map(|p| p.oracle.as_ref())
             .next_back();
-        let step = entered.map_or(op.step, |c| c.step);
-        let phase = entered.map_or(op.phase.as_str(), |c| c.phase.as_str());
+        let nonstep_support = self.path.len() == op.path.len()
+            && op
+                .path
+                .last()
+                .is_some_and(|p| ["$construct", "$commit", "$release"].contains(&p.point.as_str()));
+        let step = if nonstep_support {
+            None
+        } else {
+            entered.map_or(op.step, |c| c.step)
+        };
+        let phase = if nonstep_support {
+            ""
+        } else {
+            entered.map_or(op.phase.as_str(), |c| c.phase.as_str())
+        };
         self.path.len() <= op.path.len()
             && self.path.iter().zip(&op.path).all(|(p, q)| {
                 p.symbol == q.symbol
@@ -273,11 +286,11 @@ pub fn object_schedule(obj: &Object) -> Result<Option<Json>, String> {
         .ok_or(error("schedule line missing"))?;
     json::parse(raw).map(Some)
 }
-struct SourcePoint<'a> {
-    instruction: &'a crate::object::Instr,
-    loops: Vec<usize>,
+pub(crate) struct SourcePoint<'a> {
+    pub(crate) instruction: &'a crate::object::Instr,
+    pub(crate) loops: Vec<usize>,
 }
-fn points(f: &crate::object::Function) -> Vec<(String, SourcePoint<'_>)> {
+pub(crate) fn points(f: &crate::object::Function) -> Vec<(String, SourcePoint<'_>)> {
     fn walk<'a>(v: &'a [crate::object::Instr], loops: &[usize], out: &mut Vec<SourcePoint<'a>>) {
         for i in v {
             out.push(SourcePoint {
@@ -369,9 +382,16 @@ fn validate_path(
             }
         }
         if p.point.starts_with('$') {
-            if f.kind != FnKind::Oracle
-                || !["$construct", "$step", "$commit", "$release"].contains(&p.point.as_str())
-            {
+            let allowed = match f.kind {
+                FnKind::Oracle => {
+                    ["$construct", "$step", "$commit", "$release"].contains(&p.point.as_str())
+                }
+                FnKind::Action | FnKind::PermAction if object.isa == "0.9" => {
+                    ["$construct", "$release"].contains(&p.point.as_str())
+                }
+                _ => false,
+            };
+            if !allowed {
                 return Err(error("invalid reserved support point"));
             }
             if p.iteration.as_ref().is_some_and(|v| !v.is_empty())
@@ -420,13 +440,119 @@ fn validate_path(
 /// Preliminary source checks. Concrete 0.9 consumers additionally validate the
 /// bound library's occurrence domains with `validate_bound_entries`.
 pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
-    validate_entries_mode(doc, object, ids, None)
+    validate_entries_mode(doc, object, ids, None, false)
+}
+/// Check embedded source structure without guessing realised call occurrences.
+/// Action-local support is fixed at entry/exit, so direct action invocation
+/// chains also provide concrete tie witnesses without expanding user bodies.
+pub(crate) fn validate_embedded_support(
+    doc: &Json,
+    object: &Object,
+    ids: &Identities,
+) -> Result<(), String> {
+    // Path structure and payloads are independent of final K80 occurrences.
+    validate_entries_mode(doc, object, ids, None, true)?;
+    let entries = arr(field(doc, "entries")?)?
+        .iter()
+        .map(|e| {
+            let kind = match string(field(e, "kind")?)? {
+                "gate" => OperationKind::Gate,
+                "alloc" => OperationKind::Alloc,
+                "start" => OperationKind::Start,
+                "cleanup" => OperationKind::Cleanup,
+                _ => return Err(error("invalid entry kind")),
+            };
+            Ok((kind, Selector::parse(e)?))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let root = string(field(field(doc, "bindings")?, "region")?)?;
+    let plans = crate::ref_library::action_support::plans(object, ids)?;
+    for (_, selector) in &entries {
+        let Some(last) = selector.path.last() else {
+            continue;
+        };
+        let Some(plan) = plans.get(&last.symbol) else {
+            continue;
+        };
+        let kinds = match last.point.as_str() {
+            "$construct" => &plan.construct,
+            "$release" => &plan.release,
+            _ => continue,
+        };
+        let Some(path) = direct_action_path(selector, root, object, ids) else {
+            continue;
+        };
+        for (generated, &kind) in kinds.iter().enumerate() {
+            let op = Operation {
+                path: path.clone(),
+                generated,
+                kind,
+                ..Default::default()
+            };
+            for decision in [
+                OperationKind::Gate,
+                OperationKind::Alloc,
+                OperationKind::Start,
+            ] {
+                select_kind(&entries, &op, decision)?;
+            }
+        }
+    }
+    Ok(())
+}
+fn direct_action_path(
+    selector: &Selector,
+    root: &str,
+    object: &Object,
+    ids: &Identities,
+) -> Option<Vec<Point>> {
+    if ids.interface.get(root)? != &selector.path.first()?.symbol {
+        return None;
+    }
+    let mut path = vec![];
+    for (index, p) in selector.path.iter().enumerate() {
+        let (name, _) = ids.interface.iter().find(|(_, h)| **h == p.symbol)?;
+        let f = object.function(name)?;
+        if !matches!(
+            f.kind,
+            crate::object::FnKind::Action | crate::object::FnKind::PermAction
+        ) {
+            return None;
+        }
+        let mut point = Point {
+            symbol: p.symbol.clone(),
+            point: p.point.clone(),
+            ..Default::default()
+        };
+        if let Some(next) = selector.path.get(index + 1) {
+            let source = points(f).into_iter().find(|(n, _)| n == &p.point)?.1;
+            if source.loops.contains(&0) {
+                return None;
+            }
+            if !["action_call", "ctl", "adj"].contains(&source.instruction.op.as_str()) {
+                return None;
+            }
+            point.iteration = p
+                .iteration
+                .clone()
+                .unwrap_or_else(|| vec![0; source.loops.len()]);
+            let targets = semantic_targets(source.instruction);
+            let (call, _) = targets.iter().enumerate().find(|(n, target)| {
+                p.call_index.is_none_or(|c| c == *n)
+                    && ids.interface.get(**target) == Some(&next.symbol)
+            })?;
+            point.call_index = Some(call);
+        }
+        path.push(point);
+    }
+    Some(path)
 }
 fn validate_entries_mode(
     doc: &Json,
     object: &Object,
     ids: &Identities,
     calls: Option<&crate::ref_library::BoundCalls>,
+    defer_occurrences: bool,
 ) -> Result<(), String> {
     let check = || -> Result<(), String> {
         keys(doc, &["bindings", "entries"])?;
@@ -486,7 +612,13 @@ fn validate_entries_mode(
                 }
                 _ => unreachable!(),
             }
-            validate_path(&selector, doc, object, ids, calls.is_some())?;
+            validate_path(
+                &selector,
+                doc,
+                object,
+                ids,
+                calls.is_some() || defer_occurrences,
+            )?;
             if let Some(calls) = calls {
                 validate_bound_path(&selector, doc, object, ids, calls)?;
             }
@@ -521,7 +653,7 @@ pub fn validate_bound_entries(
     if ids.interface != source_ids.interface || ids.closure != source_ids.closure {
         return Err(error("semantic-call source identities mismatch"));
     }
-    validate_entries_mode(doc, source, source_ids, Some(calls))
+    validate_entries_mode(doc, source, source_ids, Some(calls), false)
 }
 
 fn path_matches(path: &[PathSelector], points: &[Point], indices: bool) -> bool {

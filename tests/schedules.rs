@@ -286,6 +286,27 @@ fn every_published_h_scenario_is_retained_with_loud_library_refusal() {
                 refusal.contains("§11") && refusal.contains("E_SCHEDULE_INFEASIBLE"),
                 "{sentence}: {refusal}"
             );
+        } else if case.get("unavailable").is_none()
+            && let Some(command) = case.get("command")
+        {
+            assert_eq!(command, &j(r#"["check","{object}"]"#));
+            let file = case.get("object").unwrap().as_str().unwrap();
+            let text = std::fs::read_to_string(dir.join(file)).unwrap();
+            let result = bennett_vm::load(&text, false);
+            let exit = case
+                .get("expect")
+                .unwrap()
+                .get("exit")
+                .unwrap()
+                .as_usize()
+                .unwrap();
+            if exit == 0 {
+                result.unwrap();
+            } else {
+                assert_eq!(exit, 1, "{sentence}");
+                let error = result.unwrap_err();
+                assert!(error.contains("§11"), "{sentence}: {error}");
+            }
         } else {
             let refusal = sched::require_library(None).unwrap_err();
             assert!(refusal.contains("b-isa-spec-8r4"), "{sentence}: {refusal}");
@@ -293,7 +314,8 @@ fn every_published_h_scenario_is_retained_with_loud_library_refusal() {
         checked += 1;
     }
     assert_eq!(
-        checked, 10,
+        checked,
+        std::fs::read_dir(root.join("H")).unwrap().count(),
         "all published H scenarios, including request-only cases"
     );
 }

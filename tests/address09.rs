@@ -69,6 +69,45 @@ fn k52_reads_last_entered_oracle_only_for_proper_prefix() {
     assert_eq!(sched::select(&[root], &op).unwrap(), Some(0));
 }
 #[test]
+fn k83_support_uses_wildcards_locally_and_retains_ancestor_oracle_coordinates() {
+    let mut oracle = point("entry:4");
+    oracle.call_index = Some(0);
+    oracle.oracle = Some(Coordinate {
+        step: Some(3),
+        phase: "rev".into(),
+    });
+    let mut caller = point("entry:2");
+    caller.call_index = Some(0);
+    for support in ["$construct", "$release"] {
+        let local = point(support);
+        let op = Operation {
+            path: vec![oracle.clone(), caller.clone(), local.clone()],
+            step: Some(1),
+            phase: "fwd".into(),
+            ..Default::default()
+        };
+        let ancestor = selector(path(&oracle, j("[]"), j("0")), j("3"), "rev", wild());
+        assert_eq!(sched::select(&[ancestor], &op).unwrap(), Some(0));
+        let mut full = path(&oracle, j("[]"), j("0")).as_arr().unwrap().clone();
+        full.extend(path(&caller, j("[]"), j("0")).as_arr().unwrap().clone());
+        full.extend(path(&local, j("[]"), wild()).as_arr().unwrap().clone());
+        for (step, phase, expected) in [
+            (wild(), "*", Some(0)),
+            (j("3"), "*", None),
+            (wild(), "rev", None),
+        ] {
+            assert_eq!(
+                sched::select(
+                    &[selector(Json::Arr(full.clone()), step, phase, wild())],
+                    &op
+                )
+                .unwrap(),
+                expected
+            );
+        }
+    }
+}
+#[test]
 fn k51_nonstep_and_k63_occurrences_do_not_add_specificity() {
     let mut p = point("entry:0");
     p.instance = vec![0];
@@ -206,7 +245,7 @@ fn document(symbol: &str, point: &str, iteration: Json, instance: Json, call: Js
     ])
 }
 #[test]
-fn k64_reserved_points_only_in_oracles_and_empty_source_coordinates() {
+fn k64_k83_reserved_points_follow_region_kind_and_empty_source_coordinates() {
     let (obj, ids) = load(
         "oracle @root (x:wire[1] in) (t:wire[1]) (f:wire[4]) () ()\nregs { }\n^entry():\nlift.retval x\naction @a (x:wire[1] mut) () () () ()\n^entry():\nx x\n",
     );
@@ -227,13 +266,15 @@ fn k64_reserved_points_only_in_oracles_and_empty_source_coordinates() {
                 .is_err()
             );
         }
-        assert!(
+        assert_eq!(
             sched::validate_entries(
                 &document(&ids.interface["a"], p, j("[]"), j("[]"), wild()),
                 &obj,
                 &ids
             )
-            .is_err()
+            .is_ok(),
+            ["$construct", "$release"].contains(&p),
+            "K83 action support {p}"
         );
     }
     assert!(

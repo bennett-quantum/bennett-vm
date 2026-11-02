@@ -108,7 +108,11 @@ fn implicit_qregion_support_retains_declaration_provenance() {
         .filter(|l| l.operation == "alloc" || l.operation == "release")
         .collect::<Vec<_>>();
     assert_eq!(support.len(), 2);
-    for l in support {
-        assert_eq!(l.address.as_ref().unwrap().path[0].point, "entry:0");
+    for (l, point) in support.iter().zip(["$construct", "$release"]) {
+        let a = l.address.as_ref().unwrap();
+        assert_eq!(a.path[0].point, point);
+        assert!(a.path[0].iteration.is_empty());
+        assert!(a.path[0].instance.is_empty());
+        assert_eq!(a.generated, 0);
     }
 }

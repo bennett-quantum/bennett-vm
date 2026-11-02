@@ -1,12 +1,19 @@
 //! Run the complete published harness unchanged; retain unavailable cases.
-use std::{path::Path, process::Command};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    process::Command,
+};
 
 fn run_harness(cases: &Path, mode: &str) -> (Option<i32>, String) {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let harness = repo
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/target/debug/bennett-isa-conformance");
+    let harness = std::env::var_os("BENNETT_ISA_CONFORMANCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            repo.parent()
+                .unwrap()
+                .join("bennett-isa-spec/conformance/target/debug/bennett-isa-conformance")
+        });
     let output = Command::new(&harness)
         .args(["--bin", env!("CARGO_BIN_EXE_bennett-vm"), "--cases"])
         .arg(cases)
@@ -78,18 +85,59 @@ fn unavailable_cases(report: &str, cases: &Path) -> Result<Vec<String>, String> 
     Ok(ids)
 }
 
-fn assert_rows(report: &str, unavailable: usize) {
-    for (suite, pass) in [
-        ("A", 21),
-        ("B", 35),
-        ("C", 339),
-        ("D", 7),
-        ("E", 0),
-        ("F", 33),
-        ("G", 10),
-        ("H", 0),
-        ("all", 445),
-    ] {
+// Compare every reported outcome with the entire published inventory. New
+// cases must run; an unavailable annotation never removes a case from totals.
+fn assert_rows(report: &str, cases: &Path) -> usize {
+    let mut inventory = BTreeMap::new();
+    for suite in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+        for entry in std::fs::read_dir(cases.join(suite)).unwrap() {
+            let path = entry.unwrap().path().join("case.json");
+            let case = bennett_vm::json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let id = case.get("id").unwrap().as_str().unwrap().to_owned();
+            assert!(id.starts_with(&format!("{suite}-")), "{}", path.display());
+            assert!(
+                inventory
+                    .insert(id, case.get("unavailable").is_some())
+                    .is_none()
+            );
+        }
+    }
+    let mut seen = BTreeSet::new();
+    for line in report.lines() {
+        let (outcome, rest) = if let Some(rest) = line.strip_prefix("PASS ") {
+            (false, rest)
+        } else if let Some(rest) = line.strip_prefix("UNAVAILABLE ") {
+            (true, rest)
+        } else {
+            assert!(!line.starts_with("FAIL "), "{report}");
+            continue;
+        };
+        let id = rest.split(':').next().unwrap().trim();
+        assert_eq!(
+            inventory.get(id),
+            Some(&outcome),
+            "unexpected outcome for {id}: {report}"
+        );
+        assert!(
+            seen.insert(id.to_owned()),
+            "duplicate outcome for {id}: {report}"
+        );
+    }
+    assert_eq!(
+        seen,
+        inventory.keys().cloned().collect(),
+        "omitted published case: {report}"
+    );
+    for suite in ["A", "B", "C", "D", "E", "F", "G", "H", "all"] {
+        let cases: Vec<_> = inventory
+            .iter()
+            .filter(|(id, _)| suite == "all" || id.starts_with(&format!("{suite}-")))
+            .collect();
+        let pass = cases
+            .iter()
+            .filter(|(_, unavailable)| !**unavailable)
+            .count();
+        let count = cases.len() - pass;
         let prefix = format!("| {suite} |");
         let rows: Vec<_> = report.lines().filter(|l| l.starts_with(&prefix)).collect();
         assert_eq!(rows.len(), 1, "missing/duplicate suite {suite}: {report}");
@@ -97,28 +145,17 @@ fn assert_rows(report: &str, unavailable: usize) {
         assert_eq!(columns.len(), 7, "{report}");
         assert_eq!(columns[2].parse::<usize>().unwrap(), pass, "{report}");
         assert_eq!(columns[3], "0", "{report}");
-        let count = columns[4].parse::<usize>().unwrap();
+        assert_eq!(columns[4].parse::<usize>().unwrap(), count, "{report}");
         assert_eq!(
             columns[5].parse::<usize>().unwrap(),
-            pass + count,
+            cases.len(),
             "{report}"
         );
-        let actual = report
-            .lines()
-            .filter(|l| {
-                if suite == "all" {
-                    l.starts_with("UNAVAILABLE ")
-                } else {
-                    l.starts_with(&format!("UNAVAILABLE {suite}-"))
-                }
-            })
-            .count();
-        assert_eq!(count, actual, "{report}");
-        if suite == "all" {
-            assert_eq!(count, unavailable, "{report}");
-        }
     }
-    assert!(!report.lines().any(|l| l.starts_with("FAIL ")), "{report}");
+    inventory
+        .values()
+        .filter(|unavailable| !**unavailable)
+        .count()
 }
 
 fn published_cases() -> std::path::PathBuf {
@@ -136,10 +173,10 @@ fn published_conformance_report() {
         let (exit, report) = run_harness(&published_cases(), mode);
         std::fs::write(repo.join(format!(".tmp/conformance-{mode}.log")), &report).unwrap();
         let ids = unavailable_cases(&report, &published_cases()).unwrap();
-        assert_rows(&report, ids.len());
+        let available = assert_rows(&report, &published_cases());
         assert_eq!(exit, Some(if ids.is_empty() { 0 } else { 2 }), "{report}");
         println!(
-            "{mode}: 445 available cases pass; {} unavailable: {}",
+            "{mode}: {available} available cases pass; {} unavailable: {}",
             ids.len(),
             ids.join(", ")
         );
@@ -163,9 +200,36 @@ fn copy_cases(source: &Path, destination: &Path) {
 fn corrupted_unavailable_reason_is_rejected() {
     let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!(".tmp/conformance-corrupt-{}", std::process::id()));
-    copy_cases(&published_cases(), &scratch);
+    // Preserve the published conformance/cases + conformance/fixtures layout:
+    // case-local relative paths are part of the fixture contract.
+    let cases = scratch.join("conformance/cases");
+    copy_cases(&published_cases(), &cases);
+    // Copy every shared object actually referenced by a case. The fixture
+    // publication also contains producer helpers, which are not test inputs.
+    let original = published_cases().canonicalize().unwrap();
+    let conformance = original.parent().unwrap();
+    for suite in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+        for entry in std::fs::read_dir(original.join(suite)).unwrap() {
+            let dir = entry.unwrap().path();
+            let case =
+                bennett_vm::json::parse(&std::fs::read_to_string(dir.join("case.json")).unwrap())
+                    .unwrap();
+            if let Some(file) = case.get("object").and_then(|o| o.as_str()) {
+                let source = dir.join(file).canonicalize().unwrap();
+                if !source.starts_with(&original) {
+                    let destination = scratch.join("conformance").join(
+                        source
+                            .strip_prefix(conformance)
+                            .expect("published shared object must belong to conformance"),
+                    );
+                    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                    std::fs::copy(source, destination).unwrap();
+                }
+            }
+        }
+    }
     let id = "E-topology-grid-09";
-    let path = scratch.join("E").join(id).join("case.json");
+    let path = cases.join("E").join(id).join("case.json");
     let mut case = bennett_vm::json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let bennett_vm::json::Json::Obj(ref mut fields) = case else {
         panic!("{id}: case must be an object");
@@ -176,18 +240,12 @@ fn corrupted_unavailable_reason_is_rejected() {
     fields.insert("reason".into(), bennett_vm::json::Json::Str("  ".into()));
     std::fs::write(path, case.to_jcs()).unwrap();
     for mode in ["interpreter", "jit"] {
-        let (exit, report) = run_harness(&scratch, mode);
+        let (exit, report) = run_harness(&cases, mode);
         // The published binary accepts this metadata: our consumer must refuse it.
         assert_eq!(exit, Some(2), "{report}");
-        assert_rows(
-            &report,
-            report
-                .lines()
-                .filter(|l| l.starts_with("UNAVAILABLE "))
-                .count(),
-        );
+        assert_rows(&report, &cases);
         assert_eq!(
-            unavailable_cases(&report, &scratch),
+            unavailable_cases(&report, &cases),
             Err(format!(
                 "{id}: published unavailable.reason must be non-empty"
             ))

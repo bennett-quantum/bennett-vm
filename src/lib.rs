@@ -55,6 +55,11 @@ pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Id
     let ids = identity::compute(&obj)?;
     if !hash_only {
         identity::check_hashes(&obj, &ids)?;
+        if obj.isa == "0.9"
+            && let Some(doc) = sched::object_schedule(&obj)?
+        {
+            sched::validate_embedded_support(&doc, &obj, &ids)?;
+        }
     }
     Ok((obj, ids))
 }

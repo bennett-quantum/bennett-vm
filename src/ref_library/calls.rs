@@ -102,6 +102,28 @@ impl Catalog {
         args: &[Json],
         bindings: &Bindings,
     ) -> Result<(Vec<Leaf>, BoundCalls), String> {
+        if let Some(interface) = self.interfaces.get(kind) {
+            let expected = interface
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let supplied = bindings
+                .values
+                .iter()
+                .filter_map(|(name, value)| {
+                    matches!(
+                        value,
+                        Bound::Wire(_) | Bound::Allocation(_) | Bound::Region { .. }
+                    )
+                    .then_some(name.as_str())
+                })
+                .collect::<BTreeSet<_>>();
+            if supplied != expected {
+                return Err(err(
+                    "explicit named interface map must contain exactly its wire names",
+                ));
+            }
+        }
         let mut env = bindings.clone();
         env.call_domains = Rc::default();
         env.call_index = Rc::default();
@@ -109,7 +131,7 @@ impl Catalog {
         let mut out = vec![];
         self.invoke(kind, args, &env, &mut out, &mut 0, &mut vec![])?;
         resolve_lifetimes(&mut out)?;
-        let calls = BoundCalls {
+        let mut calls = BoundCalls {
             registry: env.registry.clone(),
             region: None,
             domains: env
@@ -120,6 +142,9 @@ impl Catalog {
                 .map(|d| d.domain.clone())
                 .collect(),
         };
+        if let Some(registry) = &env.registry {
+            action_support::annotate(registry, &mut out, &mut calls)?;
+        }
         Ok((out, calls))
     }
 }

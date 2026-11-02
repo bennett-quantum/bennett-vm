@@ -1,11 +1,15 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
+pub(crate) mod action_support;
 mod address;
 mod calls;
+mod named_interface;
 pub use calls::{BoundCalls, CallDomain, CallTarget};
 #[cfg(test)]
 mod call_domains_tests;
 mod cleanup;
+#[cfg(test)]
+mod named_interface_tests;
 #[cfg(test)]
 #[path = "ref_library/oracle_bindings_tests.rs"]
 mod oracle_bindings_tests;
@@ -206,6 +210,7 @@ impl Leaf {
 }
 pub struct Catalog {
     doc: Json,
+    interfaces: BTreeMap<String, Vec<String>>,
 }
 impl Catalog {
     pub fn published() -> Result<Self, String> {
@@ -245,7 +250,8 @@ impl Catalog {
             }
             syntax(field(r, "body")?)?;
         }
-        Ok(Self { doc })
+        let interfaces = named_interface::collect(&doc)?;
+        Ok(Self { doc, interfaces })
     }
     pub fn document(&self) -> &Json {
         &self.doc
@@ -290,7 +296,8 @@ impl Catalog {
         if formals.len() != args.len() {
             return Err(err(format!("{kind}: arity mismatch")));
         }
-        let mut env = bind_formals(formals, args, outer, outer)?;
+        let capture = named_interface::scope(outer, self.interfaces.get(kind).map(Vec::as_slice))?;
+        let mut env = bind_formals(formals, args, outer, &capture)?;
         env.scratch = arr(field(r, "scratch")?)?
             .iter()
             .map(|n| string(n).map(String::from))

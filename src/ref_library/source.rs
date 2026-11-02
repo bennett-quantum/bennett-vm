@@ -245,27 +245,10 @@ pub(super) fn action_body(
         .get(name)
         .ok_or_else(|| err("source interface identity missing"))?
         .clone();
-    let mut points = BTreeMap::new();
-    fn enumerate(
-        i: &Instr,
-        block: &str,
-        ordinal: &mut usize,
-        points: &mut BTreeMap<usize, String>,
-    ) {
-        points.insert(i.line, format!("{block}:{}", *ordinal));
-        *ordinal += 1;
-        for arm in &i.nested {
-            for i in arm {
-                enumerate(i, block, ordinal, points);
-            }
-        }
-    }
-    for block in &f.blocks {
-        let mut ordinal = 0;
-        for i in &block.instrs {
-            enumerate(i, &block.name, &mut ordinal, &mut points);
-        }
-    }
+    let points = crate::sched::points(f)
+        .into_iter()
+        .map(|(name, p)| (p.instruction.line, name))
+        .collect();
     let mut source = Source {
         symbol,
         points,

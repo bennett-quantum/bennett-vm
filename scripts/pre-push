@@ -1,43 +1,20 @@
 #!/usr/bin/env bash
-# Push gate (no CI): test exactly the commit being pushed (local sha from the refs
-# git supplies on stdin; HEAD when run directly) in a temporary detached worktree,
-# never the possibly dirty working tree (an editor may be mid-change while the
-# orchestrator pushes). The worktree is placed BESIDE the repo because the tests
-# resolve ../bennett-isa-spec relative to the crate. Exit status is cargo test's.
+# Push gate (no CI). Runs the [[check]]s of gate.toml on the pushed sha in a clean detached
+# worktree, with siblings at the shas pinned there. See bennett/tools/gate_README.md in the
+# meta repo. The tool is run, never imported: it is a dev tool at a pinned commit, like cargo.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
-script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-root="$(git -C "$script_dir" rev-parse --show-toplevel)"
-shas=()
-if [ ! -t 0 ]; then
-  while read -r -t 10 _ref sha _rref _rsha; do
-    case "$sha" in ''|*[!0-9a-f]*|0000000000000000000000000000000000000000) continue;; esac
-    shas+=("$sha")
-  done || true
+root="$(git -C "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" rev-parse --show-toplevel)"
+if [ "${BENNETT_GATE_HOOK_PROBE:-}" = 1 ]; then echo "bennett-gate-hook-chained $root"; exit 0; fi
+pin="$(git -C "$root" show HEAD:gate.toml 2>/dev/null)" || { echo "pre-push: HEAD has no gate.toml" >&2; exit 3; }
+tool_sha="$(sed -n 's/^tool_sha = "\([0-9a-f]\{40\}\)"$/\1/p' <<<"$pin")"
+[ -n "$tool_sha" ] || { echo "pre-push: gate.toml has no full tool_sha" >&2; exit 3; }
+common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+meta="${BENNETT_GATE_WORKSPACE:-$(dirname "$(dirname "$common")")}/bennett"
+tool="$root/.tmp/gate/tool/gate_run-$tool_sha.py"
+if [ ! -s "$tool" ]; then
+  mkdir -p "$(dirname "$tool")"
+  git -C "$meta" show "$tool_sha:tools/gate_run.py" >"$tool.$$"
+  mv "$tool.$$" "$tool"
 fi
-if [ "${#shas[@]}" -eq 0 ]; then shas=("$(git -C "$root" rev-parse HEAD)"); fi
-declare -A seen=()
-status=0
-for sha in "${shas[@]}"; do
-  sha="$(git -C "$root" rev-parse --verify "${sha}^{commit}")"
-  [ -n "${seen[$sha]:-}" ] && continue
-  seen[$sha]=1
-  wt="$(dirname "$root")/$(basename "$root")-gate-${sha:0:12}"
-  cleanup() {
-    git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
-    rm -rf "$wt"
-    git -C "$root" worktree prune
-  }
-  cleanup
-  mkdir -p "$root/.tmp/gate-target"
-  trap cleanup EXIT
-  git -C "$root" worktree add --detach "$wt" "$sha" >/dev/null
-  echo "pre-push: gating $sha in $wt" >&2
-  mkdir -p "$wt/.tmp"
-  env TMPDIR="$wt/.tmp" CARGO_TARGET_DIR="$root/.tmp/gate-target" \
-      cargo test --offline --manifest-path "$wt/Cargo.toml" || status=$?
-  cleanup
-  trap - EXIT
-  [ "$status" -eq 0 ] || break
-done
-exit "$status"
+exec python3 -I "$tool" run --repo "$root" --tool-sha "$tool_sha" "$@"

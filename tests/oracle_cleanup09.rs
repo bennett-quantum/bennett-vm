@@ -981,3 +981,225 @@ fn zero_literal_fault_causes_are_traps_in_source_execution() {
         }
     }
 }
+
+#[test]
+fn value_row_descriptors_match_the_reference_over_complete_small_inputs() {
+    use std::{collections::BTreeMap, path::PathBuf, process::Command};
+    let catalog = Catalog::published().unwrap();
+    let reference = std::env::var_os("BENNETT_ISA_REF")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref")
+        });
+    assert!(
+        reference.exists(),
+        "missing reference interpreter: {}",
+        reference.display()
+    );
+    let mut cases = vec![
+        (
+            "const".to_string(),
+            2,
+            "r = lift.const.i2 -1\nlift.retval r".to_string(),
+            2,
+        ),
+        ("mov".into(), 2, "r = lift.mov a\nlift.retval r".into(), 2),
+        (
+            "select".into(),
+            2,
+            "r = lift.select p a b\nlift.retval r".into(),
+            2,
+        ),
+        (
+            "parmov".into(),
+            2,
+            "(r, s) = lift.parmov (a, b)\nlift.retval r".into(),
+            2,
+        ),
+        (
+            "label".into(),
+            2,
+            "r = lift.label ^done\nqjump ^done\n^done():\nlift.retval r".into(),
+            3,
+        ),
+    ];
+    for op in [
+        "add", "sub", "mul", "and", "or", "xor", "shl", "lshr", "ashr", "udiv", "urem", "sdiv",
+        "srem",
+    ] {
+        cases.push((op.into(), 2, format!("r = lift.{op} a b\nlift.retval r"), 2));
+    }
+    for pred in ["eq", "ne", "ult", "ule", "slt", "sle"] {
+        cases.push((
+            format!("icmp.{pred}"),
+            1,
+            format!("r = lift.icmp.{pred} a b\nlift.retval r"),
+            2,
+        ));
+    }
+    for (op, width) in [("zext", 3), ("sext", 3), ("trunc", 1)] {
+        cases.push((
+            op.into(),
+            width,
+            format!("r = lift.{op}.i{width} a\nlift.retval r"),
+            2,
+        ));
+    }
+    assert_eq!(cases.len(), 27);
+    // The ISA spells greater-than comparisons by swapping operands, not by
+    // adding these predicates. Keep their admission guards alongside the table.
+    for pred in ["ugt", "uge", "sgt", "sge"] {
+        let invalid = support::source(&format!(
+            "oracle @root (a:wire[2] in, b:wire[2] in) (t:wire) (f:wire[4]) () ()\nregs {{ r:reg[1] }}\n^entry():\nr = lift.icmp.{pred} a b\nlift.retval r"
+        ));
+        assert!(
+            bennett_vm::load(&invalid, false)
+                .unwrap_err()
+                .contains("unknown icmp predicate")
+        );
+    }
+    for (name, width, rows, steps) in cases {
+        let text = support::source(&format!(
+            "oracle @root (a:wire[2] in, b:wire[2] in, p:wire in) (t:wire[{width}]) (f:wire[4]) () ()\nregs {{ r:reg[{width}], s:reg[2] }}\n^entry():\n{rows}"
+        ));
+        let (object, _) = bennett_vm::load(&text, false).unwrap();
+        // These §4.2 value rows have identical 0.8/0.9 semantics. Execute the
+        // same body through the reference's established 0.8 CLI profile while
+        // checking the 0.9 catalog constructor, with independently checked ids.
+        let reference_text = support::sign(&text.replace("0.9", "0.8"));
+        let path =
+            std::env::temp_dir().join(format!("oracle-row-{name}-{}.bisa", std::process::id()));
+        std::fs::write(&path, reference_text).unwrap();
+        let expanded = catalog
+            .lower_oracle_with_cleanup(
+                &object,
+                "root",
+                &json::parse("[]").unwrap(),
+                &json::parse(&format!(r#"{{"token":["{steps}","0","0","0"]}}"#)).unwrap(),
+                0,
+                &[],
+            )
+            .unwrap();
+        let mut groups = BTreeMap::<_, Vec<_>>::new();
+        for leaf in &expanded.leaves {
+            let address = leaf.address.as_ref().unwrap();
+            assert_eq!(address.path.len(), 1);
+            groups
+                .entry((
+                    address.path[0].point.clone(),
+                    address.step,
+                    address.phase.clone(),
+                ))
+                .or_default()
+                .push(address.generated);
+        }
+        for (_, mut ordinals) in groups {
+            ordinals.sort();
+            assert_eq!(
+                ordinals,
+                (0..ordinals.len()).collect::<Vec<_>>(),
+                "{name}: source-local ordinals"
+            );
+        }
+        for bits in 0..32 {
+            let (a, b, p) = (bits & 3, (bits >> 2) & 3, bits >> 4);
+            let output = Command::new(&reference)
+                .arg("run-oracle")
+                .arg(&path)
+                .arg("root")
+                .args([
+                    "--input",
+                    &format!("{a},{b},{p}"),
+                    "--budget",
+                    &steps.to_string(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result = json::parse(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+            let payload = result.get("payload").unwrap().as_big().unwrap();
+            let code = result.get("code").unwrap().as_big().unwrap();
+            let mut state = BTreeMap::new();
+            for (slot, n, value) in [
+                ("a", 2, a),
+                ("b", 2, b),
+                ("p", 1, p),
+                ("t", width, (1 << width) - 1),
+                ("f", 4, 5),
+            ] {
+                for bit in 0..n {
+                    state.insert(format!("{slot}[{bit}]"), value & (1 << bit) != 0);
+                }
+            }
+            let mut expected = state.clone();
+            for (slot, n, value) in [("t", width, payload), ("f", 4, code)] {
+                for bit in 0..n {
+                    *expected.get_mut(&format!("{slot}[{bit}]")).unwrap() ^= value.bit(bit);
+                }
+            }
+            assert_eq!(
+                replay(&expanded.leaves, state),
+                expected,
+                "{name} input {bits}"
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn fixed_pseudo_values_preserve_complete_integer_pointer_and_f64_bits() {
+    use bennett_vm::{bigint::BigUint, value::Budget};
+    for (ty, width, value, bits) in [
+        (
+            "i128",
+            128,
+            r#""340282366920938463463374607431768211455""#,
+            "340282366920938463463374607431768211455",
+        ),
+        ("ptr", 32, r#""2147483653""#, "2147483653"),
+        ("f64", 64, r#""0x8000000000000000""#, "9223372036854775808"),
+        ("f64", 64, r#""0x7ff8000000000001""#, "9221120237041090561"),
+    ] {
+        let text = support::source(&format!(
+            "oracle @root (x:wire in) (t:wire[{width}]) (f:wire[4]) () (tk:token, v:{ty})\nregs {{ r:reg[{width}] }}\n^entry():\nr = lift.mov v\nlift.retval r"
+        ));
+        let parameters = format!(r#"[["3","0","0","0"],{value}]"#);
+        let (object, _) = bennett_vm::load(&text, false).unwrap();
+        let values = bennett_vm::invocation::decode_args(
+            &json::parse(&parameters).unwrap(),
+            &object.function("root").unwrap().lists[4]
+                .iter()
+                .map(|p| p.ty.clone())
+                .collect::<Vec<_>>(),
+            object.ptr_width,
+        )
+        .unwrap();
+        let outcome = bennett_vm::oracle::run_oracle(
+            &object,
+            "root",
+            &[BigUint::zero()],
+            &mut [],
+            &values,
+            Budget {
+                steps: 2,
+                heap: 0,
+                stack: 0,
+                depth: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.payload,
+            BigUint::parse_decimal(bits).unwrap(),
+            "{ty} {value}"
+        );
+        assert!(outcome.code.is_zero());
+        assert_map(&text, &parameters, [2, 0, 0, 0], &[("x", 1)], 2);
+    }
+}

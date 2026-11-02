@@ -1,7 +1,14 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
 mod address;
+mod calls;
+pub use calls::{BoundCalls, CallDomain, CallTarget};
+#[cfg(test)]
+mod call_domains_tests;
 mod cleanup;
+#[cfg(test)]
+#[path = "ref_library/oracle_bindings_tests.rs"]
+mod oracle_bindings_tests;
 mod oracle_cleanup;
 mod oracle_paths;
 mod oracle_source;
@@ -41,6 +48,7 @@ enum Bound {
     Arguments {
         hash: String,
         values: Vec<Bound>,
+        oracle_invocation: Option<Json>,
     },
     Region {
         address: usize,
@@ -88,6 +96,7 @@ pub struct Bindings {
     scratch: BTreeSet<String>,
     registry: Option<Rc<Registry>>,
     call_index: Rc<Cell<usize>>,
+    call_domains: Rc<RefCell<calls::CallCollector>>,
     active_symbols: Rc<RefCell<Vec<String>>>,
     source_point: Option<crate::sched::Point>,
     source_next: Rc<Cell<usize>>,
@@ -262,12 +271,7 @@ impl Catalog {
         args: &[Json],
         bindings: &Bindings,
     ) -> Result<Vec<Leaf>, String> {
-        let mut out = vec![];
-        let mut next = 0;
-        let mut active = vec![];
-        self.invoke(kind, args, bindings, &mut out, &mut next, &mut active)?;
-        resolve_lifetimes(&mut out)?;
-        Ok(out)
+        self.expand_with_calls(kind, args, bindings).map(|e| e.0)
     }
     fn invoke(
         &self,
@@ -325,6 +329,7 @@ impl Catalog {
                 local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
                 local.call_index = Rc::new(Cell::new(0));
                 local.source_next = Rc::new(Cell::new(0));
+                local.call_domain();
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
             } else if let Some(storage) = c.get("$oracle_storage") {
                 let mut local = env.clone();
@@ -600,6 +605,7 @@ impl Catalog {
                 let first_leaf = env.source_next.get();
                 let first_call = env.call_index.get();
                 let first_carrier = env.cleanup.carriers.borrow().len();
+                let first_domain = env.call_domains.borrow().records.len();
                 self.walk(field(c, "body")?, env, out, next, active)?;
                 if out[start..].iter().any(|l| l.event.is_some()) {
                     return Err(err("classical inverse requires retained §7.4 history"));
@@ -614,6 +620,26 @@ impl Catalog {
                     // independently formed source spaces inside callees.
                     let end_leaf = env.source_next.get();
                     let end_call = env.call_index.get();
+                    let mut domains = env.call_domains.borrow_mut();
+                    if let Some(index) = domains.index(&env.call_index) {
+                        let targets =
+                            &mut domains.records[index].domain.targets[first_call..end_call];
+                        for target in targets.iter_mut() {
+                            target.adjoint = !target.adjoint;
+                        }
+                        targets.reverse();
+                    }
+                    for domain in &mut domains.records[first_domain..] {
+                        if let Some(index) = domain
+                            .domain
+                            .path
+                            .get_mut(env.cleanup.prefix.len())
+                            .and_then(|p| p.call_index.as_mut())
+                        {
+                            *index = first_call + (end_call - 1 - *index);
+                        }
+                    }
+                    drop(domains);
                     for l in &mut out[start..] {
                         if let Some(a) = &mut l.address {
                             if a.path.len() == 1 {
@@ -727,6 +753,7 @@ impl Catalog {
                 let mut callee = if let Some(Bound::Arguments {
                     hash: bound,
                     values,
+                    oracle_invocation,
                 }) = args.as_str().and_then(|n| env.values.get(n))
                 {
                     if bound != &hash {
@@ -738,14 +765,17 @@ impl Catalog {
                         .zip(values)
                         .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
                         .collect::<Result<_, String>>()?;
+                    bindings.oracle_invocation = oracle_invocation.clone();
                     bindings
                 } else {
-                    bind_formals(&formals, arr(args)?, env, &Bindings::new())?
+                    let mut bindings = bind_formals(&formals, arr(args)?, env, &Bindings::new())?;
+                    bindings.oracle_invocation = env.oracle_invocation.clone();
+                    bindings
                 };
                 callee.registry = Some(registry.clone());
-                callee.oracle_invocation = env.oracle_invocation.clone();
                 callee.coordinate = env.coordinate.clone();
                 callee.cleanup = env.cleanup.clone();
+                callee.call_domains = env.call_domains.clone();
                 if let Some(caller) = &env.source_point {
                     let mut edge = caller.clone();
                     edge.iteration = env.source_iterations.clone();
@@ -759,6 +789,11 @@ impl Catalog {
                     return Err(err("cyclic symbol expansion"));
                 }
                 let call_index = env.call_index.get();
+                env.call_target(CallTarget {
+                    interface: registry.identities.interface[name].clone(),
+                    closure: hash.clone(),
+                    adjoint,
+                });
                 env.call_index.set(call_index + 1);
                 callee.active_symbols.borrow_mut().push(hash.clone());
                 let start = out.len();
@@ -832,25 +867,115 @@ impl Catalog {
         Ok(())
     }
 }
+/// Ownership before traversal direction is applied. Kind and the semantic
+/// adjoint bit describe execution direction, so neither is an identity field.
+#[derive(Clone, Copy)]
+struct LifetimeOrigin<'a>(&'a Leaf);
+impl PartialEq for LifetimeOrigin<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for LifetimeOrigin<'_> {}
+impl PartialOrd for LifetimeOrigin<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for LifetimeOrigin<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        type PointKey<'a> = (
+            &'a str,
+            &'a str,
+            &'a [usize],
+            &'a [usize],
+            Option<usize>,
+            Option<(Option<usize>, &'a str)>,
+        );
+        fn point(p: &crate::sched::Point) -> PointKey<'_> {
+            (
+                &p.symbol,
+                &p.point,
+                &p.iteration,
+                &p.instance,
+                p.call_index,
+                p.oracle.as_ref().map(|o| (o.step, o.phase.as_str())),
+            )
+        }
+        let (a, b) = (self.0, other.0);
+        let address = match (&a.address, &b.address) {
+            (Some(a), Some(b)) => a
+                .path
+                .iter()
+                .map(point)
+                .cmp(b.path.iter().map(point))
+                .then_with(|| {
+                    (a.step, &a.phase, a.generated).cmp(&(b.step, &b.phase, b.generated))
+                }),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        address
+            .then_with(|| {
+                a.invocation
+                    .iter()
+                    .map(|c| (&c.closure_hash, c.call_index))
+                    .cmp(b.invocation.iter().map(|c| (&c.closure_hash, c.call_index)))
+            })
+            .then_with(|| a.ordinal.cmp(&b.ordinal))
+    }
+}
+
 fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
     // Raw inverse puts the acquire-side scratch mark on the closing leaf.
     // Pair by declaration identity before assigning physical occurrences.
     let mut open = BTreeMap::new();
     let mut marked = BTreeSet::new();
+    let mut origins = BTreeMap::new();
     for (i, l) in leaves.iter().enumerate() {
         if l.operation == "alloc" {
-            if open.insert(l.allocation.clone(), i).is_some() {
+            let id = l
+                .allocation
+                .as_deref()
+                .ok_or_else(|| err("allocation identity missing"))?;
+            if open.insert(id, i).is_some() {
                 return Err(err("double acquisition"));
             }
         } else if l.operation == "release" {
-            let start = open
-                .remove(&l.allocation)
-                .ok_or_else(|| err("unmatched release"))?;
+            let id = l
+                .allocation
+                .as_deref()
+                .ok_or_else(|| err("release identity missing"))?;
+            let start = open.remove(id).ok_or_else(|| err("unmatched release"))?;
             if l.scratch || leaves[start].scratch {
                 marked.insert(start);
             }
+            // Either endpoint may become the acquire under raw inverse. Their
+            // unordered ownership pair determines the same forward lifetime.
+            let origin = LifetimeOrigin(&leaves[start]).min(LifetimeOrigin(l));
+            if origins.insert((id, origin), start).is_some() {
+                return Err(err("duplicate allocation occurrence origin"));
+            }
         }
     }
+    for (id, start) in open {
+        if origins
+            .insert((id, LifetimeOrigin(&leaves[start])), start)
+            .is_some()
+        {
+            return Err(err("duplicate allocation occurrence origin"));
+        }
+    }
+    // Compact names, sorted by immutable ownership rather than the emitted
+    // traversal order. Keys borrow the trace so large circuits need no copied
+    // source paths or hashes per allocation.
+    let actuals = origins
+        .values()
+        .enumerate()
+        .map(|(rank, &start)| (start, format!("$alloc{rank}")))
+        .collect::<BTreeMap<_, _>>();
+    drop(origins);
 
     let mut wires = BTreeMap::<String, String>::new();
     let mut live = BTreeMap::<String, (String, Option<String>, Option<String>, bool, usize)>::new();
@@ -868,7 +993,7 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
             if leaf.scratch && leaf.state.as_deref() != Some("clean") {
                 return Err(err("library scratch must be clean"));
             }
-            let actual = format!("$alloc{index}");
+            let actual = actuals[&index].clone();
             live.insert(
                 id.clone(),
                 (
@@ -1017,6 +1142,7 @@ fn bind_formals(
                 if let Some(Bound::Arguments {
                     hash: bound,
                     values,
+                    oracle_invocation,
                 }) = a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if bound != hash {
@@ -1025,9 +1151,24 @@ fn bind_formals(
                     Bound::Arguments {
                         hash: hash.clone(),
                         values: values.clone(),
+                        oracle_invocation: oracle_invocation.clone(),
                     }
                 } else {
-                    let formals = source::interface(&registry.object, registry.name(hash)?)?;
+                    let name = registry.name(hash)?;
+                    let oracle_invocation = if registry
+                        .object
+                        .function(name)
+                        .is_some_and(|f| f.kind == crate::object::FnKind::Oracle)
+                    {
+                        oracle_source::invocation_budget(
+                            &registry.object,
+                            outer.oracle_invocation.as_ref(),
+                        )?;
+                        outer.oracle_invocation.clone()
+                    } else {
+                        None
+                    };
+                    let formals = source::interface(&registry.object, name)?;
                     let bindings = bind_formals(&formals, arr(a)?, outer, &Bindings::new())?;
                     let values = formals
                         .iter()
@@ -1036,6 +1177,7 @@ fn bind_formals(
                     Bound::Arguments {
                         hash: hash.clone(),
                         values,
+                        oracle_invocation,
                     }
                 }
             }

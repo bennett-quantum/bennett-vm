@@ -88,6 +88,7 @@ impl Bindings {
         self.source_point = other.source_point.clone();
         self.source_next = other.source_next.clone();
         self.call_index = other.call_index.clone();
+        self.call_domains = other.call_domains.clone();
         self.source_iterations = other.source_iterations.clone();
         self.reverse_iterations = other.reverse_iterations;
         self.replaying_cleanup = other.replaying_cleanup;
@@ -162,6 +163,7 @@ impl Catalog {
         env.source_next = space.next.clone();
         env.call_index = space.calls.clone();
         env.source_iterations.clear();
+        env.call_domain();
         Ok(())
     }
 }

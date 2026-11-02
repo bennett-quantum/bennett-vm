@@ -132,10 +132,12 @@ impl Catalog {
         env.add_controls(wires(&text("$controls"), &env)?);
         env.link(object)?;
         let body = action_body(object, name, adjoint, &mut env)?;
-        let leaves = self.expand("adj", &[body], &env)?;
+        let (leaves, mut calls) = self.expand_with_calls("adj", &[body], &env)?;
+        calls.region = Some(name.into());
         let cleanups = env.cleanup.carriers.borrow().clone();
         Ok(ActionExpansion {
             leaves,
+            calls,
             cleanups,
             cleanup_pairing_complete: !env.cleanup.incomplete.get(),
         })
@@ -199,7 +201,7 @@ pub(super) fn action_body(
     let f = object
         .function(name)
         .ok_or_else(|| err("unresolved linked action"))?;
-    if f.kind == FnKind::Oracle && env.oracle_invocation.is_some() {
+    if f.kind == FnKind::Oracle {
         return super::oracle_source::body(object, name, env);
     }
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction) {

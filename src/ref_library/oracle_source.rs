@@ -56,7 +56,7 @@ fn staged(i: &Instr) -> String {
 impl Catalog {
     /// Instantiate source-derived oracle rows and support. The context is K77's
     /// explicit record, separate from declared args; this is not raw descriptor
-    /// admission or a realised schedule. Remaining row adapters fail explicitly.
+    /// admission or a realised schedule.
     #[allow(clippy::too_many_arguments)]
     pub fn lower_oracle_with_cleanup(
         &self,
@@ -126,24 +126,31 @@ impl Catalog {
         env.wire("$controls", inherited_controls);
         env.add_controls(wires(&s("$controls"), &env)?);
         let body = body(object, name, &mut env)?;
-        let leaves = self.expand("adj", &[body], &env)?;
+        let (leaves, mut calls) = self.expand_with_calls("adj", &[body], &env)?;
+        calls.region = Some(name.into());
         let cleanups = env.cleanup.carriers.borrow().clone();
         Ok(ActionExpansion {
             leaves,
+            calls,
             cleanups,
             cleanup_pairing_complete: !env.cleanup.incomplete.get(),
         })
     }
 }
 
-pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Json, String> {
-    let context = env
-        .oracle_invocation
-        .as_ref()
-        .ok_or_else(|| err("missing oracle_invocation source context"))?;
+pub(super) fn invocation_budget(
+    object: &Object,
+    context: Option<&Json>,
+) -> Result<crate::value::Budget, String> {
+    let context = context.ok_or_else(|| err("missing oracle_invocation source context"))?;
     keys(context, &["token"])?;
     let budget = crate::invocation::decode_budget(field(context, "token")?)?;
     crate::cliargs::validate_budget(object, &budget)?;
+    Ok(budget)
+}
+
+pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Json, String> {
+    let budget = invocation_budget(object, env.oracle_invocation.as_ref())?;
     let f = object
         .function(name)
         .ok_or_else(|| err("source oracle missing"))?;

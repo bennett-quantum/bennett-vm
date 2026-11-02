@@ -322,6 +322,87 @@ pub struct RegionWires {
     pub w: usize,
 }
 
+fn bundle_shapes(bundles: &[Vec<usize>], widths: &[usize]) -> bool {
+    bundles.len() == widths.len() && bundles.iter().zip(widths).all(|(ws, n)| ws.len() == *n)
+}
+
+fn region_shapes(regions: &[RegionWires], shapes: &[(usize, usize, String)]) -> bool {
+    regions.len() == shapes.len()
+        && regions.iter().zip(shapes).all(|(r, (a, w, _))| {
+            r.a == *a
+                && r.w == *w
+                && u32::try_from(*a).ok().and_then(|a| 1usize.checked_shl(a)) == Some(r.cells.len())
+                && r.cells.iter().all(|c| c.len() == *w)
+        })
+}
+
+fn disjoint_interface(
+    all: impl Iterator<Item = usize>,
+    modified: impl Iterator<Item = usize>,
+    controls: &[usize],
+) -> bool {
+    let mut seen = BTreeSet::new();
+    all.into_iter().all(|w| seen.insert(w)) && modified.into_iter().all(|w| !controls.contains(&w))
+}
+
+/// Runtime binding checks use denoted wires, including aliases with different
+/// handle names. Controls may overlap read-only slots, never modified slots.
+pub(crate) fn action_binding_valid(
+    sig: &crate::validate::ActionSig,
+    muts: &[Vec<usize>],
+    inputs: &[Vec<usize>],
+    regions: &[RegionWires],
+    controls: &[usize],
+) -> bool {
+    bundle_shapes(muts, &sig.muts)
+        && bundle_shapes(inputs, &sig.ins)
+        && region_shapes(regions, &sig.mem)
+        && disjoint_interface(
+            muts.iter().chain(inputs).flatten().copied().chain(
+                regions
+                    .iter()
+                    .flat_map(|r| r.cells.iter().flatten().copied()),
+            ),
+            muts.iter().flatten().copied().chain(
+                regions
+                    .iter()
+                    .zip(&sig.mem)
+                    .filter(|(_, (_, _, role))| role == "mut")
+                    .flat_map(|(r, _)| r.cells.iter().flatten().copied()),
+            ),
+            controls,
+        )
+}
+
+pub(crate) fn oracle_binding_valid(
+    sig: &crate::validate::OracleSig,
+    inputs: &[Vec<usize>],
+    target: &[usize],
+    fault: &[usize],
+    regions: &[RegionWires],
+    controls: &[usize],
+) -> bool {
+    bundle_shapes(inputs, &sig.ins)
+        && target.len() == sig.tgt
+        && fault.len() == sig.fault
+        && region_shapes(regions, &sig.mem)
+        && disjoint_interface(
+            inputs
+                .iter()
+                .flatten()
+                .copied()
+                .chain(target.iter().copied())
+                .chain(fault.iter().copied())
+                .chain(
+                    regions
+                        .iter()
+                        .flat_map(|r| r.cells.iter().flatten().copied()),
+                ),
+            target.iter().chain(fault).copied(),
+            controls,
+        )
+}
+
 /// Apply the oracle XOR to the authoritative exact state in either calling tier.
 /// Outcomes depend only on projected inputs and memory, so superpositions of
 /// target/fault/control spectators reuse the same bounded oracle execution.
@@ -338,6 +419,13 @@ pub(crate) fn execute_oracle_inner(
     budget: Budget,
     pred: &[usize],
 ) -> Result<(), String> {
+    let sig = crate::validate::oracle_sig(obj, callee)?;
+    if !oracle_binding_valid(&sig, in_bundles, target, fault, mem_regions, pred) {
+        return Err(diag(
+            "3.3",
+            "invalid oracle wire binding (width, shape or overlap)",
+        ));
+    }
     let mut first_error: Option<String> = None;
     let mut outcomes: OutcomeCache = Default::default();
     state.map_basis(|k| {
@@ -1609,6 +1697,13 @@ pub fn execute_action_with_idle(
         crate::object::FnKind::Action | crate::object::FnKind::PermAction
     ) {
         return Err(diag("5.3", format!("@{name} is not an action")));
+    }
+    let sig = crate::validate::action_sig(obj, name)?;
+    if !action_binding_valid(&sig, muts, ins_b, mems, inherited_pred) {
+        return Err(diag(
+            "3.3",
+            "invalid action wire binding (width, shape or overlap)",
+        ));
     }
     let certificate_budget = args
         .iter()

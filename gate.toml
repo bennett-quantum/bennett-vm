@@ -1,0 +1,31 @@
+# Push-gate pins (bennett/tools/gate_README.md). Siblings resolve only to these commits.
+schema = 1
+repo = "bennett-vm"
+tool_sha = "c698ce1c56d33fdae36624b8616d673a8836679a"
+timeout_s = 14400
+
+[env]
+CARGO_TARGET_DIR = "{root}/.tmp/gate-target"
+
+[[check]]
+name = "cargo test"
+argv = ["cargo", "test", "--offline"]
+
+[siblings."bennett-isa-spec"]
+sha = "ecaaac060c44e317d1181345fa6b8e38c096c099"
+note = "ISA main as gated by the 2026-11-02 push wave"
+
+[[siblings."bennett-isa-spec".build]]
+name = "reference interpreter (debug)"
+cwd = "reference-interpreter"
+argv = ["cargo", "build", "--offline"]
+outputs = ["reference-interpreter/target/debug/bennett-isa-ref"]
+env = { CARGO_BUILD_JOBS = "4" }
+
+[[siblings."bennett-isa-spec".build]]
+name = "published conformance harness (debug)"
+cwd = "conformance"
+argv = ["cargo", "build", "--offline"]
+outputs = ["conformance/target/debug/bennett-isa-conformance"]
+env = { CARGO_BUILD_JOBS = "4" }
+

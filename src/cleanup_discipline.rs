@@ -16,7 +16,7 @@
 use crate::{
     object::{FnKind, Function, Instr, Object, Type},
     qvalidate::{flip, wires},
-    validate::{action_sig, err, list_operand, oracle_sig},
+    validate::{action_sig, err, list_operand},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -477,14 +477,13 @@ impl Analysis<'_> {
         let mut xs = i.operands.as_slice();
         let mut op = i.op.as_str();
         let mut control = None;
-        let mut adjoint = false;
         if op == "ctl" {
             control = Some(xs[0].clone());
             op = &xs[1];
             xs = &xs[2..];
         }
+        // Direction does not matter here: a call's outputs become unknown either way.
         if op == "adj" {
-            adjoint = true;
             op = &xs[0];
             xs = &xs[1..];
         }

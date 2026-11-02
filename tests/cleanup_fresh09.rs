@@ -782,10 +782,10 @@ fn earlier_conditional_iterations_are_replayed_without_new_cleanup_carriers() {
 
 #[test]
 fn else_history_does_not_substitute_the_temporarily_inverted_predicate() {
-    let functions = "action @root (x:wire mut) (p:wire in) () () ()\n^entry():\nd = qcopy p\nqif p {\n} {\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\n}\nquncopy p d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    let functions = "action @root (x:wire mut) (p:wire in) () () ()\nregs {  } bounds {0}\n^entry():\nd = qcopy p\nqif p {\nqloop 0 {\nx x\n}\n} {\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\n}\nquncopy p d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
     let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:3","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
+        let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:5","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
         let error = Catalog::published()
             .unwrap()
             .lower_action_with_cleanup(
@@ -816,7 +816,7 @@ fn else_history_does_not_substitute_the_temporarily_inverted_predicate() {
 
 #[test]
 fn replayed_independent_branch_histories_do_not_reapply_cleanup_policy() {
-    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in, q:wire in) () () ()\n^entry():\nd = qcopy x\nqif q {\ncx z d\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\ncx z d\n} {\nx d\nx d\n}\nqif p {\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\n} {\n}\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire in, q:wire in) () () ()\nregs {  } bounds {0}\n^entry():\nd = qcopy x\nqif q {\ncx z d\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\ncx z d\n} {\nx d\nx d\n}\nqif p {\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\n} {\nqloop 0 {\nx x\n}\n}\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
     for adjoint in [false, true] {
         let e = recompute(functions, "entry:10", adjoint);
         assert_eq!(

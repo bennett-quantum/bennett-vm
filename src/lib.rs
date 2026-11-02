@@ -56,9 +56,22 @@ pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Id
     }
     let ids = identity::compute(&obj)?;
     if !hash_only {
+        check_oracle_pairs(&obj)?;
         identity::check_hashes(&obj, &ids)?;
     }
     Ok((obj, ids))
+}
+
+/// §5.5 at load. `load(_, true)` omits it because it also re-reads an object already
+/// loaded when binding addresses, where `oracle_cleanup_pairs` decides the pairing
+/// value-precisely; the `hash` command runs it separately.
+pub fn check_oracle_pairs(obj: &object::Object) -> Result<(), String> {
+    for f in &obj.functions {
+        if matches!(f.kind, object::FnKind::Oracle | object::FnKind::Lproc) {
+            call_matching::function(f)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

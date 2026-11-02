@@ -3,6 +3,10 @@
 //! `mem` operands; matching no call on some path, different calls on different
 //! paths, or a row between the pair writing one of its `ins` is ill-formed.
 //! An intervening `lift.store` is not: its address is data.
+//!
+//! A `qjumpr` target is a run-time value, so a function with one is left to the
+//! value-precise pairing of `ref_library`'s `oracle_cleanup_pairs`: the paths this
+//! CFG would add are not all paths the program has.
 use crate::{
     object::{Function, Instr},
     validate::{err, list_operand},
@@ -104,7 +108,7 @@ pub(crate) fn function(f: &Function) -> Result<(), String> {
         starts.insert(block.name.as_str(), rows.len());
         rows.extend(&block.instrs);
     }
-    if rows.is_empty() || !rows.iter().any(|i| i.op == "lift.oracle_uncall") {
+    if !rows.iter().any(|i| i.op == "lift.oracle_uncall") || rows.iter().any(|i| i.op == "qjumpr") {
         return Ok(());
     }
     let label = |target: &str| -> Result<usize, String> {
@@ -115,17 +119,11 @@ pub(crate) fn function(f: &Function) -> Result<(), String> {
             .copied()
             .ok_or_else(|| err("3.6", format!("unknown block {target} in @{}", f.name)))
     };
-    let labelled = rows
-        .iter()
-        .filter(|i| i.op == "lift.label")
-        .map(|i| label(&i.operands[0]))
-        .collect::<Result<Vec<_>, _>>()?;
     let successors = |row: usize| -> Result<Vec<usize>, String> {
         let ins = rows[row];
         Ok(match ins.op.as_str() {
             "qjump" => vec![label(&ins.operands[0])?],
             "qbranch" => vec![label(&ins.operands[1])?, label(&ins.operands[2])?],
-            "qjumpr" => labelled.clone(),
             "lift.retval" | "lift.ret" | "fault" => vec![],
             _ if row + 1 < rows.len() => vec![row + 1],
             _ => vec![],

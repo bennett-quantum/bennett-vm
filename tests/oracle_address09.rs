@@ -166,7 +166,9 @@ fn paired_source(rows: &str) -> bennett_vm::object::Object {
     let text = support::source(&format!(
         "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, other:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4], fs:reg[4], pc:reg[4], offset:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
     ));
-    bennett_vm::load(&text, false).unwrap().0
+    // Parsed only: these pairs test the address-binding stage, which must refuse
+    // them on its own; ill-formed ones are refused earlier by load (§5.5).
+    bennett_vm::object::parse(&text).unwrap()
 }
 
 #[test]

@@ -1228,7 +1228,11 @@ fn cc_oracle_xor_budgets_controls_and_arguments() {
 
 /// A signed object at `version` ("0.8" or "0.9") in a per-test file.
 fn signed_object(label: &str, version: &str, functions: &str) -> String {
-    let text = source09::source_at(version, functions);
+    let mut text = source09::source_at(version, functions);
+    if functions.contains("region[") {
+        text.push_str("\nsection layout\n{\"A_tab\":2,\"H\":6,\"S_cells\":4,\"globals\":{},\"heap_base\":32,\"heap_limit_max\":32,\"interface_regions\":{},\"null_size\":16,\"ptr_width\":32}\n");
+        text = source09::sign(&text);
+    }
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(".tmp")
         .join(format!("{label}-{version}-{}.bisa", std::process::id()));
@@ -1585,7 +1589,11 @@ fn launch_reverse_accepts_failed_runs_at_0_9() {
         ("0.9", "measured", NOT_REVERSIBLE),
         ("0.8", "nested", INVALID),
     ] {
-        let text = source09::source_at(version, functions);
+        let mut text = source09::source_at(version, functions);
+        if functions.contains("region[") {
+            text.push_str("\nsection layout\n{\"A_tab\":2,\"H\":6,\"S_cells\":4,\"globals\":{},\"heap_base\":32,\"heap_limit_max\":32,\"interface_regions\":{},\"null_size\":16,\"ptr_width\":32}\n");
+            text = source09::sign(&text);
+        }
         unsafe {
             let mut p = std::ptr::null_mut();
             let status = bennett_load(text.as_ptr(), text.len(), std::ptr::null(), 0, &mut p);
@@ -1692,7 +1700,27 @@ fn measurement_draws_compare_exact_born_weights() {
 
 /// bennett-vm-ffj: ill-formed under the text at both versions. Each is rejected
 /// at load by every command that loads an object.
-const ILL_FORMED: [(&str, &str, &str); 19] = [
+const ILL_FORMED: [(&str, &str, &str); 23] = [
+    (
+        "unclosed-predicate",
+        "§3.",
+        "action @main (t:wire[2] mut) () () () ()\n^entry():\nqpred t[0]\nx t[1]",
+    ),
+    (
+        "qregion-name",
+        "§4.8",
+        "action @main (t:wire mut) () () () ()\n^entry():\nqregion 2 2 8\nx t",
+    ),
+    (
+        "row-after-trap",
+        "§3.4",
+        "fn r @main () (r0:i8) () () ()\n^entry():\ntrap\nv = const.i8 0\nret v",
+    ),
+    (
+        "qfree-entangled-in-arm",
+        "§6.2",
+        "action @main (t:wire[3] mut) () () () ()\n^entry():\nqif t[0] {\nw = qalloc any 1\ncx t[1] w\nqfree w\n} {\nx t[2]\n}",
+    ),
     (
         "retval-undeclared",
         "§3.7",

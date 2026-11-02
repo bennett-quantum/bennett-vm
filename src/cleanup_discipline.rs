@@ -8,9 +8,11 @@
 //! A value with `other` provenance (§6.1) additionally requires that nothing live
 //! read its current version (§6.1 dependency-set test).
 //!
-//! An opcode this analysis does not model leaves the function to the run-time
-//! `qfree` cleanliness check, as does a `qloop` whose state never repeats within
-//! `MAX_LOOP_VISITS`: verdicts here are only ever rejections with a cited rule.
+//! Verdicts here are only rejections with a cited rule; the analysis stays out of
+//! what it cannot decide. A write under a predicate, through a region call or by an
+//! exchange makes its wires unknown, an opcode it does not model or a `qloop` whose
+//! state never repeats within `MAX_LOOP_VISITS` ends it for the function, and the
+//! run-time `qfree` cleanliness check remains in all cases.
 use crate::{
     object::{FnKind, Function, Instr, Object, Type},
     qvalidate::{flip, wires},
@@ -33,9 +35,8 @@ type Read = (Wire, Version, u64);
 #[derive(Clone, PartialEq)]
 struct Creation {
     kind: &'static str,
-    sources: Vec<String>,
     reads: Vec<Read>,
-    controls: Vec<(Wire, bool, Version, u64)>,
+    controls: Vec<(Wire, bool)>,
     /// Window-closing counts of the read wires at the computation.
     closures: Vec<(Wire, u64)>,
 }
@@ -118,6 +119,8 @@ struct State {
     epochs: BTreeMap<Wire, u64>,
     closed: BTreeMap<Wire, u64>,
     phases: Vec<Event>,
+    /// Written in a way this analysis does not follow: never a rejection.
+    unknown: BTreeSet<Wire>,
 }
 
 struct Analysis<'a> {
@@ -174,7 +177,10 @@ impl State {
             .collect())
     }
     fn clean(&self, name: &str) -> Result<bool, Stop> {
-        Ok(self.bundle(name)?.iter().all(|w| self.version(w) == CLEAN))
+        Ok(self
+            .bundle(name)?
+            .iter()
+            .all(|w| self.version(w) == CLEAN || self.unknown.contains(w)))
     }
     fn produce(&mut self, name: &str, width: usize, creation: Creation) -> Outcome {
         if self.env.contains_key(name) {
@@ -191,6 +197,7 @@ impl State {
         for w in self.bundle(name)? {
             self.logs.remove(&w);
             self.closed.remove(&w);
+            self.unknown.remove(&w);
         }
         self.env.remove(name);
         self.created.remove(name);
@@ -255,6 +262,20 @@ impl Analysis<'_> {
         other: bool,
     ) -> Outcome {
         self.saw_other |= other;
+        // Under predicates, only values born in this same context are followed.
+        let controls = s.control_wires()?;
+        let same_context = outputs
+            .iter()
+            .all(|w| s.created.get(&w.0).is_some_and(|c| c.controls == controls));
+        if !s.predicates.is_empty() && !same_context {
+            s.unknown.extend(outputs.iter().cloned());
+            if other {
+                for w in outputs {
+                    *s.closed.entry(w.clone()).or_default() += 1;
+                }
+            }
+            return Ok(());
+        }
         let key = self.key(s, op, rest, direct)?;
         let reads = self.reads(s, direct)?;
         let event = self.tables.event(key);
@@ -381,6 +402,10 @@ impl Analysis<'_> {
         rest: String,
     ) -> Outcome {
         let op = i.op.as_str();
+        if !s.predicates.is_empty() {
+            s.unknown.extend(targets);
+            return Ok(());
+        }
         let (forward, inverse): (String, Option<String>) = if op == "rz" {
             let angle = &i.operands[0];
             (
@@ -465,113 +490,66 @@ impl Analysis<'_> {
         }
         let name = xs[0].trim_start_matches('@');
         let callee = self.obj.function(name);
-        if control.is_some() {
-            s.predicates.push((control.clone().unwrap(), true));
+        if let Some(control) = &control {
+            s.predicates.push((control.clone(), true));
         }
         let cells = |r: &str| (r.to_string(), CELLS);
-        let (outputs, reads, kind, inverse_kind, other) = if op == "action_call" {
-            let Ok(sig) = action_sig(self.obj, name) else {
+        let mut outputs = vec![];
+        let mut other = false;
+        if op == "action_call" {
+            let (Ok(sig), Some(callee)) = (action_sig(self.obj, name), callee) else {
                 return Err(Stop::Unmodelled);
             };
-            let mut outputs = vec![];
             for n in list_operand(&xs[1])? {
                 outputs.extend(s.bundle(&n)?);
             }
-            let mut reads = vec![];
-            for n in list_operand(&xs[2])? {
-                reads.extend(s.bundle(&n)?);
-            }
             for (n, (_, _, role)) in list_operand(&xs[3])?.iter().zip(&sig.mem) {
-                if role == "in" {
-                    reads.push(cells(n));
-                } else {
+                if role != "in" {
                     outputs.push(cells(n));
                 }
             }
-            let Some(callee) = callee else {
-                return Err(Stop::Unmodelled);
-            };
-            let other = callee.kind == FnKind::Action;
-            let (forward, backward) = if adjoint {
-                ("call_adj", "call_fwd")
-            } else {
-                ("call_fwd", "call_adj")
-            };
-            (outputs, reads, forward, backward, other)
+            other = callee.kind == FnKind::Action;
         } else if op == "oracle_call" {
-            let Ok(sig) = oracle_sig(self.obj, name) else {
-                return Err(Stop::Unmodelled);
-            };
-            let mut outputs = s.bundle(&xs[3])?;
+            outputs.extend(s.bundle(&xs[3])?);
             outputs.extend(s.bundle(&xs[4])?);
-            let mut reads = vec![];
-            for n in list_operand(&xs[2])? {
-                reads.extend(s.bundle(&n)?);
-            }
-            for (n, _) in list_operand(&xs[5])?.iter().zip(&sig.mem) {
-                reads.push(cells(n));
-            }
-            (outputs, reads, "oracle_call", "oracle_call", false)
         } else {
             return Err(Stop::Unmodelled);
-        };
-        let rest = xs.join(" ");
-        self.change(
-            s,
-            kind,
-            &rest,
-            Some((inverse_kind, rest.as_str())),
-            &outputs,
-            &reads,
-            other,
-        )?;
-        for w in outputs.iter().filter(|w| w.1 == CELLS) {
-            *s.epochs.entry(w.clone()).or_default() += 1;
+        }
+        self.saw_other |= other;
+        for w in &outputs {
+            s.unknown.insert(w.clone());
+            if other {
+                *s.closed.entry(w.clone()).or_default() += 1;
+            }
+            if w.1 == CELLS {
+                *s.epochs.entry(w.clone()).or_default() += 1;
+            }
         }
         if control.is_some() {
             s.predicates.pop();
         }
         Ok(())
     }
-    fn creation(
-        &self,
-        s: &State,
-        kind: &'static str,
-        sources: Vec<String>,
-        deps: &[Wire],
-    ) -> Result<Creation, Stop> {
+    fn creation(&self, s: &State, kind: &'static str, deps: &[Wire]) -> Result<Creation, Stop> {
         let mut read_wires: BTreeSet<Wire> = deps.iter().cloned().collect();
         read_wires.extend(s.control_wires()?.into_iter().map(|(w, _)| w));
         Ok(Creation {
             kind,
-            sources,
             reads: read_wires.iter().map(|w| s.read(w)).collect(),
-            controls: s.controls()?,
+            controls: s.control_wires()?,
             closures: read_wires
                 .iter()
                 .map(|w| (w.clone(), s.closed.get(w).copied().unwrap_or(0)))
                 .collect(),
         })
     }
-    /// A cleanup's reads, controls and window against the computing sequence.
-    fn outside_window(
-        &self,
-        s: &State,
-        name: &str,
-        kind: &'static str,
-        sources: &[String],
-        deps: &[Wire],
-    ) -> Result<bool, Stop> {
+    /// A cleanup after its inverse event: its value clean, under the computing
+    /// sequence's controls, with no window closed since.
+    fn outside_window(&self, s: &State, name: &str) -> Result<bool, Stop> {
         let Some(c) = s.created.get(name) else {
             return Ok(true);
         };
-        let now = self.creation(s, kind, sources.to_vec(), deps)?;
-        Ok(c.kind != kind
-            || c.sources != now.sources
-            || c.reads != now.reads
-            || c.controls != now.controls
-            || !s.clean(name)?
-            || s.window_closed(c))
+        Ok(c.controls != s.control_wires()? || !s.clean(name)? || s.window_closed(c))
     }
     fn sequence(&mut self, s: &mut State, body: &[Instr]) -> Outcome {
         for i in body {
@@ -613,13 +591,15 @@ impl Analysis<'_> {
                 } else {
                     "qborrow"
                 };
-                let creation = self.creation(s, kind, vec![], &[])?;
+                let creation = self.creation(s, kind, &[])?;
                 s.produce(&i.lhs[0], width, creation)
             }
             "qfree" => {
                 match s.created.get(&a[0]) {
-                    None => return Err(Stop::Reject(err("3.3", "release of non-workspace value"))),
-                    Some(c) if c.kind != "qalloc" => {
+                    None => {
+                        return Err(Stop::Reject(err("3.3", "release of non-workspace value")));
+                    }
+                    Some(c) if c.kind == "qborrow" => {
                         return Err(Stop::Reject(err("5.1", "allocation/release kind mismatch")));
                     }
                     Some(_) => {}
@@ -633,16 +613,23 @@ impl Analysis<'_> {
                 s.consume(&a[0])
             }
             "qreturn" => s.consume(&a[0]),
+            // §4.5: a copy is the XOR of its source into a clean bundle, so a
+            // matching `qxor` or `quncopy` is its inverse.
             "qcopy" => {
                 let source = s.bundle(&a[0])?;
-                let creation = self.creation(s, "qcopy", vec![a[0].clone()], &source)?;
-                s.produce(&i.lhs[0], source.len(), creation)
+                let creation = self.creation(s, "qcopy", &source)?;
+                s.produce(&i.lhs[0], source.len(), creation)?;
+                let rest = format!("{} {}", a[0], i.lhs[0]);
+                let target = s.bundle(&i.lhs[0])?;
+                let undo = Some(("qxor", rest.as_str()));
+                self.change(s, "qxor", &rest, undo, &target, &source, false)
             }
             "quncopy" => {
-                let source = s.bundle(&a[0])?;
-                if !s.created.contains_key(&a[1])
-                    || self.outside_window(s, &a[1], "qcopy", &[a[0].clone()], &source)?
-                {
+                let (source, target) = (s.bundle(&a[0])?, s.bundle(&a[1])?);
+                let rest = a.join(" ");
+                let undo = Some(("qxor", rest.as_str()));
+                self.change(s, "qxor", &rest, undo, &target, &source, false)?;
+                if self.outside_window(s, &a[1])? {
                     return Err(Stop::Reject(err(
                         "6.2",
                         "quncopy outside its computing window",
@@ -661,82 +648,67 @@ impl Analysis<'_> {
                 };
                 let mut deps = self.memory_address(s, &a[1])?;
                 deps.push((a[0].clone(), CELLS));
-                let creation = self.creation(s, "qload", a.clone(), &deps)?;
-                s.produce(&i.lhs[0], width, creation)
+                let creation = self.creation(s, "qload", &deps)?;
+                s.produce(&i.lhs[0], width, creation)?;
+                let rest = format!("{} {} {}", a[0], a[1], i.lhs[0]);
+                let target = s.bundle(&i.lhs[0])?;
+                let undo = Some(("qload", rest.as_str()));
+                self.change(s, "qload", &rest, undo, &target, &deps, false)
             }
             "qunload" => {
                 let mut deps = self.memory_address(s, &a[1])?;
                 deps.push((a[0].clone(), CELLS));
-                if !s.created.contains_key(&a[2])
-                    || self.outside_window(s, &a[2], "qload", &a[..2], &deps)?
-                {
+                let target = s.bundle(&a[2])?;
+                let rest = a.join(" ");
+                let undo = Some(("qload", rest.as_str()));
+                self.change(s, "qload", &rest, undo, &target, &deps, false)?;
+                if self.outside_window(s, &a[2])? {
                     return Err(Stop::Reject(err("6.2", "qunload outside computing window")));
                 }
                 s.consume(&a[2])
             }
-            "qstore" | "qexchm" => {
+            "qstore" => {
                 let cell = (a[0].clone(), CELLS);
                 let mut reads = self.memory_address(s, &a[1])?;
-                let value = s.bundle(&a[2])?;
-                let mut outputs = vec![cell.clone()];
-                if i.op == "qstore" {
-                    reads.extend(value);
-                } else {
-                    outputs.extend(value);
-                }
-                let (op, rest) = (i.op.as_str(), a.join(" "));
+                reads.extend(s.bundle(&a[2])?);
+                let rest = a.join(" ");
+                let undo = Some(("qstore", rest.as_str()));
                 self.change(
                     s,
-                    op,
+                    "qstore",
                     &rest,
-                    Some((op, rest.as_str())),
-                    &outputs,
+                    undo,
+                    std::slice::from_ref(&cell),
                     &reads,
                     false,
                 )?;
                 *s.epochs.entry(cell).or_default() += 1;
                 Ok(())
             }
+            "qexchm" => {
+                let cell = (a[0].clone(), CELLS);
+                let value = s.bundle(&a[2])?;
+                s.unknown.extend(value);
+                s.unknown.insert(cell.clone());
+                *s.epochs.entry(cell).or_default() += 1;
+                Ok(())
+            }
             "qxor" => {
                 let (source, target) = (s.bundle(&a[0])?, s.bundle(&a[1])?);
                 let rest = a.join(" ");
-                self.change(
-                    s,
-                    "qxor",
-                    &rest,
-                    Some(("qxor", rest.as_str())),
-                    &target,
-                    &source,
-                    false,
-                )
+                let undo = Some(("qxor", rest.as_str()));
+                self.change(s, "qxor", &rest, undo, &target, &source, false)
             }
             "qexch" => {
-                let outputs = [s.bundle(&a[0])?, s.bundle(&a[1])?].concat();
-                let rest = a.join(" ");
-                self.change(
-                    s,
-                    "qexch",
-                    &rest,
-                    Some(("qexch", rest.as_str())),
-                    &outputs,
-                    &[],
-                    false,
-                )
+                let (left, right) = (s.bundle(&a[0])?, s.bundle(&a[1])?);
+                s.unknown.extend(left);
+                s.unknown.extend(right);
+                Ok(())
             }
             "qinplace" => {
                 let target = s.bundle(&a[3])?;
-                let mut reads = vec![];
-                if a.len() > 4 {
-                    for n in list_operand(&a[4])? {
-                        reads.extend(s.bundle(&n)?);
-                    }
-                }
-                let forward = a.join(" ");
-                let mut swapped = a.clone();
-                swapped.swap(0, 1);
-                let inverse = swapped.join(" ");
-                let undo = Some(("qinplace", inverse.as_str()));
-                self.change(s, "qinplace", &forward, undo, &target, &reads, false)
+                s.unknown.extend(target);
+                Ok(())
             }
             "action_call" | "oracle_call" | "adj" | "ctl" => self.call(s, i),
             op if crate::action::is_gate_name(op) => self.gate(s, i),
@@ -846,6 +818,7 @@ pub(crate) fn function(obj: &Object, f: &Function) -> Result<(), String> {
         epochs: BTreeMap::new(),
         closed: BTreeMap::new(),
         phases: vec![],
+        unknown: BTreeSet::new(),
     };
     let mut analysis = Analysis {
         obj,

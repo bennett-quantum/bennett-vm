@@ -42,7 +42,6 @@ pub fn source_at(v: &str, functions: &str) -> String {
         .functions
         .iter()
         .any(|f| f.kind == object::FnKind::Oracle && !f.lists[3].is_empty())
-        || functions.contains("region[")
     {
         let regions = obj
             .functions

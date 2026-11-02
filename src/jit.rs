@@ -84,7 +84,7 @@ pub fn selection() -> Result<Option<(Passes, bool)>, String> {
         }
     };
     Ok(match mode.as_str() {
-        "interpreter" => None,
+        "interpreter" | "dense" => None,
         "baseline" => Some((Passes::default(), false)),
         "inline" => Some((
             Passes {

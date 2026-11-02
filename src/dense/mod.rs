@@ -11,6 +11,8 @@
 //! `phase_if_all`, `swap` and `measure` mirror that exact engine; this
 //! engine's evidence kind is always `"numerical"` with the accumulated
 //! floating-point bound from `error_bound()`, never `"exhaustive"`.
+mod runtime;
+pub(crate) use runtime::Runtime;
 /// Binary64 unit roundoff, `2^-53`.
 const U: f64 = 1.110_223_024_625_156_5e-16;
 /// States smaller than this run single-threaded (spawn cost dominates).

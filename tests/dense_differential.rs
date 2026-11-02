@@ -316,3 +316,62 @@ fn selected_dense_cli_executes_bell_and_labels_numerical_evidence() {
         assert!((re - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-14);
     }
 }
+
+#[test]
+fn dense_runtime_virtualizes_wide_constant_registers_and_cleans_inverse() {
+    let mut dense = QuantumState::new_dense();
+    let wires = dense.alloc_wires(192);
+    let value = bennett_vm::bigint::BigUint::from_u64(1).shl(180);
+    dense.prepare(&wires, &value);
+    dense.apply1(129, &[], h_amp());
+    dense.flip(2, &[129]);
+    let snapshot = dense.amplitudes();
+    assert_eq!(snapshot.len(), 2);
+    assert!(snapshot.keys().all(|k| k.bit(180) && k.bit(2) == k.bit(129)));
+    assert!(dense.amps.is_empty(), "dense execution must not maintain a sparse amplitude shadow");
+    dense.flip(2, &[129]);
+    dense.apply1(129, &[], h_amp());
+    assert!(dense.is_clean(&[2, 129]));
+    assert_eq!(dense.constant_value(&wires), Some(value));
+    let evidence = dense.simulation_evidence().unwrap();
+    assert_eq!(evidence.get("kind").and_then(|v| v.as_str()), Some("numerical"));
+    // Numerical observations must never satisfy exact proof equality.
+    assert!(!dense.exact_equals(&dense.clone()));
+}
+
+#[test]
+fn dense_runtime_oracle_map_then_gate_and_measurement_reset() {
+    let mut dense = QuantumState::new_dense();
+    let mut exact = QuantumState::new();
+    dense.alloc_wires(80);
+    exact.alloc_wires(80);
+    for state in [&mut dense, &mut exact] {
+        state.apply1(0, &[], h_amp());
+        state.map_basis(|k| {
+            let mut out = k.clone();
+            if k.bit(0) { out.set_bit(70, !k.bit(70)); }
+            out
+        });
+        state.flip(70, &[]);
+    }
+    for draw in [0.1, 0.9] {
+        let mut d = dense.clone();
+        let mut e = exact.clone();
+        assert_eq!(d.measure(&[70, 0], draw), e.measure(&[70, 0], draw));
+        assert!(d.is_clean(&[0, 70]));
+        let ds = d.amplitudes();
+        assert_eq!(ds.len(), 1);
+        assert!((ds.values().next().unwrap().0 - 1.0).abs() < 1e-13);
+    }
+}
+
+#[test]
+fn dense_runtime_does_not_erase_underflow_scale_input_support() {
+    let mut state = QuantumState::new_dense();
+    state.alloc_wires(1);
+    state.set_state(BTreeMap::from([
+        (bennett_vm::bigint::BigUint::zero(), (1.0, 0.0)),
+        (bennett_vm::bigint::BigUint::from_u64(1), (1e-200, 0.0)),
+    ]));
+    assert!(!state.is_clean(&[0]), "squared-probability underflow is not exact zero support");
+}

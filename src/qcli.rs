@@ -85,7 +85,7 @@ fn bits(key: &BigUint, n: usize) -> String {
 }
 fn state_json(s: &QuantumState, n: usize) -> Json {
     Json::Obj(
-        s.amps
+        s.amplitudes()
             .iter()
             .map(|(k, a)| {
                 (
@@ -126,7 +126,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     let name = cliargs::entry_name(&o.positional[1]);
     let sig = crate::validate::action_sig(&obj, name)?;
     let f = obj.function(name).ok_or("§5.1: unresolved action")?;
-    let mut s = QuantumState::new();
+    let mut s = QuantumState::new_selected()?;
     let muts: Vec<_> = sig.muts.iter().map(|w| s.alloc_wires(*w)).collect();
     let ins: Vec<_> = sig.ins.iter().map(|w| s.alloc_wires(*w)).collect();
     let mut regions = vec![];
@@ -275,7 +275,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
             &[],
             &pool,
         )?;
-        let eq = s.exact_equals(&entry);
+        let eq = s.numerically_equals(&entry);
         fields.extend([
             ("equals_entry", Json::Bool(eq)),
             (
@@ -309,6 +309,9 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
                     .collect(),
             ),
         ));
+    }
+    if let Some(evidence) = s.simulation_evidence() {
+        fields.push(("simulation", evidence));
     }
     println!("{}", Json::obj(fields).to_jcs());
     Ok(())

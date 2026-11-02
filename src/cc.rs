@@ -1375,7 +1375,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         None => cliargs::default_budget(&obj, 1_000_000),
     };
     let mut data = Data::new(&obj)?;
-    let mut quantum = QuantumState::new();
+    let mut quantum = QuantumState::new_selected()?;
     quantum.target = target.map(std::sync::Arc::new);
     for raw in opts.all("mem") {
         let (n, h) = raw.split_once('=').ok_or("--mem requires global=hex")?;
@@ -1638,6 +1638,9 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             Json::Str(m.quantum.target_error().decimal()),
         ));
     }
+    if let Some(evidence) = m.quantum.simulation_evidence() {
+        out.push(("simulation", evidence));
+    }
     let output = Json::obj(out).to_jcs();
     if let Some(path) = tape_out {
         std::fs::write(
@@ -1797,7 +1800,7 @@ impl Resources {
     pub(crate) fn new(obj: &Object) -> Result<Self, String> {
         Ok(Self {
             data: Data::new(obj)?,
-            quantum: QuantumState::new(),
+            quantum: QuantumState::new_selected()?,
         })
     }
     pub(crate) fn set_target(&mut self, target: crate::target::Target) {

@@ -27,8 +27,11 @@ pub struct GateRequest {
 
 #[derive(Clone, Debug)]
 pub struct QuantumState {
+    /// Binary64 view for exact states. Dense diagnostics use `amplitudes()`;
+    /// dense gates never maintain a second sparse amplitude store.
     pub amps: BTreeMap<BigUint, Amp>,
     exact: BTreeMap<BigUint, Exact>,
+    dense: Option<crate::dense::Runtime>,
     next_wire: usize,
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
     pub(crate) wire_classes: crate::persistent::Map<usize, String>,
@@ -48,6 +51,7 @@ impl QuantumState {
         QuantumState {
             amps,
             exact: BTreeMap::from([(BigUint::zero(), Exact::one())]),
+            dense: None,
             next_wire: 0,
             target: None,
             wire_classes: crate::persistent::Map::new(),
@@ -60,12 +64,56 @@ impl QuantumState {
             requests: None,
         }
     }
+    /// Exact remains the default for semantic references and certificate replay.
+    /// Only execution entry points opt into the environment-selected backend.
+    pub fn new_selected() -> Result<Self, String> {
+        crate::jit::selection()?;
+        Ok(if std::env::var("BENNETT_VM_ENGINE").as_deref() == Ok("dense") {
+            Self::new_dense()
+        } else { Self::new() })
+    }
+    pub fn new_dense() -> Self {
+        let mut state = Self::new();
+        state.amps.clear();
+        state.exact.clear();
+        state.dense = Some(crate::dense::Runtime::new());
+        state
+    }
+    /// Explicit report/debug snapshot, never an automatically refreshed cache.
+    pub fn amplitudes(&self) -> BTreeMap<BigUint, Amp> {
+        self.dense.as_ref().map_or_else(|| self.amps.clone(), |d| d.snapshot())
+    }
+    pub fn simulation_evidence(&self) -> Option<crate::json::Json> {
+        self.dense.as_ref().map(|d| d.evidence(self.next_wire))
+    }
+    pub fn numerically_equals(&self, other: &Self) -> bool {
+        if self.dense.is_none() && other.dense.is_none() { return self.exact_equals(other); }
+        let mut a = self.amplitudes();
+        let b = other.amplitudes();
+        let mut distance2 = 0.0;
+        for (k, (br, bi)) in b {
+            let (ar, ai) = a.remove(&k).unwrap_or((0.0, 0.0));
+            distance2 += (ar-br).powi(2) + (ai-bi).powi(2);
+        }
+        distance2 += a.values().map(|(r, i)| r*r + i*i).sum::<f64>();
+        let bound = self.dense.as_ref().map_or(0.0, |d| d.bound())
+            + other.dense.as_ref().map_or(0.0, |d| d.bound());
+        distance2.sqrt() <= bound
+    }
     pub fn wire_count(&self) -> usize {
         self.next_wire
     }
     /// Reclaim only a clean suffix of simulator ids after actual inverse gates.
     /// This changes allocation bookkeeping, never quantum amplitudes.
     pub fn rewind_clean_wires(&mut self, boundary: usize) -> Result<(), String> {
+        if self.dense.is_some() {
+            if boundary > self.next_wire || !self.is_clean(&(boundary..self.next_wire).collect::<Vec<_>>()) {
+                return Err("§7.4: inverse left a released wire unclean".into());
+            }
+            self.dense.as_mut().unwrap().release(&(boundary..self.next_wire).collect::<Vec<_>>());
+            self.next_wire = boundary;
+            return Ok(());
+        }
         if boundary > self.next_wire
             || self
                 .amps
@@ -94,6 +142,7 @@ impl QuantumState {
             .collect();
     }
     pub fn set_state(&mut self, state: BTreeMap<BigUint, Amp>) {
+        if let Some(dense) = &mut self.dense { dense.set_state(state); return; }
         self.exact = state
             .into_iter()
             .map(|(k, (r, i))| (k, Exact::pair(r, i)))
@@ -101,10 +150,11 @@ impl QuantumState {
         self.refresh();
     }
     pub fn exact_equals(&self, other: &Self) -> bool {
-        self.exact == other.exact
+        self.dense.is_none() && other.dense.is_none() && self.exact == other.exact
     }
     /// Set basis bits on wires that start at zero in every component.
     pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
+        if let Some(dense) = &mut self.dense { dense.prepare(wires, value); return; }
         self.exact = std::mem::take(&mut self.exact)
             .into_iter()
             .map(|(mut k, a)| {
@@ -128,6 +178,7 @@ impl QuantumState {
         v
     }
     pub fn constant_value(&self, wires: &[usize]) -> Option<BigUint> {
+        if let Some(dense) = &self.dense { return dense.constant_value(wires); }
         let mut seen: Option<BigUint> = None;
         for k in self.amps.keys() {
             let v = Self::extract(k, wires);
@@ -144,6 +195,10 @@ impl QuantumState {
     }
     /// Controlled single-qubit matrix `[[a,b],[c,d]]`.
     pub fn apply1(&mut self, target: usize, controls: &[usize], m: [[Amp; 2]; 2]) {
+        if let Some(dense) = &mut self.dense {
+            dense.apply1(target, controls, m.map(|r| r.map(|(re, im)| crate::dense::Complex::new(re, im))), true);
+            return;
+        }
         let h = std::f64::consts::FRAC_1_SQRT_2;
         let m = m.map(|r| {
             r.map(|(re, im)| {
@@ -164,6 +219,12 @@ impl QuantumState {
         self.apply_exact(target, controls, m);
     }
     pub fn apply_exact(&mut self, target: usize, controls: &[usize], m: [[Exact; 2]; 2]) {
+        if let Some(dense) = &mut self.dense {
+            dense.apply1(target, controls, m.map(|r| r.map(|v| {
+                let (re, im) = v.value(); crate::dense::Complex::new(re, im)
+            })), true);
+            return;
+        }
         let mut next = BTreeMap::<BigUint, Exact>::new();
         for (k, a) in std::mem::take(&mut self.exact) {
             if !controls.iter().all(|c| k.bit(*c)) {
@@ -184,6 +245,7 @@ impl QuantumState {
     }
     /// Flip `target` where every control is 1 (permutation gate).
     pub fn flip(&mut self, target: usize, controls: &[usize]) {
+        if let Some(dense) = &mut self.dense { dense.flip(target, controls); return; }
         self.apply1(
             target,
             controls,
@@ -191,6 +253,7 @@ impl QuantumState {
         );
     }
     pub fn phase_if_all(&mut self, wires: &[usize], phase: Amp) {
+        if let Some(dense) = &mut self.dense { dense.phase(wires, crate::dense::Complex::new(phase.0, phase.1)); return; }
         for (k, a) in &mut self.exact {
             if wires.iter().all(|w| k.bit(*w)) {
                 *a = a.mul(&Exact::pair(phase.0, phase.1));
@@ -207,6 +270,7 @@ impl QuantumState {
         });
     }
     pub fn map_basis(&mut self, mut f: impl FnMut(&BigUint) -> BigUint) {
+        if let Some(dense) = &mut self.dense { dense.map_basis(f); return; }
         let mut next = BTreeMap::<BigUint, Exact>::new();
         for (k, a) in std::mem::take(&mut self.exact) {
             let nk = f(&k);
@@ -222,6 +286,7 @@ impl QuantumState {
     /// the remaining state (the handle is consumed; the post-state
     /// factorises onto the outcome).
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (BigUint, String) {
+        if let Some(dense) = &mut self.dense { return dense.measure(wires, draw); }
         let mut probs: BTreeMap<BigUint, f64> = BTreeMap::new();
         for (k, a) in &self.amps {
             *probs.entry(Self::extract(k, wires)).or_insert(0.0) += a.0 * a.0 + a.1 * a.1;
@@ -2020,6 +2085,7 @@ impl QuantumState {
         Ok(wires)
     }
     pub(crate) fn target_release(&mut self, wires: &[usize]) {
+        if let Some(dense) = &mut self.dense { dense.release(wires); }
         for w in wires {
             self.wire_classes.remove(w);
         }

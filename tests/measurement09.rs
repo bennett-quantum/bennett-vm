@@ -20,15 +20,26 @@ fn run(path: &Path, engine: &str, command: &str, entry: &str, draw: &str) -> Out
 }
 
 fn check(engine: &str, uncall: bool) {
-    let text = support::source(
-        "action @mix (q:wire mut) () () () ()\n^entry():\nh q\nfn cc @sample () (r:i1) () () ()\n^entry():\nq = qreg.new any 1\naction_call @mix (q) () () ()\nr = measure.i1 q\nret r\nfn cc @bad_uncall () () () () ()\n^entry():\nr = call @sample\nuncall @sample () (r)\nret",
-    );
+    for width in [1, 2] {
+        check_width(engine, uncall, width);
+    }
+}
+
+fn check_width(engine: &str, uncall: bool, width: usize) {
+    let gates = if width == 1 {
+        "h q[0]"
+    } else {
+        "h q[0]\ncx q[0] q[1]"
+    };
+    let text = support::source(&format!(
+        "action @mix (q:wire[{width}] mut) () () () ()\n^entry():\n{gates}\nfn cc @sample () (r:i{width}) () () ()\n^entry():\nq = qreg.new any {width}\naction_call @mix (q) () () ()\nr = measure.i{width} q\nret r\nfn cc @bad_uncall () () () () ()\n^entry():\nr = call @sample\nuncall @sample () (r)\nret",
+    ));
     let path = std::env::temp_dir().join(format!(
-        "measure09-{engine}-{uncall}-{}.bisa",
+        "measure09-{engine}-{uncall}-{width}-{}.bisa",
         std::process::id()
     ));
     std::fs::write(&path, text).unwrap();
-    for (draw, expected) in [("0.1", "0"), ("0.9", "1")] {
+    for (draw, expected) in [("0.1", "0"), ("0.9", if width == 1 { "1" } else { "3" })] {
         let out = run(&path, engine, "run-cc", "sample", draw);
         assert!(
             out.status.success(),

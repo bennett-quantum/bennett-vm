@@ -681,7 +681,7 @@ impl Machine {
             pure: pure(&ins.op) && fault.is_none(),
             reversed: false,
             marker: ins.op == "uncall" && fault.is_none(),
-            measured: ins.op == "measure" && fault.is_none(),
+            measured: ins.op.split('.').next() == Some("measure") && fault.is_none(),
         });
         self.steps += 1;
         Ok(())
@@ -995,6 +995,20 @@ impl Machine {
                     return Ok(Some(4));
                 }
                 let ws = h.wires.clone();
+                if ins.op != "measure" {
+                    let width = ins
+                        .op
+                        .strip_prefix("measure.i")
+                        .ok_or_else(|| err("invalid measurement opcode"))?
+                        .parse::<usize>()
+                        .map_err(|_| err("invalid typed measurement width"))?;
+                    if width == 0 {
+                        return Err(err("invalid typed measurement width"));
+                    }
+                    if width != ws.len() {
+                        return Ok(Some(4));
+                    }
+                }
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
                 let (v, bits) = self.quantum.measure(&ws, draw);
@@ -2087,7 +2101,11 @@ impl RuntimeRun {
     pub(crate) fn step(&mut self) -> Result<(), String> {
         let m = &mut self.machine;
         if let Some(a) = m.stack.last()
-            && m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op == "measure"
+            && m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index]
+                .op
+                .split('.')
+                .next()
+                == Some("measure")
         {
             use std::io::Read;
             let mut bs = [0u8; 8];
@@ -2238,7 +2256,7 @@ mod scaling_tests {
         );
         assert_eq!(run.machine.draw_pos, 1);
         let draw = *run.machine.draws.get(0).unwrap();
-        assert!(draw >= 0.0 && draw < 1.0);
+        assert!((0.0..1.0).contains(&draw));
         assert!(run.measured());
         assert_eq!(run.measurements().len(), 1);
         let snapshot = run.snapshot("RUNNING").unwrap();
@@ -2262,6 +2280,7 @@ mod scaling_tests {
         assert!(run.measurements().is_empty());
         assert_eq!(run.machine.draw_pos, 0);
         assert!(run.machine.quantum.exact_equals(&quantum));
+        assert!(run.machine.data.handles[&id].live);
         run.reverse_to(0).unwrap();
         assert_eq!(run.fault(), None);
         assert!(run.machine.quantum.exact_equals(&quantum));

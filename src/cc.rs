@@ -436,16 +436,13 @@ impl Machine {
             Err(4)
         }
     }
-    fn wires(&self, n: &str) -> Result<Vec<usize>, String> {
+    fn wires(&self, n: &str) -> Result<Vec<usize>, u64> {
         if let Some((base, index)) = n.split_once('[') {
-            let i: usize = index.trim_end_matches(']').parse().map_err(err)?;
+            let i: usize = index.trim_end_matches(']').parse().map_err(|_| 4u64)?;
             let ws = self.wires(base)?;
-            return ws
-                .get(i)
-                .map(|w| vec![*w])
-                .ok_or_else(|| err("wire index out of bounds"));
+            return ws.get(i).map(|w| vec![*w]).ok_or(4);
         }
-        let id = self.id(n).map_err(|_| err(format!("invalid qreg {n}")))?;
+        let id = self.id(n)?;
         Ok(self.data.handle(id).unwrap().wires.clone())
     }
     fn undo(&mut self, index: usize, control: bool) -> Result<(), String> {
@@ -1021,7 +1018,7 @@ impl Machine {
                 ]));
                 result = Some(Value::int(ws.len(), v));
             }
-            "action_call" | "oracle_call" | "adj" | "ctl" => self.region(ins)?,
+            "action_call" | "oracle_call" | "adj" | "ctl" => return self.region(ins),
             _ => return Err(format!("unimplemented: {op} (milestone 2)")),
         }
         if let Some(v) = result {
@@ -1105,13 +1102,26 @@ impl Machine {
         self.data.tape.push(event);
         Ok(None)
     }
-    fn region(&mut self, ins: &Instr) -> Result<(), String> {
+    fn region(&mut self, ins: &Instr) -> Result<Option<u64>, String> {
+        macro_rules! binding {
+            ($value:expr) => {
+                match $value {
+                    Ok(value) => value,
+                    Err(code) => return Ok(Some(code)),
+                }
+            };
+        }
         let mut xs = ins.operands.as_slice();
         let mut op = ins.op.as_str();
         let mut adjoint = false;
         let mut controls = vec![];
+        let mut used = vec![];
         if op == "ctl" {
-            controls = self.wires(&xs[0])?;
+            controls = binding!(self.wires(&xs[0]));
+            used.push(xs[0].clone());
+            if controls.len() != 1 {
+                return Ok(Some(4));
+            }
             op = &xs[1];
             xs = &xs[2..];
         }
@@ -1121,9 +1131,8 @@ impl Machine {
             xs = &xs[1..];
         }
         let name = xs[0].trim_start_matches('@').to_string();
-        let mut used = vec![];
-        let mut bundles = |text: &str| -> Result<Vec<Vec<usize>>, String> {
-            list(text)?
+        let mut bundles = |names: &[String]| -> Result<Vec<Vec<usize>>, u64> {
+            names
                 .iter()
                 .map(|n| {
                     used.push(n.clone());
@@ -1132,9 +1141,9 @@ impl Machine {
                 .collect()
         };
         let invocation = if op == "action_call" {
-            let muts = bundles(&xs[1])?;
-            let inputs = bundles(&xs[2])?;
-            let mem = bundles(&xs[3])?;
+            let muts = binding!(bundles(&list(&xs[1])?));
+            let inputs = binding!(bundles(&list(&xs[2])?));
+            let mem = binding!(bundles(&list(&xs[3])?));
             let sig = crate::validate::action_sig(&self.obj, &name)?;
             let regions = mem
                 .into_iter()
@@ -1144,7 +1153,10 @@ impl Machine {
                     a: *a,
                     w: *w,
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            if !action::action_binding_valid(&sig, &muts, &inputs, &regions, &controls) {
+                return Ok(Some(4));
+            }
             let args = self
                 .operands(&list(&xs[4])?)
                 .map_err(|_| err("invalid action argument"))?;
@@ -1158,14 +1170,29 @@ impl Machine {
                 controls,
             }
         } else if op == "oracle_call" {
-            let inputs = bundles(&xs[2])?;
-            let target = self.wires(&xs[3])?;
-            let fault = self.wires(&xs[4])?;
+            let inputs = binding!(bundles(&list(&xs[2])?));
+            let target = binding!(self.wires(&xs[3]));
+            let fault = binding!(self.wires(&xs[4]));
             let mem_names = list(&xs[5])?;
-            let mem = mem_names
+            let mem = binding!(
+                mem_names
+                    .iter()
+                    .map(|n| self.wires(n))
+                    .collect::<Result<Vec<_>, _>>()
+            );
+            let sig = crate::validate::oracle_sig(&self.obj, &name)?;
+            let regions = mem
                 .iter()
-                .map(|n| self.wires(n))
-                .collect::<Result<Vec<_>, _>>()?;
+                .zip(&sig.mem)
+                .map(|(ws, (a, w, _))| RegionWires {
+                    cells: ws.chunks(*w).map(|c| c.to_vec()).collect(),
+                    a: *a,
+                    w: *w,
+                })
+                .collect::<Vec<_>>();
+            if !action::oracle_binding_valid(&sig, &inputs, &target, &fault, &regions, &controls) {
+                return Ok(Some(4));
+            }
             used.extend([xs[3].clone(), xs[4].clone()]);
             used.extend(mem_names);
             let budget = match self.read(&xs[1]).map_err(|_| err("missing oracle token"))? {
@@ -1188,19 +1215,23 @@ impl Machine {
         } else {
             return Err(err(format!("invalid region call {op}")));
         };
+        // Resolve every ledger transition while all operands are still live.
+        // A view also used as a read-only control is consumed exactly once.
+        let handles = used
+            .iter()
+            .map(|n| self.id(&action::base_name(n)))
+            .collect::<Result<BTreeSet<_>, _>>();
+        let handles = binding!(handles);
         apply_invocation(&self.obj, &mut self.quantum, &invocation)?;
         record_quantum(&mut self.quantum_events, invocation.clone());
         self.pending_region = Some(invocation);
-        for n in used {
-            let id = self
-                .id(&action::base_name(&n))
-                .map_err(|_| err("invalid region handle"))?;
+        for id in handles {
             if let Some(parent) = self.data.handles[&id].parent {
                 self.data.handles.get_mut(&id).unwrap().live = false;
                 self.data.handles.get_mut(&parent).unwrap().viewed = false;
             }
         }
-        Ok(())
+        Ok(None)
     }
 }
 fn list(text: &str) -> Result<Vec<String>, String> {
@@ -2230,6 +2261,194 @@ thread_local! {
 #[cfg(test)]
 mod scaling_tests {
     use super::*;
+
+    fn region_object(functions: &str) -> std::sync::Arc<Object> {
+        let source = format!(
+            "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n"
+        );
+        let mut obj = crate::object::parse(&source).unwrap();
+        for (index, f) in obj.functions.clone().iter().enumerate() {
+            obj.symbols.insert(
+                f.name.clone(),
+                crate::object::Symbol {
+                    index,
+                    name: f.name.clone(),
+                    kind: f.kind.kind_str().into(),
+                    signature: Json::Null,
+                    stored_hash: "0".repeat(64),
+                },
+            );
+        }
+        for f in obj.functions.clone() {
+            let signature = crate::validate::derived_signature(&obj, &f.name).unwrap();
+            obj.symbols.get_mut(&f.name).unwrap().signature = signature;
+        }
+        std::sync::Arc::new(obj)
+    }
+
+    #[test]
+    fn region_alias_fault_preserves_quantum_and_view_ledger_then_reverses() {
+        for tier in ["cc", "r"] {
+            for call in [
+                "action_call @a (x) (y) () ()",
+                "ctl y action_call @a (x) () () ()",
+            ] {
+                let action = if call.starts_with("ctl") {
+                    "action @a (t:wire[1] mut) () () () ()\n^entry():\nx t"
+                } else {
+                    "action @a (t:wire[1] mut) (p:wire[1] in) () () ()\n^entry():\nx t"
+                };
+                let object = region_object(&format!(
+                    "{action}\nfn {tier} @main (x:qreg[*], y:qreg[*]) () () () ()\n^entry():\n{call}\nret"
+                ));
+                let mut resources = Resources::new(&object).unwrap();
+                let parent = resources.new_reg(2, "any").unwrap();
+                resources.prepare(parent, &[1, 0]);
+                let ws = resources.data.handles[&parent].wires[..1].to_vec();
+                let view = resources.data.new_handle(ws, Some(parent));
+                resources.data.handles.get_mut(&parent).unwrap().viewed = true;
+                let mut run = RuntimeRun::new(
+                    object,
+                    &resources,
+                    "main",
+                    vec![Value::Qreg(view), Value::Qreg(view)],
+                    vec![],
+                )
+                .unwrap();
+                let quantum = run.machine.quantum.clone();
+                let handles = run.machine.data.handles.clone();
+                run.step().unwrap();
+                assert_eq!(run.fault(), Some(4), "{tier}/{call}");
+                assert!(run.machine.quantum.exact_equals(&quantum));
+                assert_eq!(run.machine.data.handles, handles);
+                assert!(run.machine.quantum_events.is_empty());
+                assert!(run.machine.history[0].region.is_none());
+                run.reverse_to(0).unwrap();
+                assert_eq!(run.fault(), None);
+                assert_eq!(run.machine.data.handles, handles);
+                assert!(run.machine.quantum.exact_equals(&quantum));
+            }
+        }
+    }
+
+    #[test]
+    fn oracle_entry_rejects_aliases_and_widths_before_mapping() {
+        let object = region_object(
+            "oracle @echo (v:wire[4] in) (t:wire[4]) (fr:wire[4]) () ()\n^entry():\nlift.retval v",
+        );
+        for (inputs, target, fault, pred) in [
+            (
+                vec![vec![0, 1, 2, 3]],
+                vec![0, 1, 2, 3],
+                vec![8, 9, 10, 11],
+                vec![],
+            ),
+            (
+                vec![vec![0, 1, 2, 3]],
+                vec![4, 5, 6, 7],
+                vec![4, 5, 6, 7],
+                vec![],
+            ),
+            (
+                vec![vec![0, 1, 2, 3]],
+                vec![4, 5, 6, 7],
+                vec![8, 9, 10, 11],
+                vec![4],
+            ),
+            (
+                vec![vec![0, 1, 2, 3]],
+                vec![4, 5, 6],
+                vec![8, 9, 10, 11],
+                vec![],
+            ),
+            (
+                vec![vec![0, 1, 2, 2]],
+                vec![4, 5, 6, 7],
+                vec![8, 9, 10, 11],
+                vec![],
+            ),
+        ] {
+            let mut state = QuantumState::new();
+            state.alloc_wires(12);
+            state.prepare(&[0, 1, 2, 3], &u(1));
+            let before = state.clone();
+            assert!(
+                action::execute_oracle_inner(
+                    &object,
+                    &mut state,
+                    "echo",
+                    &inputs,
+                    &target,
+                    &fault,
+                    &[],
+                    &[],
+                    value::Budget {
+                        steps: 3,
+                        ..Default::default()
+                    },
+                    &pred
+                )
+                .is_err()
+            );
+            assert!(state.exact_equals(&before));
+        }
+    }
+
+    #[test]
+    fn region_width_and_viewed_alias_preconditions_are_atomic_faults() {
+        for viewed in [false, true] {
+            let object = region_object(
+                "action @a (t:wire[1] mut) () () () ()\n^entry():\nx t\nfn cc @main (x:qreg[*]) () () () ()\n^entry():\naction_call @a (x) () () ()\nret",
+            );
+            let mut resources = Resources::new(&object).unwrap();
+            let id = resources.new_reg(2, "any").unwrap();
+            if viewed {
+                resources.data.handles.get_mut(&id).unwrap().viewed = true;
+            }
+            let mut run =
+                RuntimeRun::new(object, &resources, "main", vec![Value::Qreg(id)], vec![]).unwrap();
+            let before = run.machine.quantum.clone();
+            let handles = run.machine.data.handles.clone();
+            run.step().unwrap();
+            assert_eq!(run.fault(), Some(4));
+            assert!(run.machine.quantum.exact_equals(&before));
+            assert_eq!(run.machine.data.handles, handles);
+            run.reverse_to(0).unwrap();
+            assert_eq!(run.fault(), None);
+        }
+    }
+
+    #[test]
+    fn region_readonly_control_view_is_consumed_once_and_restored_by_reverse() {
+        let object = region_object(
+            "action @a (t:wire[1] mut) (p:wire[1] in) () () ()\n^entry():\ncx p t\nfn cc @main (x:qreg[*], y:qreg[*]) () () () ()\n^entry():\nctl y action_call @a (x) (y) () ()\nret",
+        );
+        let mut resources = Resources::new(&object).unwrap();
+        let parent = resources.new_reg(2, "any").unwrap();
+        let target = resources.new_reg(1, "any").unwrap();
+        resources.prepare(parent, &[1, 0]);
+        let ws = resources.data.handles[&parent].wires[..1].to_vec();
+        let view = resources.data.new_handle(ws, Some(parent));
+        resources.data.handles.get_mut(&parent).unwrap().viewed = true;
+        let mut run = RuntimeRun::new(
+            object,
+            &resources,
+            "main",
+            vec![Value::Qreg(target), Value::Qreg(view)],
+            vec![],
+        )
+        .unwrap();
+        let before = run.machine.quantum.clone();
+        let handles = run.machine.data.handles.clone();
+        run.step().unwrap();
+        assert_eq!(run.fault(), None);
+        assert!(!run.machine.quantum.exact_equals(&before));
+        assert!(!run.machine.data.handles[&view].live);
+        assert!(!run.machine.data.handles[&parent].viewed);
+        run.reverse_to(0).unwrap();
+        assert_eq!(run.machine.data.handles, handles);
+        assert!(run.machine.quantum.exact_equals(&before));
+    }
 
     fn run_for(body: &str) -> RuntimeRun {
         run_for_version(body, "0.8")

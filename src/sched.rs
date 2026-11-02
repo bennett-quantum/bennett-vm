@@ -515,7 +515,13 @@ pub fn validate_bound_entries(
             "semantic-call domains are not bound to this object and region",
         ));
     }
-    validate_entries_mode(doc, object, ids, Some(calls))
+    let (source, source_ids) = calls
+        .canonical_source()
+        .ok_or_else(|| error("unbound semantic-call domains"))?;
+    if ids.interface != source_ids.interface || ids.closure != source_ids.closure {
+        return Err(error("semantic-call source identities mismatch"));
+    }
+    validate_entries_mode(doc, source, source_ids, Some(calls))
 }
 
 fn path_matches(path: &[PathSelector], points: &[Point], indices: bool) -> bool {

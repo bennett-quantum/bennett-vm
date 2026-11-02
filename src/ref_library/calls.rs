@@ -10,6 +10,7 @@ pub struct CallTarget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallDomain {
     /// The containing invocation path, ending at the owning source row.
+    /// An empty path denotes an unaddressed raw catalog scope.
     pub path: Vec<crate::sched::Point>,
     pub targets: Vec<CallTarget>,
 }
@@ -28,6 +29,12 @@ impl BoundCalls {
             .as_ref()
             .is_some_and(|r| r.object.text == object.text)
             && self.region.as_deref() == Some(region)
+    }
+    pub(crate) fn canonical_source(
+        &self,
+    ) -> Option<(&crate::object::Object, &crate::identity::Identities)> {
+        let registry = self.registry.as_ref()?;
+        Some((&registry.object, &registry.identities))
     }
 }
 #[derive(Clone, Debug)]

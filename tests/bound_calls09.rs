@@ -39,6 +39,61 @@ fn point(symbol: &str, row: &str, call: Option<u64>) -> Json {
     Json::obj(fields)
 }
 
+fn ownership_object() -> (bennett_vm::object::Object, bennett_vm::identity::Identities) {
+    let text = support::source(
+        "action @root (x:wire[1] mut) () () () ()\n^entry():\naction_call @left (x) () () ()\naction @left (w:wire[1] mut) () () () ()\nregs { } bounds {0}\n^entry():\nqloop 0 {\nx w\n}\naction @right (w:wire[1] mut) () () () ()\n^entry():\nx w",
+    );
+    bennett_vm::load(&text, false).unwrap()
+}
+
+#[test]
+fn root_source_ignores_mutated_ast_call_targets() {
+    let (mut obj, ids) = ownership_object();
+    let root = obj.functions.iter_mut().find(|f| f.name == "root").unwrap();
+    root.blocks[0].instrs[0].operands[0] = "@right".into();
+    let expansion = Catalog::published()
+        .unwrap()
+        .lower_action_with_cleanup(&obj, "root", &Json::Arr(vec![]), false, 0, &[])
+        .unwrap();
+    let domain = expansion
+        .calls
+        .domains()
+        .iter()
+        .find(|d| d.path.len() == 1 && d.path[0].symbol == ids.interface["root"])
+        .unwrap();
+    assert_eq!(
+        &domain.targets[0].closure,
+        ids.closure["left"].as_ref().unwrap()
+    );
+    assert!(expansion.leaves.is_empty());
+}
+
+#[test]
+fn root_source_rejects_forged_rows_and_identities() {
+    let (mut obj, ids) = ownership_object();
+    let expansion = Catalog::published()
+        .unwrap()
+        .lower_action_with_cleanup(&obj, "root", &Json::Arr(vec![]), false, 0, &[])
+        .unwrap();
+    let root = obj.functions.iter_mut().find(|f| f.name == "root").unwrap();
+    let mut row = root.blocks[0].instrs[0].clone();
+    row.line += 1;
+    root.blocks[0].instrs.push(row);
+    let doc = start_document(
+        Json::Arr(vec![
+            point(&ids.interface["root"], "entry:1", Some(0)),
+            point(&ids.interface["left"], "entry:0", None),
+        ]),
+        "root",
+    );
+    assert!(sched::validate_bound_entries(&doc, &obj, &ids, &expansion.calls).is_err());
+    let mut wrong_ids = ids.clone();
+    wrong_ids.interface.insert("root".into(), "f".repeat(64));
+    let doc = start_document(Json::Arr(vec![]), "root");
+    sched::validate_bound_entries(&doc, &obj, &ids, &expansion.calls).unwrap();
+    assert!(sched::validate_bound_entries(&doc, &obj, &wrong_ids, &expansion.calls).is_err());
+}
+
 #[test]
 fn bound_paths_reject_wrong_callees_indices_objects_and_unbound_domains() {
     let text = support::source(

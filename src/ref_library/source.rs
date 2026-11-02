@@ -80,6 +80,12 @@ impl Catalog {
         inherited_controls: usize,
         entries: &[CleanupEntry],
     ) -> Result<ActionExpansion, String> {
+        let mut env = Bindings::new();
+        env.link(object)?;
+        // Root formation has the same source authentication boundary as a
+        // nested call: caller-owned AST fields cannot retarget the text's hash.
+        let registry = env.registry.clone().unwrap();
+        let object = &registry.object;
         let f = object
             .function(name)
             .ok_or_else(|| err(format!("unresolved action @{name}")))?;
@@ -88,7 +94,6 @@ impl Catalog {
         }
         let types = f.lists[3].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
         crate::invocation::decode_args(params, &types, object.ptr_width)?;
-        let mut env = Bindings::new();
         env.cleanup.entries = Rc::new(entries.to_vec());
         for p in f.lists[0].iter().chain(&f.lists[1]) {
             let Type::Wire(width) = p.ty else {
@@ -130,7 +135,6 @@ impl Catalog {
         }
         env.wire("$controls", inherited_controls);
         env.add_controls(wires(&text("$controls"), &env)?);
-        env.link(object)?;
         let body = action_body(object, name, adjoint, &mut env)?;
         let (leaves, mut calls) = self.expand_with_calls("adj", &[body], &env)?;
         calls.region = Some(name.into());

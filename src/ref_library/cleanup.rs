@@ -190,8 +190,16 @@ impl Catalog {
         if let Some(names) = pair.get("live_versions") {
             for name in arr(names)? {
                 let name = string(name)?;
-                let value = env.values.get(name).ok_or_else(|| err("historical live version is unbound"))?.clone();
-                if local.values.insert(format!("$history.live.{name}"), value).is_some() {
+                let value = env
+                    .values
+                    .get(name)
+                    .ok_or_else(|| err("historical live version is unbound"))?
+                    .clone();
+                if local
+                    .values
+                    .insert(format!("$history.live.{name}"), value)
+                    .is_some()
+                {
                     return Err(err("historical live version alias collision"));
                 }
             }

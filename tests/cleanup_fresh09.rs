@@ -198,7 +198,7 @@ fn nonempty_call_recompute_restores_exact_nonzero_pre_call_inputs() {
 }
 
 #[test]
-fn copy_and_load_multirow_pairs_replace_the_entire_written_inverse() {
+fn intrinsic_copy_and_load_pairs_retain_separate_primitive_inverse_rows() {
     for load in [false, true] {
         let (compute, cleanup) = if load {
             ("d = qload db x", "qunload db x d")
@@ -213,12 +213,12 @@ fn copy_and_load_multirow_pairs_replace_the_entire_written_inverse() {
             let e = recompute(&functions, point, adjoint);
             assert!(e.cleanup_pairing_complete);
             assert_eq!(e.cleanups.len(), 1);
-            // The first written inverse row must disappear in recompute too.
+            // K81 keeps the primitive inverse outside the intrinsic cleanup.
             let old_inverse = if adjoint { "entry:1" } else { "entry:2" };
             assert!(
                 e.leaves
                     .iter()
-                    .all(|l| l.address.as_ref().unwrap().path[0].point != old_inverse)
+                    .any(|l| l.address.as_ref().unwrap().path[0].point == old_inverse)
             );
             for bits in 0..16 {
                 let mut state = std::collections::BTreeMap::from([
@@ -896,11 +896,27 @@ fn completed_bounded_while_history_reconstructs_released_condition_bundle() {
 
 #[test]
 fn earlier_memory_versions_are_reconstructed_without_changing_the_live_region() {
+    // This checks symbolic history formation and scratch restoration only.
+    // A restored memory value does not restore its cell version or admit this
+    // whole source region: the separate §6.2 admission check must reject the
+    // later qunload after a cell-version advance, even for equal final bytes.
     let functions = "action @root (a:wire mut, z:wire mut) () (r:region[1,1] mut) () ()\n^entry():\nd = qload r a\ng = qalloc any 1\nqstore r a z\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqstore r a z\nqfree g\nqunload r a d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
     for adjoint in [false, true] {
-        let e = recompute(functions, if adjoint { "entry:3" } else { "entry:4" }, adjoint);
+        let e = recompute(
+            functions,
+            if adjoint { "entry:3" } else { "entry:4" },
+            adjoint,
+        );
         for bits in 0..16 {
-            replay_identity(&e, &[("a[0]", bits & 1 != 0), ("z[0]", bits & 2 != 0), ("r[0]", bits & 4 != 0), ("r[1]", bits & 8 != 0)]);
+            replay_identity(
+                &e,
+                &[
+                    ("a[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("r[0]", bits & 4 != 0),
+                    ("r[1]", bits & 8 != 0),
+                ],
+            );
         }
     }
 }
@@ -909,7 +925,26 @@ fn earlier_memory_versions_are_reconstructed_without_changing_the_live_region() 
 fn historical_external_changes_retain_proven_live_owned_control_versions() {
     let functions = "action @root (x:wire mut) (q:wire in) () () ()\n^entry():\nd = qcopy x\np = qcopy q\ng = qalloc any 1\nqpred p\nx x\nqunpred p\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqpred p\nx x\nqunpred p\nqfree g\nquncopy q p\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
     for adjoint in [false, true] {
-        let e = recompute(functions, if adjoint { "entry:6" } else { "entry:7" }, adjoint);
+        let e = recompute(
+            functions,
+            if adjoint { "entry:6" } else { "entry:7" },
+            adjoint,
+        );
+        for bits in 0..4 {
+            replay_identity(&e, &[("x[0]", bits & 1 != 0), ("q[0]", bits & 2 != 0)]);
+        }
+    }
+}
+
+#[test]
+fn historical_external_changes_reconstruct_mutated_live_owned_controls() {
+    let functions = "action @root (x:wire mut) (q:wire in) () () ()\n^entry():\nd = qcopy x\np = qcopy q\ng = qalloc any 1\nqpred p\nx x\nqunpred p\nx p\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nx p\nqpred p\nx x\nqunpred p\nqfree g\nquncopy q p\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:7" } else { "entry:8" },
+            adjoint,
+        );
         for bits in 0..4 {
             replay_identity(&e, &[("x[0]", bits & 1 != 0), ("q[0]", bits & 2 != 0)]);
         }

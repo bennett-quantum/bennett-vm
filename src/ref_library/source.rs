@@ -1,6 +1,7 @@
 //! Source formation from this consumer's parsed objects and the published ISA.
 use super::*;
 use crate::object::{FnKind, Instr, Object, Type};
+mod partition;
 
 fn text(s: impl Into<String>) -> Json {
     Json::Str(s.into())
@@ -757,7 +758,9 @@ impl Source {
                 source.widths.insert(alias.clone(), width);
                 let live = if step.live_versions.contains(&name) {
                     format!("$history.live.{name}")
-                } else { name.clone() };
+                } else {
+                    name.clone()
+                };
                 snapshots.push((live, alias.clone(), width));
                 aliases.insert(name, alias);
             }
@@ -780,7 +783,9 @@ impl Source {
                 .collect::<Vec<_>>();
             body.extend(rollback.clone());
             let mut row_aliases = aliases.clone();
-            for name in &step.live_versions { row_aliases.remove(name); }
+            for name in &step.live_versions {
+                row_aliases.remove(name);
+            }
             body.extend(scoped(
                 &source,
                 &step.row,
@@ -820,7 +825,7 @@ impl Source {
         adjoint: bool,
         env: &Bindings,
     ) -> Option<CallInputs> {
-        // Generated traversal projects enclosing fixed-loop/branch histories
+        // Generated traversal projects enclosing fixed/while-loop and branch histories
         // into this domain first. Predicate slices still retain the enclosing
         // prefix, including acquisitions before the lexical scope.
         let history = if self.history.iter().any(|i| i.line == compute.line) {
@@ -905,12 +910,17 @@ impl Source {
                 acquisitions.iter().cloned().collect()
             };
             if index >= compute_at || outputs.is_disjoint(&needed) {
-                if outputs.iter().any(|n| !owned.contains(n)) {
+                if !outputs.is_empty() && acquisitions.is_empty() {
                     if external_changes.last().is_some_and(|(next, scopes, at)| {
                         let mut reads = Self::references(i);
                         reads.extend(predicates.iter().map(|n| base(n)));
-                        *scopes == predicates && Self::inverse_rows(i, next)
-                            && prefix[index + 1..*at].iter().all(|row| Self::outputs(row, env).iter().all(|n| !reads.contains(&base(n))))
+                        *scopes == predicates
+                            && Self::inverse_rows(i, next)
+                            && prefix[index + 1..*at].iter().all(|row| {
+                                Self::outputs(row, env)
+                                    .iter()
+                                    .all(|n| !reads.contains(&base(n)))
+                            })
                     }) {
                         external_changes.pop();
                     } else {
@@ -940,23 +950,25 @@ impl Source {
                     return None;
                 }
                 fn lifetime_change(i: &Instr, name: &str) -> bool {
-                    (matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload") && i.lhs.first().is_some_and(|n| n == name))
-                        || (matches!(i.op.as_str(), "qfree" | "qreturn" | "qregion") && i.operands.first().is_some_and(|n| n == name))
+                    (matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload")
+                        && i.lhs.first().is_some_and(|n| n == name))
+                        || (matches!(i.op.as_str(), "qfree" | "qreturn" | "qregion")
+                            && i.operands.first().is_some_and(|n| n == name))
                         || (i.op == "quncopy" && i.operands.get(1).is_some_and(|n| n == name))
                         || (i.op == "qunload" && i.operands.get(2).is_some_and(|n| n == name))
                         || i.nested.iter().flatten().any(|i| lifetime_change(i, name))
                 }
                 for name in refs.iter().filter(|n| owned.contains(*n)) {
-                    // A live owned dependency is an exact witness only if its
-                    // captured version survives through this cleanup, and is
-                    // outside the call's mutable targets. Keep that binding
+                    // A live owned lifetime supplies a basis snapshot, outside
+                    // the call's mutable targets. Later version changes enter
+                    // this same inverse slice; a released/reacquired lifetime
+                    // cannot supply the captured value. Keep this live binding
                     // distinct from the fresh reconstructed owned history.
                     if targets.iter().any(|n| base(n) == *name)
                         || !env.values.contains_key(name)
-                        || prefix[at + 1..].iter().any(|row| {
-                            Self::outputs(row, env).iter().any(|n| base(n) == *name)
-                                || lifetime_change(row, name)
-                        })
+                        || prefix[at + 1..]
+                            .iter()
+                            .any(|row| lifetime_change(row, name))
                     {
                         return None;
                     }
@@ -1002,6 +1014,7 @@ impl Source {
                 return None;
             }
             selected.insert(index);
+            let is_acquisition = !acquisitions.is_empty();
             for n in acquisitions {
                 needed.remove(&n);
                 acquired.insert(n);
@@ -1011,6 +1024,9 @@ impl Source {
                     && !acquisition(i, n)
                     && !(i.op == "qregion" && i.operands.first() == Some(n))
             }));
+            if !is_acquisition && !outputs.is_empty() {
+                external_changes.push((i, predicates.clone(), index));
+            }
         }
         if !needed.is_empty() || targets.iter().any(|n| !acquired.contains(&base(n))) {
             return None;
@@ -1093,7 +1109,8 @@ impl Source {
         let mut known = BTreeMap::new();
         branches(&self.history, cleanup_line, &mut known);
         // Only read-only conditions prove the same arm in earlier iterations.
-        // Mutable predicates retain the general version-reconstruction obligation.
+        // Mutable predicates replay their actual conditional on reconstructed
+        // historical selector versions instead of specializing the current arm.
         known.retain(|name, _| self.readonly.contains(name));
         let domain = HistoryDomain {
             iterations: &env.source_iterations,
@@ -1167,7 +1184,18 @@ impl Source {
                 Json::Arr(targets.iter().map(text).collect()),
             );
             let initialising = if let Some(steps) = inputs.versioned {
-                p.insert("live_versions".into(), Json::Arr(steps.iter().flat_map(|s| s.live_versions.iter().cloned()).collect::<BTreeSet<_>>().iter().map(text).collect()));
+                p.insert(
+                    "live_versions".into(),
+                    Json::Arr(
+                        steps
+                            .iter()
+                            .flat_map(|s| s.live_versions.iter().cloned())
+                            .collect::<BTreeSet<_>>()
+                            .iter()
+                            .map(text)
+                            .collect(),
+                    ),
+                );
                 self.versioned_input_history(&steps, adjoint, env)?
             } else {
                 self.input_history(&inputs.rows, adjoint, env)?
@@ -1182,7 +1210,7 @@ impl Source {
     }
 
     /// Project the executed prefix at one generated source coordinate. Completed
-    /// fixed loops replay their full history; the containing loop contributes
+    /// loops replay their full predicated history; the containing loop contributes
     /// exactly its earlier iterations and the selected current prefix. A containing
     /// qif contributes only the active arm. Its else predicate is already inverted
     /// by ref.qif: retain that external version change for the dependency check.
@@ -1296,8 +1324,6 @@ impl Source {
         for (end, release) in instructions.iter().enumerate() {
             let target = match release.op.as_str() {
                 "qfree" | "qreturn" => &release.operands[0],
-                "quncopy" => &release.operands[1],
-                "qunload" => &release.operands[2],
                 _ => continue,
             };
             let Some(start) = instructions[..end].iter().rposition(|i| {
@@ -1511,41 +1537,19 @@ impl Source {
             }
         }
         let mut call_pairs = BTreeMap::new();
-        let mut calls = Vec::new();
-        let mut predicate_depth = 0;
-        for i in instructions {
-            match i.op.as_str() {
-                "qpred" => {
-                    predicate_depth += 1;
-                    continue;
-                }
-                "qunpred" => {
-                    predicate_depth -= 1;
-                    continue;
-                }
-                _ => {}
-            }
-            if predicate_depth != 0 {
-                continue;
-            }
-            if !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
-                continue;
-            }
-            let (inverse, control, op, args) = crate::action::normalize_call(i)?;
-            if op != "action_call" {
-                continue;
-            }
-            if !inverse {
-                calls.push(i);
-                continue;
-            }
-            let Some(n) = calls.iter().rposition(|compute| {
-                crate::action::normalize_call(compute)
-                    .is_ok_and(|(inv, c, o, a)| !inv && c == control && o == op && a == args)
-            }) else {
+        let occurrences = self.inverse_occurrences(instructions, env)?;
+        for (index, i) in instructions.iter().enumerate() {
+            let Some(&prior) = occurrences.get(&index) else {
                 continue;
             };
-            let compute = calls.remove(n);
+            if prior >= index || !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
+                continue;
+            }
+            let (inverse, _control, op, args) = crate::action::normalize_call(i)?;
+            if !inverse || op != "action_call" {
+                continue;
+            }
+            let compute = &instructions[prior];
             let registry = env
                 .registry
                 .as_ref()
@@ -1937,7 +1941,10 @@ impl Source {
                             ("address", num(r.address)),
                             ("cell", num(r.cell)),
                             ("role", text(&r.role)),
-                            ("origin", text(format!("local:{}", name.trim_start_matches('$')))),
+                            (
+                                "origin",
+                                text(format!("local:{}", name.trim_start_matches('$'))),
+                            ),
                             ("cells", text(name)),
                         ])
                     });

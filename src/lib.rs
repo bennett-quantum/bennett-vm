@@ -68,7 +68,7 @@ pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Id
 pub fn check_oracle_pairs(obj: &object::Object) -> Result<(), String> {
     for f in &obj.functions {
         if matches!(f.kind, object::FnKind::Oracle | object::FnKind::Lproc) {
-            call_matching::function(f)?;
+            call_matching::function(f, obj.isa != "0.8")?;
         }
     }
     Ok(())

@@ -4,6 +4,9 @@
 //! paths, or a row between the pair writing one of its `ins` is ill-formed.
 //! An intervening `lift.store` is not: its address is data.
 //!
+//! LIFO matching is 0.9's (E17.5). 0.8's §5.5 pairs a call and its uncall by their
+//! operands alone, `tgt` and `fr'` included, so pairs on different targets may cross.
+//!
 //! A `qjumpr` target is a run-time value, so a function with one is left to the
 //! value-precise pairing of `ref_library`'s `oracle_cleanup_pairs`: the paths this
 //! CFG would add are not all paths the program has.
@@ -13,8 +16,9 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-/// Callee, token, `ins`, `mem`, `args`, as written.
-type Key = (String, String, String, String, String);
+/// Callee, token, `ins`, `mem`, `args`, as written; then `tgt` and `fr'` when
+/// pairs are matched by operands alone (0.8), empty under LIFO matching.
+type Key = (String, String, String, String, String, String, String);
 
 #[derive(Clone, PartialEq)]
 struct Outstanding {
@@ -26,14 +30,21 @@ struct Outstanding {
 
 type State = BTreeMap<Key, Outstanding>;
 
-fn key(ins: &Instr) -> Key {
+fn key(ins: &Instr, lifo: bool) -> Key {
     let x = &ins.operands;
+    let (tgt, fr) = if lifo {
+        (String::new(), String::new())
+    } else {
+        (x[3].clone(), x[4].clone())
+    };
     (
         x[0].clone(),
         x[1].clone(),
         x[2].clone(),
         x[5].clone(),
         x[6].clone(),
+        tgt,
+        fr,
     )
 }
 
@@ -66,7 +77,7 @@ fn meet(a: &State, b: &State) -> State {
     out
 }
 
-fn transfer(rows: &[&Instr], row: usize, state: &State) -> Result<State, String> {
+fn transfer(rows: &[&Instr], row: usize, state: &State, lifo: bool) -> Result<State, String> {
     let ins = rows[row];
     let mut next = state.clone();
     let mut writes = ins.lhs.clone();
@@ -77,7 +88,7 @@ fn transfer(rows: &[&Instr], row: usize, state: &State) -> Result<State, String>
         writes.extend(list_operand(&ins.operands[1])?);
     }
     if ins.op == "lift.oracle_uncall"
-        && let Some(entry) = next.get_mut(&key(ins))
+        && let Some(entry) = next.get_mut(&key(ins, lifo))
     {
         entry.calls.pop();
     }
@@ -90,7 +101,7 @@ fn transfer(rows: &[&Instr], row: usize, state: &State) -> Result<State, String>
         }
     }
     if ins.op == "lift.oracle_call" {
-        next.entry(key(ins))
+        next.entry(key(ins, lifo))
             .or_insert(Outstanding {
                 disagree_below: false,
                 calls: vec![],
@@ -101,7 +112,7 @@ fn transfer(rows: &[&Instr], row: usize, state: &State) -> Result<State, String>
     Ok(next)
 }
 
-pub(crate) fn function(f: &Function) -> Result<(), String> {
+pub(crate) fn function(f: &Function, lifo: bool) -> Result<(), String> {
     let mut rows = vec![];
     let mut starts = BTreeMap::new();
     for block in &f.blocks {
@@ -133,7 +144,7 @@ pub(crate) fn function(f: &Function) -> Result<(), String> {
     entry[0] = Some(State::new());
     let mut work = vec![0];
     while let Some(row) = work.pop() {
-        let out = transfer(&rows, row, entry[row].as_ref().unwrap())?;
+        let out = transfer(&rows, row, entry[row].as_ref().unwrap(), lifo)?;
         for next in successors(row)? {
             let merged = match &entry[next] {
                 None => out.clone(),
@@ -150,7 +161,7 @@ pub(crate) fn function(f: &Function) -> Result<(), String> {
         let Some(state) = state.as_ref().filter(|_| ins.op == "lift.oracle_uncall") else {
             continue;
         };
-        let matched = state.get(&key(ins)).and_then(|o| o.calls.last());
+        let matched = state.get(&key(ins, lifo)).and_then(|o| o.calls.last());
         let Some((call, unwritten)) = matched else {
             return Err(err(
                 "5.5",

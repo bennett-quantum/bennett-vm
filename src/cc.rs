@@ -1011,7 +1011,8 @@ impl Machine {
                 }
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
-                let (v, bits) = self.quantum.measure(&ws, draw);
+                let exact_ties = self.obj.isa != "0.8";
+                let (v, bits) = self.quantum.measure(&ws, draw, exact_ties);
                 self.quantum.target_release(&ws);
                 self.data.handles.get_mut(&id).unwrap().live = false;
                 self.data.measurements.push(Json::obj(vec![
@@ -1185,6 +1186,9 @@ impl Machine {
                 .collect();
             let args = match self.operands(&list(&xs[4])?) {
                 Ok(args) => args,
+                // 0.9 E17.7: a use without a current instance traps. 0.8 has no
+                // such sentence for a region call's classical operands.
+                Err(_) if self.obj.isa == "0.8" => return Err(err("invalid action argument")),
                 Err(code) => return Ok(Some(code)),
             };
             (
@@ -1226,10 +1230,12 @@ impl Machine {
             let budget = match self.read(&xs[1]) {
                 Ok(Value::Token(b) | Value::TokenId(_, b)) => b,
                 Ok(_) => return Err(err("oracle call requires token")),
+                Err(_) if self.obj.isa == "0.8" => return Err(err("missing oracle token")),
                 Err(code) => return Ok(Some(code)),
             };
             let args = match self.operands(&list(&xs[6])?) {
                 Ok(args) => args,
+                Err(_) if self.obj.isa == "0.8" => return Err(err("invalid oracle argument")),
                 Err(code) => return Ok(Some(code)),
             };
             (

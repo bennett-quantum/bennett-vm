@@ -222,7 +222,10 @@ impl QuantumState {
     /// so an exact CDF tie selects the next outcome. The measured bits are
     /// reset to zero in the remaining state (the handle is consumed; the
     /// post-state factorises onto the outcome).
-    pub fn measure(&mut self, wires: &[usize], draw: f64) -> (BigUint, String) {
+    ///
+    /// `exact_ties` is that rule. Without it (0.8, whose text has no draw rule)
+    /// the comparison stays on binary64 weights, byte for byte.
+    pub fn measure(&mut self, wires: &[usize], draw: f64, exact_ties: bool) -> (BigUint, String) {
         let mut probs: BTreeMap<BigUint, f64> = BTreeMap::new();
         for (k, a) in &self.amps {
             *probs.entry(Self::extract(k, wires)).or_insert(0.0) += a.0 * a.0 + a.1 * a.1;
@@ -238,7 +241,9 @@ impl QuantumState {
             // Binary64 settles every comparison away from a tie; the exact
             // weights settle the rest.
             let difference = cumulative - threshold;
-            let above = if difference.abs() > TIE_BAND * total {
+            let above = if !exact_ties {
+                draw < cumulative
+            } else if difference.abs() > TIE_BAND * total {
                 difference > 0.0
             } else {
                 let outcomes = &ordered[..=index];
@@ -251,7 +256,13 @@ impl QuantumState {
         }
         // The last cumulative weight is the total, and draw < 1.
         let value = chosen
-            .or_else(|| ordered.last().map(|(v, _)| (*v).clone()))
+            .or_else(|| {
+                if exact_ties {
+                    ordered.last().map(|(v, _)| (*v).clone())
+                } else {
+                    probs.keys().last().cloned()
+                }
+            })
             .expect("§4.1: a quantum state has at least one outcome");
         let p = probs.get(&value).copied().unwrap_or(1.0);
         let norm = if p > 0.0 { 1.0 / p.sqrt() } else { 1.0 };

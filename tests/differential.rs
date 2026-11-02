@@ -1651,7 +1651,9 @@ fn unallocatable_transfers_are_diagnostics_not_panics() {
 #[test]
 fn measurement_draws_compare_exact_born_weights() {
     let functions = "action @single (t:wire mut) () () () ()\n^entry():\nh t\naction @h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[1]\naction @h0h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nh t[1]\naction @bell (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\ncx t[0] t[1]\naction @phase (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nrz 0.5 t[0]\nh t[0]\nry 1.0 t[1]\nfn cc @one (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h1 (q) () () ()\nr = measure q\nret r\nfn cc @two (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h0h1 (q) () () ()\nr = measure q\nret r\nfn cc @bell_m (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @bell (q) () () ()\nr = measure q\nret r\nfn cc @angle (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @phase (q) () () ()\nr = measure q\nret r\nfn cc @sequence (a:i64) (r:i1, s:i1) () () ()\n^entry():\nq = qreg.new any 1\nw = qreg.new any 1\naction_call @single (q) () () ()\naction_call @single (w) () () ()\nr = measure q\ns = measure w\nret r s";
-    for version in ["0.8", "0.9"] {
+    // K17 is 0.9's; tests/isa08_unchanged.rs pins 0.8.
+    {
+        let version = "0.9";
         let path = signed_object("dwj", version, functions);
         for entry in ["one", "two", "bell_m", "angle"] {
             for draw in [
@@ -1677,7 +1679,7 @@ fn measurement_draws_compare_exact_born_weights() {
             );
         }
     }
-    let path = signed_object("dwj-engines", "0.8", functions);
+    let path = signed_object("dwj-engines", "0.9", functions);
     for (entry, draw, bits) in [
         ("one", "0.5", "01"),
         ("two", "0.25", "01"),
@@ -1823,6 +1825,10 @@ fn ill_formed_objects_are_rejected_at_load() {
     let mut escaped = vec![];
     for version in ["0.8", "0.9"] {
         for (name, rule, functions) in ILL_FORMED {
+            // K5's sentence is 0.9's; tests/isa08_unchanged.rs pins 0.8.
+            if version == "0.8" && name == "row-after-trap" {
+                continue;
+            }
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(".tmp")
                 .join(format!("ffj-{name}-{version}-{}.bisa", std::process::id()));

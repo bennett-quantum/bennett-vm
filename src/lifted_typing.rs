@@ -98,6 +98,17 @@ impl<'a> Schema<'a> {
             "lifted classical argument count mismatch",
         )?;
         for (name, ty) in actual.iter().zip(want) {
+            // 0.8 §3.3 asks only for "exactly the callee signature widths"; the
+            // immutable entry binding is 0.9's (§5.1).
+            let width = match ty {
+                Type::Ptr => Some(self.obj.ptr_width),
+                Type::F64 => Some(64),
+                other => other.width(),
+            };
+            if let (true, Some(width)) = (self.obj.isa == "0.8", width) {
+                self.width(name, width)?;
+                continue;
+            }
             check(
                 self.fixed(name).is_some_and(|p| p.ty == *ty),
                 "lifted argument must be an identically typed immutable entry binding",
@@ -160,6 +171,10 @@ impl<'a> Schema<'a> {
             "const" => {
                 let w = suffix()?;
                 self.destination(ins, w)?;
+                // 0.9 E16.9. 0.8 states no range for the literal.
+                if self.obj.isa == "0.8" {
+                    return Ok(());
+                }
                 let (negative, text) = xs[0]
                     .strip_prefix('-')
                     .map_or((false, xs[0].as_str()), |t| (true, t));

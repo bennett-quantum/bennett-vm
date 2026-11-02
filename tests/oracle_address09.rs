@@ -162,13 +162,43 @@ fn k64_step_support_excludes_rows_and_rows_next_share_ordinals() {
     }
 }
 
-fn paired_source(rows: &str) -> bennett_vm::object::Object {
-    let text = support::source(&format!(
+fn paired_text(rows: &str) -> String {
+    support::source(&format!(
         "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, other:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4], fs:reg[4], pc:reg[4], offset:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
-    ));
+    ))
+}
+
+fn paired_source(rows: &str) -> bennett_vm::object::Object {
     // Parsed only: these pairs test the address-binding stage, which must refuse
-    // them on its own; ill-formed ones are refused earlier by load (§5.5).
-    bennett_vm::object::parse(&text).unwrap()
+    // them on its own; `load_verdicts_match_the_binding_stage` holds load to the
+    // same verdicts.
+    bennett_vm::object::parse(&paired_text(rows)).unwrap()
+}
+
+/// The pairing tests below start from parsed objects, so this keeps what `load`
+/// used to establish for them: every pair the binding stage admits loads, and every
+/// pair it refuses is refused by load under §5.5, not by some other rule.
+#[test]
+fn load_verdicts_match_the_binding_stage() {
+    for rows in [
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nqbranch x ^left ^right\n^left():\nqjump ^join\n^right():\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nqjump ^body\n^body():\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nqbranch x ^body ^done\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+    ] {
+        bennett_vm::load(&paired_text(rows), false).unwrap();
+    }
+    for rows in [
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id other (x) r fr () ()\nlift.retval r",
+        "s = lift.mov x\nlift.oracle_call @id tk (s) r fr () ()\ns = lift.mov x\nlift.oracle_uncall @id tk (s) r fr () ()\nlift.retval r",
+        "qbranch x ^left ^right\n^left():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^right():\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "qbranch x ^left ^right\n^left():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^right():\nlift.oracle_call @id tk (x) r fr () ()\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nqjump ^body\n^body():\nlift.oracle_uncall @id tk (x) r fr () ()\nqbranch x ^body ^done\n^done():\nlift.retval r",
+    ] {
+        let error = bennett_vm::load(&paired_text(rows), false).err().unwrap();
+        assert!(error.contains("§5.5"), "{rows}: {error}");
+    }
 }
 
 #[test]

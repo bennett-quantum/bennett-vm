@@ -189,7 +189,11 @@ rounding/underflow allowance, is added to B and recorded as a numerical
 projection. Bit removal compacts the arrays in place. Measured wires have
 already been reset by collapse; their packed coordinates are reclaimed
 without consuming additional draws. Constant measured bits are merged
-into the result in the original wire-list order.
+into the result in the original wire-list order. Factoring also runs before
+measurement: a boundary draw of zero after a circuit and its actual inverse
+must not sample a tiny numerical residue. The full history differential
+suite caught this case; the discarded amplitude is charged to B and an
+explicit inverse-Bell regression covers all four basis inputs.
 
 `exact_equals` never accepts a dense state as an exact proof. Standalone
 numerical reversal instead compares the state distance against the two
@@ -402,5 +406,25 @@ cases (600-second debug gate, 518.10 seconds). CC oracle-then-gate,
 budget/control/fault regressions also passed with the added dense check.
 Runtime tests cover wide virtual constants, allocation/cleanup, measured
 wire reset, general permutation cycles, scaled support/equality checks,
-exact-proof separation and actual CLI/ABI numerical labels. The final
-combined release gate and build results are recorded in the handoff.
+exact-proof separation and actual CLI/ABI numerical labels. The initial combined release gate found the inverse-circuit draw-zero
+bug described above (20/21 general differential tests passed). After the
+fix, the identical complete test set passed in the final debug gate. The
+release build had taken 12m25 on the shared machine at load ~52; no test
+or fixture was omitted or weakened when checking the corrected source.
+
+Final integration gates (2026-11-02 07:52 UTC):
+
+```
+timeout 1200 cargo test -j4 --offline --test differential --test dense_kernels --test dense_differential --lib -- --test-threads=4
+# 22 library + 12 dense differential/runtime + 26 kernel + 21 general differential tests passed.
+BENNETT_VM_ENGINE=dense CARGO_BUILD_JOBS=4 timeout 600 cargo test -j4 --offline --test launch_c -- --test-threads=1
+# Both published C11 launch and scheduling consumers passed (93.91 s).
+timeout 300 cargo build -j4 --offline
+# Whole crate build passed.
+```
+
+The 21-test final differential suite completed in 230.94 seconds.
+Formatting checks passed for all changed Rust files. The north-star
+executor plan entry was read back from the orchestrator's plan and is
+present. No integration acceptance work remains; 28-qubit single-thread
+fusion tuning is the separate open performance bead `bennett-vm-1x1`.

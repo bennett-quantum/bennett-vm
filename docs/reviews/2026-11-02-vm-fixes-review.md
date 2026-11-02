@@ -85,7 +85,11 @@ selector moved entry:3 → entry:5 because the then-arm gained two rows; by row 
 name the same `adj action_call @mix` row, and the test still requires the specific
 refusal "nonempty call cleanup needs its exact clean-input computing sequence" (not an
 earlier, unrelated error) plus replay identity on all inputs; entry:10 in the second
-test is unchanged by the same count. Verdict (b): CLEAR, a correction, not a weakening.
+test is unchanged by the same count. Not done: a source mutation showing the new programs
+still fail when the guard is removed (it needs a separate full build, and the host's heavy
+slot was held by plugin gates for the review's duration, R3); the claim rests on the
+row-for-row identity of the guarded arms and on the specific refusal text the first test
+asserts. Verdict (b): CLEAR, a correction, not a weakening.
 
 ## (c) oracle pairing tests: load → parse
 
@@ -168,4 +172,37 @@ effect-tape behaviour, and how a mixed fat object uses them:
 
 ## Merge and gates
 
-PENDING: full per-engine gate waiting for the host heavy slot (ruling R3); filled in by the next commit.
+Merged main 9a5a887 into vm-fixes: 5396ba8 (conflicts in src/cc.rs and
+.beads/issues.jsonl only; resolution in the commit message: main's `region()` with
+vm-fixes' E17.7 fault codes kept; no test dropped, both measure.iN launch tests kept),
+then 3544363 (warnings). Code at 3544363; later commits are this document only.
+
+Gates (release, `.tmp/review/target`, `BENNETT_ISA_REF` = reference built from the gate
+pin bennett-isa-spec ecaaac0; one heavy run at a time per R3, which kept the full run
+waiting about 3 h behind plugin and vm push gates):
+
+- Focused, merged tree: lib 37, bound_calls09 3, cleanup_fresh09 24, isa08_reference 6,
+  measurement09 4, oracle_address09 13, region_alias09 4, validation_order 1: all pass.
+- Full `cargo test --offline --release --no-fail-fast`, `BENNETT_VM_ENGINE=interpreter`,
+  10:25–10:43Z: 39 binaries, 342 passed, 0 failed.
+- Same, `BENNETT_VM_ENGINE=jit`, 11:05–11:11Z: 339 passed, 3 failed: tests/conformance.rs
+  (2) and tests/schedules.rs (1). Not the branch or the engine: these tests read the
+  live `../bennett-isa-spec` tree, which gained k83 cases between the two runs (H
+  scenarios 10 → 18; F/H-k83 cases whose `../../../fixtures/accepted-k83-09` paths do
+  not resolve in the copied case dirs). Rerun at 11:1xZ, the same binaries fail the same
+  three on the interpreter too. Filed bennett-vm-i63.
+- Witnesses on the merged binary: 24/32, as above. 0.9 corpus check: unchanged
+  (`diff09-merged.log`).
+
+NOT DONE (maintainer wind-down 11:12Z): the dual-engine run with siblings at the gate
+pin (layout prepared under `.tmp/review/pinned/`: this branch archived beside isa-spec
+ecaaac0 with its conformance harness built; `GATE_WORK=… GATE_TAG=-pinned
+GATE_TARGET=… .tmp/review/fullgate.sh`) never got the heavy slot. The jit engine
+therefore has no clean full pass at the pinned siblings; the push gate
+(`scripts/pre-push`, pinned, debug) will be the first.
+
+## Verdict
+
+(a) CLEAR, (b) CLEAR, (c) CLEAR, at code sha 3544363 (merged with main 9a5a887). Merge
+gate: interpreter green (342/0); jit 339/3 with all three failures traced to live-sibling
+drift, not yet confirmed green at the pinned siblings.

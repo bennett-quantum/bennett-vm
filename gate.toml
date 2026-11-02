@@ -1,7 +1,7 @@
 # Push-gate pins (bennett/tools/gate_README.md). Siblings resolve only to these commits.
 schema = 1
 repo = "bennett-vm"
-tool_sha = "c698ce1c56d33fdae36624b8616d673a8836679a"
+tool_sha = "01c0314c9aaa4a37313ab530da2134efafe9cbd5"
 timeout_s = 14400
 
 [env]

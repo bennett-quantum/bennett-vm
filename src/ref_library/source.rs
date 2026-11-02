@@ -29,6 +29,8 @@ struct WholePair {
     cleanup_end: usize,
     carrier: usize,
     computing: Vec<usize>,
+    entry_point: usize,
+    bundle: Option<Vec<String>>,
     outside: Vec<usize>,
     target: String,
     perm: bool,
@@ -1333,7 +1335,13 @@ impl Source {
             .enumerate()
             .map(|(p, n)| (*n, p))
             .collect::<BTreeMap<_, _>>();
-        for (&release, &acquire) in &occurrences.entries {
+        let mut claimed = BTreeSet::new();
+        for release in order
+            .iter()
+            .copied()
+            .filter(|n| occurrences.entries.contains_key(n))
+        {
+            let acquire = occurrences.entries[&release];
             let target = if adjoint {
                 &instructions[release].lhs[0]
             } else {
@@ -1342,6 +1350,7 @@ impl Source {
             let start = positions[&acquire];
             let end = positions[&release];
             let mut inverses = vec![];
+            let mut bundle: Option<Vec<String>> = None;
             for position in (start + 1..end).rev() {
                 let index = order[position];
                 let row = &instructions[index];
@@ -1351,13 +1360,37 @@ impl Source {
                 let Some(&partner) = occurrences.inverse.get(&index) else {
                     break;
                 };
-                if positions[&partner] >= position || !Self::writes_only(row, target, env) {
+                if positions[&partner] >= position || claimed.contains(&index) {
+                    break;
+                }
+                if !Self::writes_only(row, target, env) {
+                    // A joint inverse is indivisible. Its first released
+                    // output owns it; later releases do not own it again.
+                    // Multirow joint chains need per-output entry histories.
+                    let names = Self::outputs(row, env)
+                        .into_iter()
+                        .map(|n| n.split('[').next().unwrap().to_string())
+                        .collect::<BTreeSet<_>>();
+                    if !inverses.is_empty()
+                        || names.len() < 2
+                        || !names
+                            .iter()
+                            .all(|name| self.declarations.iter().any(|(n, ..)| n == name))
+                    {
+                        break;
+                    }
+                    bundle = Some(names.into_iter().collect());
+                    inverses.push(index);
                     break;
                 }
                 inverses.push(index);
             }
             inverses.reverse();
-            let mut computing = vec![acquire];
+            let mut computing = if bundle.is_some() {
+                vec![]
+            } else {
+                vec![acquire]
+            };
             computing.extend(inverses.iter().rev().map(|n| occurrences.inverse[n]));
             let mut cleanup = inverses;
             cleanup.push(release);
@@ -1366,6 +1399,11 @@ impl Source {
             let cleanup_start = *cleanup.first().unwrap();
             let cleanup_end = *cleanup.last().unwrap();
             let mut touched = self.locations(target)?;
+            if let Some(names) = &bundle {
+                for name in names {
+                    touched.extend(self.locations(name)?);
+                }
+            }
             for n in &computing {
                 touched.extend(self.read_locations(&instructions[*n])?);
             }
@@ -1389,7 +1427,13 @@ impl Source {
             let outside = (cleanup_start..=cleanup_end)
                 .filter(|n| !cleanup.contains(n))
                 .collect();
-            let perm = self
+            let perm = bundle.as_ref().is_none_or(|names| {
+                names.iter().all(|name| {
+                    self.declarations
+                        .iter()
+                        .any(|(n, _, _, state)| n == name && state == "clean")
+                })
+            }) && self
                 .declarations
                 .iter()
                 .find(|(n, ..)| n == target)
@@ -1398,12 +1442,15 @@ impl Source {
                     .iter()
                     .filter(|n| **n != acquire)
                     .all(|n| Self::permutation_row(&instructions[*n], env));
+            claimed.extend(cleanup.iter().copied().filter(|n| *n != release));
             pairs.insert(
                 cleanup_start,
                 WholePair {
                     cleanup_end,
                     carrier: release,
                     computing,
+                    entry_point: acquire,
+                    bundle,
                     outside,
                     target: target.clone(),
                     perm,
@@ -1507,7 +1554,13 @@ impl Source {
                 WholePair {
                     cleanup_end,
                     carrier: if adjoint { start } else { end },
+                    entry_point: if adjoint {
+                        *computing.last().unwrap()
+                    } else {
+                        *computing.first().unwrap()
+                    },
                     computing,
+                    bundle: None,
                     outside,
                     target: target.clone(),
                     perm,
@@ -1680,19 +1733,45 @@ impl Source {
                 let uncomputing = self.raw_sequence(&computing_rows, !adjoint, false, env)?;
                 let body =
                     self.raw_sequence(&instructions[index..=pair.cleanup_end], adjoint, true, env)?;
-                let computing_start = if adjoint {
-                    *pair.computing.last().unwrap()
-                } else {
-                    *pair.computing.first().unwrap()
-                };
                 let mut annotation = self.pair_annotation(
-                    &pair.target,
-                    &self.points[&instructions[computing_start].line],
+                    if pair.bundle.is_some() {
+                        ""
+                    } else {
+                        &pair.target
+                    },
+                    &self.points[&instructions[pair.entry_point].line],
                     computing,
                     uncomputing,
                     body,
                     pair.perm,
                 );
+                if let Some(targets) = &pair.bundle {
+                    let compute = if adjoint {
+                        *pair.computing.last().unwrap()
+                    } else {
+                        *pair.computing.first().unwrap()
+                    };
+                    let Json::Obj(c) = &mut annotation else {
+                        unreachable!()
+                    };
+                    let Some(Json::Obj(p)) = c.get_mut("$cleanup") else {
+                        unreachable!()
+                    };
+                    p.insert(
+                        "input_request".into(),
+                        Json::obj(vec![
+                            ("compute", num(instructions[compute].line)),
+                            ("cleanup", num(instructions[pair.carrier].line)),
+                            ("adjoint", Json::Bool(adjoint)),
+                            ("targets", Json::Arr(targets.iter().map(text).collect())),
+                        ]),
+                    );
+                    p.insert("zero_targets".into(), Json::Arr(vec![text(&pair.target)]));
+                    p.insert(
+                        "release_targets".into(),
+                        Json::Arr(vec![text(&pair.target)]),
+                    );
+                }
                 if !pair.outside.is_empty() {
                     let rows = pair
                         .outside

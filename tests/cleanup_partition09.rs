@@ -14,7 +14,7 @@ fn expand(
     choices: &[(&str, CleanupRealisation)],
 ) -> Result<ActionExpansion, String> {
     let functions = format!(
-        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b"
+        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\nx a\ncx a b"
     );
     let (object, ids) = bennett_vm::load(&support::source(&functions), false)?;
     let entries = choices.iter().map(|(point, realisation)| {
@@ -247,13 +247,64 @@ fn a_prior_cancelled_pair_is_outside_the_terminal_inverse_chain() {
 fn joint_inverse_has_one_release_owner_and_later_release_is_independent() {
     let body = "a = qalloc any 1\nb = qalloc any 1\naction_call @pair (a, b) () () ()\nadj action_call @pair (a, b) () () ()\nqfree a\nqfree b";
     for adjoint in [false, true] {
-        let (owner, later) = if adjoint { ("entry:1", "entry:0") } else { ("entry:4", "entry:5") };
+        let (owner, later) = if adjoint {
+            ("entry:1", "entry:0")
+        } else {
+            ("entry:4", "entry:5")
+        };
         for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
-            let e = expand(body, adjoint, &[(owner, choice), (later, CleanupRealisation::Recompute)]).unwrap();
+            let e = expand(
+                body,
+                adjoint,
+                &[(owner, choice), (later, CleanupRealisation::Recompute)],
+            )
+            .unwrap();
             assert!(e.cleanup_pairing_complete);
             assert_eq!(e.cleanups.len(), 2);
-            assert_eq!(e.cleanups.iter().map(|c| c.address.path[0].point.as_str()).collect::<BTreeSet<_>>(), BTreeSet::from([owner, later]));
+            assert_eq!(
+                e.cleanups
+                    .iter()
+                    .map(|c| c.address.path[0].point.as_str())
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([owner, later])
+            );
             assert_identity(&e);
         }
+    }
+}
+
+#[test]
+fn fixed_loop_visits_restore_call_versions_only_after_matched_inverse_visits() {
+    for count in [0, 1, 2, 4] {
+        let functions = format!(
+            "action @root (x:wire[2] mut, z:wire mut) () () () ()\nregs {{}} bounds {{{count}}}\n^entry():\naction_call @mix (x) () () ()\nqloop {count} {{\nx x[0]\n}}\nadj action_call @mix (x) () () ()\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]"
+        );
+        let (object, _) = bennett_vm::load(&support::source(&functions), false).unwrap();
+        let catalog = Catalog::published().unwrap();
+        for adjoint in [false, true] {
+            let e = catalog
+                .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
+                .unwrap();
+            assert_eq!(
+                e.cleanups.len(),
+                usize::from(count % 2 == 0),
+                "count={count}, adjoint={adjoint}"
+            );
+            if count % 2 == 0 {
+                assert_identity(&e);
+            }
+        }
+    }
+}
+
+#[test]
+fn joint_owner_preserves_the_other_live_targets_nonzero_entry_values() {
+    let body = "a = qalloc any 1\nb = qalloc any 1\ncx x[0] b\naction_call @pair (a, b) () () ()\nadj action_call @pair (a, b) () () ()\nqfree a\ncx x[0] b\nqfree b";
+    for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+        let e = expand(body, false, &[("entry:5", choice), ("entry:7", CleanupRealisation::Recompute)]).unwrap();
+        assert!(e.cleanup_pairing_complete);
+        assert_eq!(e.cleanups.len(), 2);
+        assert_eq!(e.cleanups[0].address.path[0].point, "entry:5");
+        assert_identity(&e);
     }
 }

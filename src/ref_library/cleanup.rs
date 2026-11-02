@@ -250,8 +250,29 @@ impl Catalog {
         body.extend(arr(field(pair, "uncomputing")?)?.iter().cloned());
         // The call's adjoint restores its exact pre-call value, which need
         // not be zero. Restore it before uncomputing the fresh input history.
-        body.extend(xor(&targets));
+        let zero = pair
+            .get("zero_targets")
+            .map(arr)
+            .transpose()?
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let restore = targets
+            .iter()
+            .filter(|(name, _, _)| !zero.iter().any(|n| n.as_str() == Some(name.as_str())))
+            .cloned()
+            .collect::<Vec<_>>();
+        body.extend(xor(&restore));
         body.extend(arr(field(pair, "uninitialising")?)?.iter().cloned());
+        if let Some(releases) = pair.get("release_targets") {
+            for release in arr(releases)? {
+                let name = string(release)?;
+                let (_, alias, _) = targets
+                    .iter()
+                    .find(|(target, _, _)| target == name)
+                    .ok_or_else(|| err("release is not a restored cleanup target"))?;
+                body.push(Json::obj(vec![("relinquish", Json::Str(alias.clone()))]));
+            }
+        }
         for allocation in arr(field(pair, "allocations")?)?.iter().rev() {
             local.values.remove(string(field(allocation, "name")?)?);
             body = vec![Json::obj(vec![

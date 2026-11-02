@@ -1694,6 +1694,8 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
                     "uninitialising",
                     "before_recompute",
                     "live_versions",
+                    "zero_targets",
+                    "release_targets",
                 ],
             )?;
             syntax_inner(field(pair, "computing")?, true)?;

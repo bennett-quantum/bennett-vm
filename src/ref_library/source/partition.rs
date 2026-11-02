@@ -68,6 +68,56 @@ impl Source {
         }
         Ok(locations)
     }
+    // A positive shortcut for repeated, exactly matched source operations.
+    // Prove either one body or a two-body block cancels by occurrence pops;
+    // never infer identity from the composed Boolean/quantum matrix. Unknown
+    // structures retain their transfer until full visit instantiation.
+    fn balanced_fixed_loop(
+        &self,
+        row: &Instr,
+        env: &Bindings,
+        adjoint: bool,
+    ) -> Result<bool, String> {
+        if row.op != "qloop" || row.operands.len() != 1 {
+            return Ok(false);
+        }
+        let count = row.operands[0].parse::<usize>().map_err(err)?;
+        let body = &row.nested[0];
+        if count == 0 {
+            return Ok(true);
+        }
+        for i in body {
+            if !i.nested.is_empty()
+                || !(crate::action::is_gate_name(&i.op)
+                    || matches!(
+                        i.op.as_str(),
+                        "qxor" | "qexch" | "action_call" | "adj" | "ctl"
+                    ))
+            {
+                return Ok(false);
+            }
+            if self
+                .written_locations(i, env)?
+                .iter()
+                .any(|n| self.regions.contains_key(n.split('[').next().unwrap()))
+            {
+                return Ok(false);
+            }
+        }
+        if self.inverse_occurrences(body, env, adjoint)?.inverse.len() == body.len() {
+            return Ok(true);
+        }
+        if count % 2 != 0 {
+            return Ok(false);
+        }
+        let mut twice = body.clone();
+        twice.extend_from_slice(body);
+        Ok(self
+            .inverse_occurrences(&twice, env, adjoint)?
+            .inverse
+            .len()
+            == twice.len())
+    }
     pub(super) fn inverse_occurrences(
         &self,
         rows: &[Instr],
@@ -81,6 +131,7 @@ impl Source {
         let mut closed_allocations = BTreeSet::new();
         let mut depth = 0i32;
         let mut scope_outputs = BTreeSet::new();
+        let mut nested_terminal = BTreeSet::new();
         let order: Vec<_> = if adjoint {
             (0..rows.len()).rev().collect()
         } else {
@@ -112,6 +163,18 @@ impl Source {
                 }
                 outputs
             };
+            let owns_lifetime = outputs.iter().any(|n| {
+                self.declarations
+                    .iter()
+                    .any(|(name, ..)| name == n.split('[').next().unwrap())
+            });
+            if !owns_lifetime && self.balanced_fixed_loop(row, env, adjoint)? {
+                // The call's produced versions survive this balanced block.
+                // Its internal terminal inverses still need generated visit
+                // ownership; do not use this shortcut to form a release chain.
+                nested_terminal.extend(outputs);
+                continue;
+            }
             let release_kind = match (adjoint, row.op.as_str()) {
                 (false, "qfree") => Some(("qalloc", row.operands[0].as_str())),
                 (false, "qreturn") => Some(("qborrow", row.operands[0].as_str())),
@@ -138,7 +201,7 @@ impl Source {
                             }
                     })
                 };
-                if let Some(id) = entry {
+                if let Some(id) = entry.filter(|_| outputs.is_disjoint(&nested_terminal)) {
                     let prior = &occurrences[id];
                     if rows[prior.index].op == kind
                         && prior.outputs == outputs
@@ -201,6 +264,7 @@ impl Source {
                 }
             } else {
                 for name in &outputs {
+                    nested_terminal.remove(name);
                     current.insert(name.clone(), next_version);
                 }
             }

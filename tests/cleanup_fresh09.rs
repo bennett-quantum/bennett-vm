@@ -521,97 +521,53 @@ fn call_recompute_preserves_sliced_target_aliases() {
 }
 
 #[test]
-fn unknown_external_history_versions_are_never_substituted_by_current_values() {
+fn older_external_history_versions_are_reconstructed_on_fresh_wires() {
     let functions = "action @root (x:wire mut) () () () ()\n^entry():\nd = qcopy x\ng = qalloc any 1\nx x\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nx x\nqfree g\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let point = if adjoint { "entry:3" } else { "entry:4" };
-        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
-        let error = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(
-                &object,
-                "root",
-                &Json::Arr(vec![]),
-                adjoint,
-                0,
-                &[CleanupEntry {
-                    selector: Selector::parse(&selector).unwrap(),
-                    realisation: CleanupRealisation::Recompute,
-                }],
-            )
-            .unwrap_err();
-        assert!(
-            error.contains("exact clean-input computing sequence"),
-            "{error}"
+        let e = recompute(
+            functions,
+            if adjoint { "entry:3" } else { "entry:4" },
+            adjoint,
         );
+        for x in [false, true] {
+            replay_identity(&e, &[("x[0]", x)]);
+        }
     }
 }
 
 #[test]
 fn external_history_cancellation_preserves_effective_predicate_scopes() {
     let functions = "action @root (x:wire mut) (p:wire in, q:wire in) () () ()\n^entry():\nd = qcopy x\ng = qalloc any 1\nqpred p\nx x\nqunpred p\nqpred q\nx x\nqunpred q\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqpred q\nx x\nqunpred q\nqpred p\nx x\nqunpred p\nqfree g\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let point = if adjoint { "entry:8" } else { "entry:9" };
-        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
-        let error = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(
-                &object,
-                "root",
-                &Json::Arr(vec![]),
-                adjoint,
-                0,
-                &[CleanupEntry {
-                    selector: Selector::parse(&selector).unwrap(),
-                    realisation: CleanupRealisation::Recompute,
-                }],
-            )
-            .unwrap_err();
-        assert!(
-            error.contains("exact clean-input computing sequence"),
-            "{error}"
+        let e = recompute(
+            functions,
+            if adjoint { "entry:8" } else { "entry:9" },
+            adjoint,
         );
+        for bits in 0..8 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("p[0]", bits & 2 != 0),
+                    ("q[0]", bits & 4 != 0),
+                ],
+            );
+        }
     }
 }
 
 #[test]
 fn call_cleanup_checks_external_history_versions_through_the_cleanup_point() {
     let functions = "action @root (x:wire mut) () () () ()\n^entry():\nd = qcopy x\ng = qalloc any 1\naction_call @mix (d, g) () () ()\nx x\nadj action_call @mix (d, g) () () ()\nx x\nqfree g\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let point = if adjoint { "entry:2" } else { "entry:4" };
-        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
-        let result = Catalog::published().unwrap().lower_action_with_cleanup(
-            &object,
-            "root",
-            &Json::Arr(vec![]),
+        let e = recompute(
+            functions,
+            if adjoint { "entry:2" } else { "entry:4" },
             adjoint,
-            0,
-            &[CleanupEntry {
-                selector: Selector::parse(&selector).unwrap(),
-                realisation: CleanupRealisation::Recompute,
-            }],
         );
-        if !adjoint {
-            let error = result.unwrap_err();
-            assert!(
-                error.contains("exact clean-input computing sequence"),
-                "{error}"
-            );
-        } else {
-            // Both external flips precede the adjoint cleanup, restoring the
-            // acquisition's original input value before fresh history replay.
-            let e = result.unwrap();
-            assert!(
-                e.cleanups
-                    .iter()
-                    .any(|c| c.realisation == CleanupRealisation::Recompute)
-            );
-            for x in [false, true] {
-                replay_identity(&e, &[("x[0]", x)]);
-            }
+        for x in [false, true] {
+            replay_identity(&e, &[("x[0]", x)]);
         }
     }
 }
@@ -646,28 +602,15 @@ fn call_input_history_keeps_live_borrowed_dependencies_without_fresh_borrowing()
 #[test]
 fn call_input_history_requires_original_effective_predicate_versions() {
     let functions = "action @root (p:wire mut) () () () ()\n^entry():\nd = qalloc any 1\nqpred p\nx d\nqunpred p\ng = qalloc any 1\nx p\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nx p\nqfree g\nqpred p\nx d\nqunpred p\nqfree d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let point = if adjoint { "entry:6" } else { "entry:7" };
-        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
-        let error = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(
-                &object,
-                "root",
-                &Json::Arr(vec![]),
-                adjoint,
-                0,
-                &[CleanupEntry {
-                    selector: Selector::parse(&selector).unwrap(),
-                    realisation: CleanupRealisation::Recompute,
-                }],
-            )
-            .unwrap_err();
-        assert!(
-            error.contains("exact clean-input computing sequence"),
-            "{error}"
+        let e = recompute(
+            functions,
+            if adjoint { "entry:6" } else { "entry:7" },
+            adjoint,
         );
+        for p in [false, true] {
+            replay_identity(&e, &[("p[0]", p)]);
+        }
     }
 }
 
@@ -783,33 +726,15 @@ fn earlier_conditional_iterations_are_replayed_without_new_cleanup_carriers() {
 #[test]
 fn else_history_does_not_substitute_the_temporarily_inverted_predicate() {
     let functions = "action @root (x:wire mut) (p:wire in) () () ()\n^entry():\nd = qcopy p\nqif p {\n} {\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\n}\nquncopy p d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:3","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
-        let error = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(
-                &object,
-                "root",
-                &Json::Arr(vec![]),
-                adjoint,
-                0,
-                &[CleanupEntry {
-                    selector: Selector::parse(&selector).unwrap(),
-                    realisation: CleanupRealisation::Recompute,
-                }],
-            )
-            .unwrap_err();
+        let e = recompute(functions, "entry:3", adjoint);
         assert!(
-            error.contains("exact clean-input computing sequence"),
-            "{error}"
+            e.cleanups
+                .iter()
+                .any(|c| c.realisation == CleanupRealisation::Recompute)
         );
-        let normal = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
-            .unwrap();
         for bits in 0..4 {
-            replay_identity(&normal, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
+            replay_identity(&e, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
         }
     }
 }
@@ -836,6 +761,157 @@ fn replayed_independent_branch_histories_do_not_reapply_cleanup_policy() {
                     ("q[0]", bits & 8 != 0),
                 ],
             );
+        }
+    }
+}
+
+#[test]
+fn bounded_while_histories_reconstruct_each_executed_prefix() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire[3] in) () () ()\nregs {} bounds {3,3}\n^entry():\nd = qcopy x\nqloop 3 while p {\nx d\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\n}\nqloop 3 while p {\nx d\n}\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    for adjoint in [false, true] {
+        let e = recompute(functions, "entry:4", adjoint);
+        assert_eq!(
+            e.cleanups
+                .iter()
+                .filter(|c| c.realisation == CleanupRealisation::Recompute)
+                .count(),
+            3
+        );
+        for bits in 0..32 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                    ("p[1]", bits & 8 != 0),
+                    ("p[2]", bits & 16 != 0),
+                ],
+            );
+        }
+    }
+}
+
+#[test]
+fn completed_conditional_inputs_use_their_earlier_predicate_version() {
+    let functions = "action @root (p:wire mut) () () () ()\n^entry():\nd = qalloc any 1\nqif p {\nx d\n} {\n}\ng = qalloc any 1\nx p\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nx p\nqfree g\nqif p {\nx d\n} {\n}\nqfree d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:5" } else { "entry:6" },
+            adjoint,
+        );
+        for p in [false, true] {
+            replay_identity(&e, &[("p[0]", p)]);
+        }
+    }
+}
+
+#[test]
+fn mutable_enclosing_predicates_reconstruct_prior_iteration_arms() {
+    let functions = "action @root (x:wire mut, z:wire mut, p:wire mut) () () () ()\nregs {} bounds {3,3}\n^entry():\nd = qcopy x\nqloop 3 {\nqif p {\nx d\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\n} {\ncx z d\n}\nx p\n}\nqloop 3 {\nx p\nqif p {\nx d\n} {\ncx z d\n}\n}\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    for adjoint in [false, true] {
+        let e = recompute(functions, "entry:5", adjoint);
+        for bits in 0..8 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                ],
+            );
+        }
+    }
+}
+
+#[test]
+fn nonpermutation_external_history_is_never_replayed_as_a_basis_snapshot() {
+    let functions = "action @root (x:wire mut) () () () ()\n^entry():\nd = qcopy x\ng = qalloc any 1\nh x\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nh x\nqfree g\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
+    let catalog = Catalog::published().unwrap();
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:3" } else { "entry:4" };
+        let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"{point}","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
+        let result = catalog.lower_action_with_cleanup(
+            &object,
+            "root",
+            &Json::Arr(vec![]),
+            adjoint,
+            0,
+            &[CleanupEntry {
+                selector: Selector::parse(&selector).unwrap(),
+                realisation: CleanupRealisation::Recompute,
+            }],
+        );
+        assert!(
+            matches!(result, Err(ref error) if error.contains("exact clean-input computing sequence"))
+        );
+        assert!(
+            catalog
+                .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
+                .is_ok()
+        );
+    }
+}
+
+#[test]
+fn historical_external_permutation_calls_keep_symbols_and_operand_versions_distinct() {
+    let functions = "action @root (a:wire mut, b:wire mut) () () () ()\n^entry():\nd = qcopy b\ng = qalloc any 1\naction_call @a (b) (a) () ()\nx a\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nx a\nadj action_call @a (b) (a) () ()\nqfree g\nquncopy b d\nperm_action @a (t:wire mut) (s:wire in) () () ()\n^entry():\ncx s t\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:4" } else { "entry:5" },
+            adjoint,
+        );
+        for bits in 0..4 {
+            replay_identity(&e, &[("a[0]", bits & 1 != 0), ("b[0]", bits & 2 != 0)]);
+        }
+    }
+}
+
+#[test]
+fn completed_bounded_while_history_reconstructs_released_condition_bundle() {
+    let functions = "action @root (x:wire mut, z:wire mut) (p:wire[3] in) () () ()\nregs {} bounds {3,3}\n^entry():\nd = qcopy x\nc = qcopy p\nqloop 3 while c {\nx d\n}\nquncopy p c\naction_call @mix (d) (z) () ()\nadj action_call @mix (d) (z) () ()\ne = qcopy p\nqloop 3 while e {\nx d\n}\nquncopy p e\nquncopy x d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
+    for adjoint in [false, true] {
+        let e = recompute(
+            functions,
+            if adjoint { "entry:5" } else { "entry:6" },
+            adjoint,
+        );
+        for bits in 0..32 {
+            replay_identity(
+                &e,
+                &[
+                    ("x[0]", bits & 1 != 0),
+                    ("z[0]", bits & 2 != 0),
+                    ("p[0]", bits & 4 != 0),
+                    ("p[1]", bits & 8 != 0),
+                    ("p[2]", bits & 16 != 0),
+                ],
+            );
+        }
+    }
+}
+
+#[test]
+fn earlier_memory_versions_are_reconstructed_without_changing_the_live_region() {
+    let functions = "action @root (a:wire mut, z:wire mut) () (r:region[1,1] mut) () ()\n^entry():\nd = qload r a\ng = qalloc any 1\nqstore r a z\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqstore r a z\nqfree g\nqunload r a d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(functions, if adjoint { "entry:3" } else { "entry:4" }, adjoint);
+        for bits in 0..16 {
+            replay_identity(&e, &[("a[0]", bits & 1 != 0), ("z[0]", bits & 2 != 0), ("r[0]", bits & 4 != 0), ("r[1]", bits & 8 != 0)]);
+        }
+    }
+}
+
+#[test]
+fn historical_external_changes_retain_proven_live_owned_control_versions() {
+    let functions = "action @root (x:wire mut) (q:wire in) () () ()\n^entry():\nd = qcopy x\np = qcopy q\ng = qalloc any 1\nqpred p\nx x\nqunpred p\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqpred p\nx x\nqunpred p\nqfree g\nquncopy q p\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    for adjoint in [false, true] {
+        let e = recompute(functions, if adjoint { "entry:6" } else { "entry:7" }, adjoint);
+        for bits in 0..4 {
+            replay_identity(&e, &[("x[0]", bits & 1 != 0), ("q[0]", bits & 2 != 0)]);
         }
     }
 }

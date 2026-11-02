@@ -50,6 +50,23 @@ struct HistoryDomain<'a> {
     iterations: &'a [usize],
     branches: BTreeMap<String, usize>,
 }
+struct HistoryChange {
+    row: Instr,
+    predicates: Vec<String>,
+}
+struct HistoryStep {
+    row: Instr,
+    predicates: Vec<String>,
+    rollback: Vec<HistoryChange>,
+    snapshot_controls: BTreeSet<String>,
+    live_versions: BTreeSet<String>,
+}
+struct CallInputs {
+    rows: Vec<Instr>,
+    // Preserve the original compact replay when no historical external
+    // version is needed. Otherwise each row owns its version workspace.
+    versioned: Option<Vec<HistoryStep>>,
+}
 impl Catalog {
     /// Form a structured source action from resolved classical parameters,
     /// retaining arbitrary symbolic interface inputs. This boundary precedes
@@ -452,10 +469,7 @@ impl Source {
     // is expanded. Keep the original row wrappers for reverse; recompute is
     // newly instantiated at the release point (see ISA b-isa-spec-5cd).
     fn inverse_rows(a: &Instr, b: &Instr) -> bool {
-        if a.op == b.op
-            && a.operands == b.operands
-            && (a.op == "qif" || (a.op == "qloop" && a.operands.len() == 1))
-        {
+        if a.op == b.op && a.operands == b.operands && (a.op == "qif" || a.op == "qloop") {
             return a.nested.len() == b.nested.len()
                 && a.nested.iter().zip(&b.nested).all(|(a, b)| {
                     a.len() == b.len()
@@ -492,7 +506,7 @@ impl Source {
         b.op == inverse
     }
     fn writes_only(i: &Instr, target: &str, env: &Bindings) -> bool {
-        if i.op == "qif" || (i.op == "qloop" && i.operands.len() == 1) {
+        if i.op == "qif" || i.op == "qloop" {
             return i
                 .nested
                 .iter()
@@ -519,7 +533,7 @@ impl Source {
         false
     }
     fn permutation_row(i: &Instr, env: &Bindings) -> bool {
-        if i.op == "qif" || (i.op == "qloop" && i.operands.len() == 1) {
+        if i.op == "qif" || i.op == "qloop" {
             return i
                 .nested
                 .iter()
@@ -650,6 +664,150 @@ impl Source {
         body.extend(source.raw_sequence(&chunk, adjoint, false, env)?);
         Ok(body)
     }
+    /// Reconstruct earlier interface versions on fresh wires. Each workspace
+    /// starts from a coherent copy of the live external values, rolls back the
+    /// proven permutation slice, performs one owned-history row, then restores
+    /// and releases every snapshot. Live interface/control wires never change.
+    fn versioned_input_history(
+        &self,
+        steps: &[HistoryStep],
+        adjoint: bool,
+        env: &mut Bindings,
+    ) -> Result<Vec<Json>, String> {
+        fn rename(text: &str, aliases: &BTreeMap<String, String>) -> String {
+            let mut result = String::new();
+            let mut start = 0;
+            for (offset, c) in text.char_indices() {
+                if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$') {
+                    continue;
+                }
+                let token = &text[start..offset];
+                result.push_str(if start > 0 && text.as_bytes()[start - 1] == b'@' {
+                    token
+                } else {
+                    aliases.get(token).map_or(token, String::as_str)
+                });
+                result.push(c);
+                start = offset + c.len_utf8();
+            }
+            let token = &text[start..];
+            result.push_str(if start > 0 && text.as_bytes()[start - 1] == b'@' {
+                token
+            } else {
+                aliases.get(token).map_or(token, String::as_str)
+            });
+            result
+        }
+        fn renamed(row: &Instr, aliases: &BTreeMap<String, String>) -> Instr {
+            let mut row = row.clone();
+            row.operands = row.operands.iter().map(|n| rename(n, aliases)).collect();
+            row.nested = row
+                .nested
+                .iter()
+                .map(|arm| arm.iter().map(|i| renamed(i, aliases)).collect())
+                .collect();
+            row
+        }
+        fn scoped(
+            source: &Source,
+            row: &Instr,
+            predicates: &[String],
+            adjoint: bool,
+            env: &mut Bindings,
+            aliases: &BTreeMap<String, String>,
+        ) -> Result<Vec<Json>, String> {
+            let mut body = source.input_history(&[renamed(row, aliases)], adjoint, env)?;
+            for predicate in predicates.iter().rev() {
+                body = vec![invocation(
+                    "qpred.scope",
+                    vec![text(rename(predicate, aliases)), Json::Arr(body)],
+                )];
+            }
+            Ok(body)
+        }
+        let mut result = vec![];
+        for (ordinal, step) in steps.iter().enumerate() {
+            let mut source = self.clone();
+            let names = step
+                .rollback
+                .iter()
+                .flat_map(|change| {
+                    Self::references(&change.row).into_iter().chain(
+                        change
+                            .predicates
+                            .iter()
+                            .map(|n| n.split('[').next().unwrap().to_string()),
+                    )
+                })
+                .chain(step.snapshot_controls.iter().cloned())
+                .filter(|n| self.widths.contains_key(n) || self.regions.contains_key(n))
+                .collect::<BTreeSet<_>>();
+            let mut aliases = BTreeMap::new();
+            let mut snapshots = vec![];
+            for name in names {
+                let alias = format!("$history.version.{ordinal}.{name}");
+                let width = if let Some(region) = self.regions.get(&name) {
+                    let mut region = region.clone();
+                    region.local = true;
+                    source.regions.insert(alias.clone(), region.clone());
+                    self.region_width(&region)?
+                } else {
+                    self.widths[&name]
+                };
+                source.widths.insert(alias.clone(), width);
+                let live = if step.live_versions.contains(&name) {
+                    format!("$history.live.{name}")
+                } else { name.clone() };
+                snapshots.push((live, alias.clone(), width));
+                aliases.insert(name, alias);
+            }
+            let mut rollback = vec![];
+            for change in &step.rollback {
+                rollback.extend(scoped(
+                    &source,
+                    &change.row,
+                    &change.predicates,
+                    !adjoint,
+                    env,
+                    &aliases,
+                )?);
+            }
+            let mut body = snapshots
+                .iter()
+                .map(|(name, alias, width)| {
+                    invocation("qcopy.bound", vec![num(*width), text(name), text(alias)])
+                })
+                .collect::<Vec<_>>();
+            body.extend(rollback.clone());
+            let mut row_aliases = aliases.clone();
+            for name in &step.live_versions { row_aliases.remove(name); }
+            body.extend(scoped(
+                &source,
+                &step.row,
+                &step.predicates,
+                adjoint,
+                env,
+                &row_aliases,
+            )?);
+            if !rollback.is_empty() {
+                body.push(inverse(rollback));
+            }
+            body.extend(snapshots.iter().rev().map(|(name, alias, width)| {
+                invocation("quncopy.bound", vec![num(*width), text(name), text(alias)])
+            }));
+            for (_, alias, width) in snapshots.iter().rev() {
+                body = vec![Json::obj(vec![
+                    ("declare", text(alias)),
+                    ("width", num(*width)),
+                    ("class", Json::obj(vec![("class", text("any"))])),
+                    ("state", text("clean")),
+                    ("body", Json::Arr(body)),
+                ])];
+            }
+            result.extend(body);
+        }
+        Ok(result)
+    }
     // Recover exact pre-call target values from their source computation,
     // rather than treating allocation metadata as a zero-value assertion.
     // Keep execution order here, including source-adjoint acquisition.
@@ -661,7 +819,7 @@ impl Source {
         targets: &[String],
         adjoint: bool,
         env: &Bindings,
-    ) -> Option<Vec<Instr>> {
+    ) -> Option<CallInputs> {
         // Generated traversal projects enclosing fixed-loop/branch histories
         // into this domain first. Predicate slices still retain the enclosing
         // prefix, including acquisitions before the lexical scope.
@@ -709,8 +867,10 @@ impl Source {
                 .filter(|n| owned.contains(n)),
         );
         let mut selected = BTreeSet::new();
+        let mut steps = BTreeMap::new();
+        let mut versioned = false;
         let mut acquired = BTreeSet::new();
-        let mut external_changes: Vec<(&Instr, Vec<String>)> = vec![];
+        let mut external_changes: Vec<(&Instr, Vec<String>, usize)> = vec![];
         let mut predicates = vec![];
         for (index, i) in prefix.iter().enumerate().rev() {
             if matches!(i.op.as_str(), "qpred" | "qunpred") {
@@ -746,30 +906,94 @@ impl Source {
             };
             if index >= compute_at || outputs.is_disjoint(&needed) {
                 if outputs.iter().any(|n| !owned.contains(n)) {
-                    if external_changes.last().is_some_and(|(next, scopes)| {
+                    if external_changes.last().is_some_and(|(next, scopes, at)| {
+                        let mut reads = Self::references(i);
+                        reads.extend(predicates.iter().map(|n| base(n)));
                         *scopes == predicates && Self::inverse_rows(i, next)
+                            && prefix[index + 1..*at].iter().all(|row| Self::outputs(row, env).iter().all(|n| !reads.contains(&base(n))))
                     }) {
                         external_changes.pop();
                     } else {
-                        external_changes.push((i, predicates.clone()));
+                        external_changes.push((i, predicates.clone(), index));
                     }
                 }
                 continue;
             }
-            let changed_after = external_changes
-                .iter()
-                .flat_map(|(i, _)| Self::outputs(i, env))
-                .map(|n| base(&n))
-                .collect::<BTreeSet<_>>();
-            if Self::references(i)
-                .iter()
-                .chain(&predicates)
-                .any(|n| !owned.contains(n) && changed_after.contains(n))
-            {
-                // A current interface binding is not proof of an earlier
-                // input version. Retain the exact-history obligation.
-                return None;
+            // Slice the inverse external history from the values this row
+            // actually reads. Walking the inverse sequence backwards also
+            // captures the versions of its controls and read dependencies.
+            let mut version_inputs = Self::references(i);
+            version_inputs.extend(predicates.iter().map(|n| base(n)));
+            version_inputs.retain(|n| !owned.contains(n));
+            let mut rollback = vec![];
+            let mut live_versions = BTreeSet::new();
+            for (change, scopes, at) in external_changes.iter().rev() {
+                if Self::outputs(change, env)
+                    .iter()
+                    .all(|n| !version_inputs.contains(&base(n)))
+                {
+                    continue;
+                }
+                let mut refs = Self::references(change);
+                refs.extend(scopes.iter().map(|n| base(n)));
+                if !Self::permutation_row(change, env) {
+                    return None;
+                }
+                fn lifetime_change(i: &Instr, name: &str) -> bool {
+                    (matches!(i.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload") && i.lhs.first().is_some_and(|n| n == name))
+                        || (matches!(i.op.as_str(), "qfree" | "qreturn" | "qregion") && i.operands.first().is_some_and(|n| n == name))
+                        || (i.op == "quncopy" && i.operands.get(1).is_some_and(|n| n == name))
+                        || (i.op == "qunload" && i.operands.get(2).is_some_and(|n| n == name))
+                        || i.nested.iter().flatten().any(|i| lifetime_change(i, name))
+                }
+                for name in refs.iter().filter(|n| owned.contains(*n)) {
+                    // A live owned dependency is an exact witness only if its
+                    // captured version survives through this cleanup, and is
+                    // outside the call's mutable targets. Keep that binding
+                    // distinct from the fresh reconstructed owned history.
+                    if targets.iter().any(|n| base(n) == *name)
+                        || !env.values.contains_key(name)
+                        || prefix[at + 1..].iter().any(|row| {
+                            Self::outputs(row, env).iter().any(|n| base(n) == *name)
+                                || lifetime_change(row, name)
+                        })
+                    {
+                        return None;
+                    }
+                    live_versions.insert(name.clone());
+                }
+                version_inputs.extend(refs);
+                rollback.push(HistoryChange {
+                    row: (*change).clone(),
+                    predicates: scopes.clone(),
+                });
             }
+            rollback.reverse();
+            fn selectors(i: &Instr, out: &mut BTreeSet<String>) {
+                if i.op == "qif" {
+                    out.insert(i.operands[0].split('[').next().unwrap().to_string());
+                }
+                if i.op == "qloop" && i.operands.len() != 1 {
+                    out.insert(i.operands[2].clone());
+                }
+                for child in i.nested.iter().flatten() {
+                    selectors(child, out);
+                }
+            }
+            let mut snapshot_controls = BTreeSet::new();
+            selectors(i, &mut snapshot_controls);
+            snapshot_controls.retain(|n| !owned.contains(n));
+            versioned |= !rollback.is_empty() || !snapshot_controls.is_empty();
+            steps.insert(
+                index,
+                HistoryStep {
+                    row: (*i).clone(),
+                    predicates: predicates.clone(),
+                    rollback,
+                    snapshot_controls,
+                    live_versions,
+                },
+            );
             // A selected row may change only reconstructed owned values.
             // Interface and borrowed values must retain their original bindings.
             if outputs.iter().any(|n| !owned.contains(n))
@@ -817,7 +1041,10 @@ impl Source {
             scope.op = close.into();
             rows.push(scope);
         }
-        Some(rows)
+        Some(CallInputs {
+            rows,
+            versioned: versioned.then(|| steps.into_values().collect()),
+        })
     }
     /// Resolve only when the carrier is generated: enclosing loop indices are
     /// not known while forming the source recipe (and a zero-trip body is inert).
@@ -900,6 +1127,7 @@ impl Source {
         p.insert("recompute_supported".into(), Json::Bool(inputs.is_some()));
         if let Some(inputs) = inputs {
             let allocations = inputs
+                .rows
                 .iter()
                 .filter_map(|i| {
                     let name = if i.op == "qregion" {
@@ -938,7 +1166,12 @@ impl Source {
                 "targets".into(),
                 Json::Arr(targets.iter().map(text).collect()),
             );
-            let initialising = self.input_history(&inputs, adjoint, env)?;
+            let initialising = if let Some(steps) = inputs.versioned {
+                p.insert("live_versions".into(), Json::Arr(steps.iter().flat_map(|s| s.live_versions.iter().cloned()).collect::<BTreeSet<_>>().iter().map(text).collect()));
+                self.versioned_input_history(&steps, adjoint, env)?
+            } else {
+                self.input_history(&inputs.rows, adjoint, env)?
+            };
             p.insert("initialising".into(), Json::Arr(initialising.clone()));
             p.insert(
                 "uninitialising".into(),
@@ -976,23 +1209,47 @@ impl Source {
                 return Some(());
             }
             let containing = stop.is_some_and(|line| contains(i, line));
-            if i.op == "qloop" && i.operands.len() == 1 {
+            if i.op == "qloop" {
                 let count = i.operands[0].parse::<usize>().ok()?;
-                let prior = if containing {
+                let current = if containing {
                     let iteration = *domain.iterations.get(depth)?;
                     if iteration >= count {
                         return None;
                     }
-                    if adjoint {
-                        count - 1 - iteration
-                    } else {
-                        iteration
-                    }
+                    Some(iteration)
                 } else {
-                    count
+                    None
                 };
-                for _ in 0..prior {
+                let iterations: Vec<_> = if adjoint {
+                    (current.map_or(0, |i| i + 1)..count).rev().collect()
+                } else {
+                    (0..current.unwrap_or(count)).collect()
+                };
+                for iteration in iterations {
+                    // Inside a forward while iteration its live flag proves
+                    // every earlier iteration active. Completed loops (and
+                    // later forward iterations in a source adjoint) retain
+                    // the full conjunction of their immutable condition bits.
+                    let conditional = i.operands.len() != 1 && (!containing || adjoint);
+                    let (open, close) = if adjoint {
+                        ("qunpred", "qpred")
+                    } else {
+                        ("qpred", "qunpred")
+                    };
+                    let predicate = |bit, op: &str| {
+                        let mut p = i.clone();
+                        p.op = op.into();
+                        p.operands = vec![format!("{}[{bit}]", i.operands[2])];
+                        p.nested.clear();
+                        p
+                    };
+                    if conditional {
+                        out.extend((0..=iteration).map(|bit| predicate(bit, open)));
+                    }
                     self.project_history(&i.nested[0], None, adjoint, domain, depth + 1, out)?;
+                    if conditional {
+                        out.extend((0..=iteration).rev().map(|bit| predicate(bit, close)));
+                    }
                 }
                 if containing {
                     return self.project_history(
@@ -1020,7 +1277,7 @@ impl Source {
                 let arm = domain.branches[&i.operands[0]];
                 self.project_history(&i.nested[arm], None, adjoint, domain, depth, out)?;
             } else if containing {
-                // Bounded-while/cross-domain histories are tracked by c5.
+                // Unknown containing structures cannot prove an exact prefix.
                 return None;
             } else {
                 out.push(i.clone());
@@ -1183,14 +1440,27 @@ impl Source {
                     ],
                 )];
                 if adjoint { vec![inverse(body)] } else { body }
-            } else if self.history_replay && i.op == "qloop" && i.operands.len() == 1 {
-                vec![invocation(
-                    "qloop",
-                    vec![
-                        num(i.operands[0].parse::<usize>().map_err(err)?),
-                        Json::Arr(self.raw_sequence(&i.nested[0], adjoint, false, env)?),
-                    ],
-                )]
+            } else if self.history_replay && i.op == "qloop" {
+                let count = num(i.operands[0].parse::<usize>().map_err(err)?);
+                if i.operands.len() == 1 {
+                    vec![invocation(
+                        "qloop",
+                        vec![
+                            count,
+                            Json::Arr(self.raw_sequence(&i.nested[0], adjoint, false, env)?),
+                        ],
+                    )]
+                } else {
+                    let body = vec![invocation(
+                        "qloop.while",
+                        vec![
+                            count,
+                            text(&i.operands[2]),
+                            Json::Arr(self.raw_sequence(&i.nested[0], false, false, env)?),
+                        ],
+                    )];
+                    if adjoint { vec![inverse(body)] } else { body }
+                }
             } else {
                 self.instruction(i, adjoint, env)?
             };
@@ -1667,7 +1937,7 @@ impl Source {
                             ("address", num(r.address)),
                             ("cell", num(r.cell)),
                             ("role", text(&r.role)),
-                            ("origin", text(format!("local:{name}"))),
+                            ("origin", text(format!("local:{}", name.trim_start_matches('$')))),
                             ("cells", text(name)),
                         ])
                     });
@@ -1787,8 +2057,9 @@ impl Source {
                     (
                         "origin",
                         text(format!(
-                            "{}:{name}",
-                            if r.local { "local" } else { "interface" }
+                            "{}:{}",
+                            if r.local { "local" } else { "interface" },
+                            name.trim_start_matches('$')
                         )),
                     ),
                     ("cells", text(name)),

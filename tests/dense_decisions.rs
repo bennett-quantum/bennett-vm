@@ -50,7 +50,10 @@ fn dirty(mut s: QuantumState) -> (QuantumState, Vec<usize>) {
 fn d1_dirty_wire_is_not_clean_in_dense() {
     let (e, w) = dirty(QuantumState::new());
     let (d, _) = dirty(QuantumState::new_dense());
-    assert!(!e.is_clean(&[w[1]]), "control: exact interpreter sees the residue");
+    assert!(
+        !e.is_clean(&[w[1]]),
+        "control: exact interpreter sees the residue"
+    );
     assert_eq!(
         d.is_clean(&[w[1]]),
         e.is_clean(&[w[1]]),
@@ -123,7 +126,10 @@ fn d2b_amplified_bound_deletes_real_amplitude() {
         s.measure(&[w[1]], 0.995).1
     });
     assert_eq!(e, "1", "control");
-    assert_eq!(d, e, "dense measurement outcome differs from the interpreter");
+    assert_eq!(
+        d, e,
+        "dense measurement outcome differs from the interpreter"
+    );
 }
 
 /// A wire whose |0> branch has exact probability 1e-28 is not factored to
@@ -138,7 +144,10 @@ fn d2a_compaction_does_not_factor_real_tiny_branch() {
         s.apply1(w[0], &[], ry(std::f64::consts::PI - 2e-14));
         s.measure(&[w[0]], 0.0).1
     });
-    assert_eq!(d, e, "dense measurement outcome differs from the interpreter");
+    assert_eq!(
+        d, e,
+        "dense measurement outcome differs from the interpreter"
+    );
 }
 
 /// Control: the state bound holds against the exact interpreter on a
@@ -245,7 +254,10 @@ fn undecidable_case_has_an_exact_answer_in_the_interpreter() {
     s.apply1(w[0], &[w[1]], h());
     s.apply1(w[0], &[w[1]], h());
     s.apply1(w[0], &[], ry(-0.3));
-    assert!(s.is_clean(&[w[0]]), "exact dyadic entries cancel: c*s - s*c = 0");
+    assert!(
+        s.is_clean(&[w[0]]),
+        "exact dyadic entries cancel: c*s - s*c = 0"
+    );
 }
 
 /// Measurement compaction must never delete amplitude that the exact
@@ -268,7 +280,9 @@ fn compaction_keeps_small_real_branch_after_unlikely_outcome() {
     assert!((one - (0.1f64).sin().powi(2)).abs() < 1e-3, "P(1) = {one}");
     let evidence = d.simulation_evidence().unwrap();
     assert_eq!(
-        evidence.get("numerical_projections").and_then(|v| v.as_u64()),
+        evidence
+            .get("numerical_projections")
+            .and_then(|v| v.as_u64()),
         Some(0),
         "no numerical factoring was needed"
     );
@@ -310,6 +324,16 @@ fn random_circuits_dense_decisions_match_interpreter_or_fault() {
                     3 => s.apply1(w[q], &[], tdg_gate()),
                     4 => s.apply1(w[q], &[], ry(((r >> 32) % 7) as f64 * 0.25 - 0.75)),
                     5 if c != q => s.flip(w[q], &[w[c]]),
+                    5 if c2 != q => {
+                        let (src, dst) = (w[c2], w[q]);
+                        s.map_basis(|k| {
+                            let mut out = k.clone();
+                            if k.bit(src) {
+                                out.set_bit(dst, !k.bit(dst));
+                            }
+                            out
+                        })
+                    }
                     6 if c != q && c2 != q && c2 != c => s.flip(w[q], &[w[c], w[c2]]),
                     7 if c != q => s.apply1(w[q], &[w[c]], h()),
                     8 => s.phase_if_all(&[w[q], w[c]], (-1.0, 0.0)),
@@ -337,10 +361,7 @@ fn random_circuits_dense_decisions_match_interpreter_or_fault() {
                         agreed += 1;
                     }
                     Err(p) => {
-                        let msg = p
-                            .downcast_ref::<String>()
-                            .cloned()
-                            .unwrap_or_default();
+                        let msg = p.downcast_ref::<String>().cloned().unwrap_or_default();
                         assert!(msg.contains("undecidable"), "seed {seed}: {msg}");
                         undecided += 1;
                     }
@@ -350,5 +371,130 @@ fn random_circuits_dense_decisions_match_interpreter_or_fault() {
     }
     std::panic::set_hook(previous);
     eprintln!("dense decisions: {agreed} agreed, {undecided} undecidable");
-    assert!(agreed > 10 * undecided, "{agreed} agreed vs {undecided} undecidable");
+    assert!(
+        agreed > 10 * undecided,
+        "{agreed} agreed vs {undecided} undecidable"
+    );
+}
+
+fn s_gate() -> [[Amp; 2]; 2] {
+    [[(1., 0.), (0., 0.)], [(0., 0.), (0., 1.)]]
+}
+
+/// Conformance case objects/interference: h c; ctl c (x s s x s s = -I) t;
+/// h c. The controlled -I is Z on c, so c ends exactly 1, but no gate pair
+/// cancels and the support certificate cannot see the phase interference.
+/// The exact fallback (replay through the interpreter) must decide it
+/// (full gate at 1ec2f7b faulted "undecidable" here).
+#[test]
+fn algebraic_interference_is_decided_by_exact_replay() {
+    for mut s in engines() {
+        let w = s.alloc_wires(2);
+        s.prepare(&w, &BigUint::zero());
+        let (c, t) = (w[0], w[1]);
+        s.apply1(c, &[], h());
+        s.flip(t, &[c]);
+        s.apply1(t, &[c], s_gate());
+        s.apply1(t, &[c], s_gate());
+        s.flip(t, &[c]);
+        s.apply1(t, &[c], s_gate());
+        s.apply1(t, &[c], s_gate());
+        s.apply1(c, &[], h());
+        assert_eq!(s.constant_value(&w), Some(BigUint::from_u64(1)));
+    }
+}
+
+/// actions.bisa bell --adjoint then reverse (differential `reverse`): the
+/// control returned to |0> by H.H is still materialized when the next cx
+/// arrives, so the target's cleanliness needs the exact fallback.
+#[test]
+fn bell_adjoint_reverse_cleanliness_is_decided_exactly() {
+    for mut s in engines() {
+        let w = s.alloc_wires(4);
+        s.flip(w[1], &[w[0]]);
+        s.apply1(w[0], &[], h());
+        s.apply1(w[0], &[], h());
+        s.flip(w[1], &[w[0]]);
+        assert!(s.is_clean(&w));
+    }
+}
+
+/// Measurements replay with their draws; a replayed history decides exactly.
+#[test]
+fn exact_replay_through_a_measurement() {
+    for mut s in engines() {
+        let w = s.alloc_wires(3);
+        s.apply1(w[0], &[], h());
+        s.apply1(w[2], &[], h());
+        let _ = s.measure(&[w[2]], 0.7);
+        s.flip(w[1], &[w[0]]);
+        s.apply1(w[1], &[w[0]], s_gate());
+        s.apply1(w[1], &[w[0]], s_gate());
+        s.apply1(w[1], &[w[0]], s_gate());
+        s.apply1(w[1], &[w[0]], s_gate());
+        s.flip(w[1], &[w[0]]);
+        assert!(s.is_clean(&[w[1]]));
+    }
+}
+
+/// Fixture r9-codex-oracle: h c; oracle d ^= c twice (remaps); h c; qfree.
+#[test]
+fn remap_compute_uncompute_between_inverse_gates_is_exactly_clean() {
+    for mut s in engines() {
+        let w = s.alloc_wires(7);
+        let (c, d) = (w[1], w[2]);
+        s.apply1(c, &[], h());
+        for _ in 0..2 {
+            s.map_basis(|k| {
+                let mut out = k.clone();
+                if k.bit(c) {
+                    out.set_bit(d, !k.bit(d));
+                }
+                out
+            });
+        }
+        s.apply1(c, &[], h());
+        assert!(s.is_clean(&w[3..]));
+        assert!(s.is_clean(&[d]));
+        assert!(s.is_clean(&[c]));
+    }
+}
+
+/// Fixture r9-sol-qinplace (reverse): h c; xor c->s, swap c<->s, xor c->s
+/// (the identity on the support, not on the packed domain); h c. The
+/// released wire must be exactly factored: no residue may remain
+/// materialized on a released wire (the full gate saw distance 1 in the
+/// CLI's projected state when it did).
+#[test]
+fn support_restricted_remaps_compose_and_release_factors_exactly() {
+    for mut s in engines() {
+        let w = s.alloc_wires(3);
+        let (t, c, k) = (w[0], w[1], w[2]);
+        s.set_state([(BigUint::zero(), (0.0, 1.0))].into_iter().collect());
+        s.apply1(c, &[], h());
+        let xor = |k_: &BigUint| {
+            let mut out = k_.clone();
+            if k_.bit(c) {
+                out.set_bit(k, !k_.bit(k));
+            }
+            out
+        };
+        s.map_basis(xor);
+        s.map_basis(|key| {
+            let mut out = key.clone();
+            out.set_bit(c, key.bit(k));
+            out.set_bit(k, key.bit(c));
+            out
+        });
+        s.map_basis(xor);
+        s.apply1(c, &[], h());
+        assert!(s.is_clean(&[c, k]));
+        s.rewind_clean_wires(c).expect("released wires are clean");
+        let snap = s.amplitudes();
+        assert_eq!(snap.len(), 1, "released wires keep no residue: {snap:?}");
+        assert!(
+            snap.keys()
+                .all(|key| !key.bit(c) && !key.bit(k) && !key.bit(t))
+        );
+    }
 }

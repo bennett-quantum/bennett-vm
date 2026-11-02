@@ -14,9 +14,7 @@
 //! branch norm, rounded down, exceeds that branch's error bound (T3). Anything
 //! else is undecidable and faults loudly; compaction simply leaves such a wire
 //! materialized, so it never deletes amplitude the exact state has.
-use super::{
-    Complex, DenseState, U, gamma, matrix_norm_upper, pair_index, phase_norm_upper,
-};
+use super::{Complex, DenseState, U, gamma, matrix_norm_upper, pair_index, phase_norm_upper};
 use crate::{bigint::BigUint, exact::Exact, json::Json};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,6 +30,8 @@ fn next_seq() -> u64 {
 const LOG_LIVE_CAP: usize = 4096;
 /// Live entries scanned backwards for an exact inverse to cancel against.
 const CANCEL_WALK: usize = 256;
+/// Largest packed domain whose remap key map is recorded.
+const REMAP_RECORD_MAX: usize = 1 << 12;
 
 #[derive(Clone, Debug, PartialEq)]
 enum OpKind {
@@ -48,8 +48,25 @@ enum OpKind {
         wires: Vec<usize>,
         phase: Complex,
     },
-    /// Measurement, preparation, input state, remap or merged history.
-    Other,
+    /// `QuantumState::prepare` (wires in call order).
+    Prepare {
+        wires: Vec<usize>,
+        value: BigUint,
+    },
+    /// A dense measurement with its draw and the outcome the dense engine took.
+    Measure {
+        wires: Vec<usize>,
+        draw: f64,
+        value: BigUint,
+    },
+    /// `set_state` input (exact dyadic amplitudes).
+    Input(std::sync::Arc<BTreeMap<BigUint, (f64, f64)>>),
+    /// A remap recorded as its key map over the support bitmap (which holds
+    /// the whole exact support); recorded only for small domains. Adjacent
+    /// recorded remaps compose into one entry.
+    Remap(std::sync::Arc<BTreeMap<BigUint, BigUint>>),
+    /// An unrecorded remap or merged history: not replayable.
+    Opaque,
 }
 
 #[derive(Clone, Debug)]
@@ -176,9 +193,12 @@ fn inverse(old: &Op, new: &Op) -> bool {
                 wires: b,
                 phase: pb,
             },
-        ) => {
-            a == b
-                && Exact::pair(pa.re, pa.im).mul(&Exact::pair(pb.re, pb.im)) == Exact::one()
+        ) => a == b && Exact::pair(pa.re, pa.im).mul(&Exact::pair(pb.re, pb.im)) == Exact::one(),
+        // Adjacent remaps (remaps commute with nothing): the support at the
+        // second lies inside f(domain of the first), so g(f(k)) == k on the
+        // keys where both are defined makes the pair the identity.
+        (OpKind::Remap(f), OpKind::Remap(g)) => {
+            f.iter().all(|(k, fk)| g.get(fk).is_none_or(|gk| gk == k))
         }
         _ => false,
     }
@@ -214,6 +234,44 @@ impl Log {
             writes,
             acts,
         };
+        if let OpKind::Remap(g) = &new.kind
+            && let Some(idx) = self.ops.iter().rposition(Option::is_some)
+            && let Some(Op {
+                kind: OpKind::Remap(f),
+                ..
+            }) = &self.ops[idx]
+        {
+            // Bits move with f, so the support at g is f(support at f) and
+            // every f(k) lies in g's table; otherwise do not compose.
+            let composed: Option<BTreeMap<BigUint, BigUint>> = f
+                .iter()
+                .map(|(k, fk)| g.get(fk).map(|gk| (k.clone(), gk.clone())))
+                .collect();
+            if let Some(h) = composed {
+                if h.iter().all(|(k, hk)| k == hk) {
+                    self.retire(idx);
+                    return;
+                }
+                let old = self.ops[idx].as_mut().unwrap();
+                let added: Vec<usize> = new
+                    .writes
+                    .iter()
+                    .copied()
+                    .filter(|w| !old.writes.contains(w))
+                    .collect();
+                old.kind = OpKind::Remap(std::sync::Arc::new(h));
+                old.writes.extend(&added);
+                old.writes.sort_unstable();
+                let end = old.end;
+                for w in added {
+                    let a = self.anchors.entry(w).or_default();
+                    if end >= a.seq {
+                        a.count += 1;
+                    }
+                }
+                return;
+            }
+        }
         let mut seen = 0;
         for idx in (0..self.ops.len()).rev() {
             let Some(old) = &self.ops[idx] else {
@@ -241,7 +299,9 @@ impl Log {
     }
 
     fn retire(&mut self, idx: usize) {
-        let op = self.ops[idx].take().expect("dense runtime: retiring a dead log entry");
+        let op = self.ops[idx]
+            .take()
+            .expect("dense runtime: retiring a dead log entry");
         self.live -= 1;
         for &w in &op.writes {
             let a = self.anchors.entry(w).or_default();
@@ -279,7 +339,7 @@ impl Log {
         self.ops.push_front(Some(Op {
             seq: lo,
             end: hi,
-            kind: OpKind::Other,
+            kind: OpKind::Opaque,
             exact: false,
             writes: writes.clone(),
             acts: None,
@@ -311,6 +371,10 @@ impl Log {
 /// - rx/ry projections have identical diagonal entries (one symbolic value);
 /// - rz projections are diag(e^{-ia}, e^{ia}), so a unit first entry forces
 ///   the identity; every rotation at a subnormal angle projects to I.
+///
+/// This relies on `QuantumState::apply_exact` receiving only
+/// `Exact::rotation` matrices (its two call sites in src/action.rs); passing
+/// exact operands explicitly is bennett-vm-k8w.
 fn classify(m: &[[Complex; 2]; 2]) -> (bool, bool) {
     let off = m[0][1] == Complex::ZERO && m[1][0] == Complex::ZERO;
     if off && m[0][0] == Complex::ONE && m[1][1] == Complex::ONE {
@@ -486,8 +550,8 @@ impl Runtime {
 
     fn branch_norm_lower(&self, p: usize, value: bool) -> f64 {
         let (norm, steps) = self.branch_norm_raw(p, value);
-        let low = (norm * (1.0 - gamma(4 * steps + 8)) - steps as f64 * f64::MIN_POSITIVE)
-            .next_down();
+        let low =
+            (norm * (1.0 - gamma(4 * steps + 8)) - steps as f64 * f64::MIN_POSITIVE).next_down();
         low.max(0.0)
     }
 
@@ -575,11 +639,36 @@ impl Runtime {
         }
     }
 
+    /// Factor released wires that are exactly constant. Wires the
+    /// certificates leave undecided are settled by the exact replay when
+    /// possible; the replayed value re-anchors the history certificate.
+    /// Wires that stay undecided remain materialized (never guessed).
     pub fn release(&mut self, wires: &[usize]) {
+        let mut undecided = vec![];
         for &wire in wires {
-            if self.position(wire).is_some()
-                && let Decision::Constant(value) = self.decide(wire)
-            {
+            if self.position(wire).is_none() {
+                continue;
+            }
+            match self.decide(wire) {
+                Decision::Constant(value) => self.remove_constant(wire, value),
+                Decision::Undecidable(_) => undecided.push(wire),
+                Decision::Varies => {}
+            }
+        }
+        if undecided.is_empty() {
+            return;
+        }
+        let Some(exact) = self.replay() else {
+            return;
+        };
+        for wire in undecided {
+            if let Some(v) = exact.constant_value(&[wire]) {
+                let value = v.bit(0);
+                self.log.set_anchor(wire, value);
+                assert!(
+                    !self.certainly_nonzero(self.position(wire).unwrap(), !value),
+                    "dense runtime: internal error: exact replay contradicts wire {wire}"
+                );
                 self.remove_constant(wire, value);
             }
         }
@@ -602,14 +691,81 @@ impl Runtime {
                 }
             }
         }
-        if let Some(why) = undecidable {
-            panic!(
-                "dense runtime: cleanliness/constant value is undecidable within the \
-                 numerical error bound ({why}); the dense engine does not guess exact \
-                 ISA decisions: rerun with the exact engine (BENNETT_VM_ENGINE unset)"
-            );
+        let Some(why) = undecidable else {
+            return Some(result);
+        };
+        // Exact fallback: the interpreter's own answer on the replayed history.
+        if let Some(exact) = self.replay() {
+            let answer = exact.constant_value(wires);
+            if let Some(v) = &answer {
+                for (b, &wire) in wires.iter().enumerate() {
+                    if let Decision::Constant(c) = self.decide(wire) {
+                        assert_eq!(
+                            c,
+                            v.bit(b),
+                            "dense runtime: internal error: certificate for wire {wire} \
+                             contradicts the exact replay"
+                        );
+                    }
+                }
+            }
+            return answer;
         }
-        Some(result)
+        panic!(
+            "dense runtime: cleanliness/constant value is undecidable within the \
+             numerical error bound ({why}) and the history is not exactly replayable; \
+             the dense engine does not guess exact ISA decisions: rerun with the exact \
+             engine (BENNETT_VM_ENGINE unset)"
+        );
+    }
+
+    /// Exact fallback: replay the live operation history through the exact
+    /// interpreter (`QuantumState::new()`), issuing the same calls the
+    /// program issued. Retired pairs are exact identities. Possible only
+    /// when every live operation has exact operands: no rotation-shaped
+    /// matrix, remap or merged history, and every replayed measurement
+    /// takes the outcome the dense engine took. Cost is that of the exact
+    /// interpreter on the live history; it runs only for decisions the
+    /// certificates cannot settle.
+    fn replay(&self) -> Option<crate::action::QuantumState> {
+        if self.log.merged {
+            return None;
+        }
+        let amp = |z: Complex| (z.re, z.im);
+        let mut q = crate::action::QuantumState::new();
+        for op in self.log.ops.iter().flatten() {
+            match &op.kind {
+                OpKind::Gate {
+                    target,
+                    controls,
+                    m,
+                } if op.exact => q.apply1(*target, controls, m.map(|r| r.map(amp))),
+                OpKind::Flip { target, controls } => q.flip(*target, controls),
+                OpKind::Phase { wires, phase } => q.phase_if_all(wires, amp(*phase)),
+                OpKind::Prepare { wires, value } => q.prepare(wires, value),
+                OpKind::Measure { wires, draw, value } => {
+                    if q.measure(wires, *draw).0 != *value {
+                        return None;
+                    }
+                }
+                OpKind::Input(input) => q.set_state((**input).clone()),
+                OpKind::Remap(table) => {
+                    let mut missing = false;
+                    q.map_basis(|k| match table.get(k) {
+                        Some(out) => out.clone(),
+                        None => {
+                            missing = true;
+                            k.clone()
+                        }
+                    });
+                    if missing {
+                        return None;
+                    }
+                }
+                OpKind::Gate { .. } | OpKind::Opaque => return None,
+            }
+        }
+        Some(q)
     }
 
     pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
@@ -619,8 +775,15 @@ impl Runtime {
         );
         self.release(wires);
         let ws = sorted(wires);
-        self.log
-            .record(OpKind::Other, false, ws.clone(), Some(ws));
+        self.log.record(
+            OpKind::Prepare {
+                wires: wires.to_vec(),
+                value: value.clone(),
+            },
+            false,
+            ws.clone(),
+            Some(ws),
+        );
         for (b, &w) in wires.iter().enumerate() {
             self.basis.set_bit(w, value.bit(b));
             self.log.set_anchor(w, value.bit(b));
@@ -630,6 +793,7 @@ impl Runtime {
     pub fn set_state(&mut self, input: BTreeMap<BigUint, (f64, f64)>) {
         assert!(!input.is_empty(), "dense runtime: empty input state");
         *self = Self::new();
+        let recorded = std::sync::Arc::new(input.clone());
         self.basis = input.keys().next().unwrap().clone();
         let varying = input
             .keys()
@@ -654,7 +818,7 @@ impl Runtime {
         // State preparation may contain an explicitly unnormalised vector.
         self.state.norm_upper = (self.state.norm2().sqrt() * (1.0 + 64.0 * U)).next_up();
         self.log
-            .record(OpKind::Other, false, self.active.clone(), None);
+            .record(OpKind::Input(recorded), false, self.active.clone(), None);
         for w in 0..self.basis.bits() {
             if self.basis.bit(w) {
                 self.log.set_anchor(w, true);
@@ -737,7 +901,14 @@ impl Runtime {
     }
 
     /// A non-diagonal kernel on target position `p` mixes its branches.
-    fn charge_target(&mut self, p: usize, m: &[[Complex; 2]; 2], controlled: bool, b0: f64, r0: f64) {
+    fn charge_target(
+        &mut self,
+        p: usize,
+        m: &[[Complex; 2]; 2],
+        controlled: bool,
+        b0: f64,
+        r0: f64,
+    ) {
         let a = matrix_norm_upper(m);
         self.charge_within(a, 32, b0, r0, Some(p));
         let round = self.rounding(a, 32, b0, r0);
@@ -816,7 +987,15 @@ impl Runtime {
         }
     }
 
-    fn general(&mut self, p: usize, cs: &[usize], m: &[[Complex; 2]; 2], exact: bool, b0: f64, r0: f64) {
+    fn general(
+        &mut self,
+        p: usize,
+        cs: &[usize],
+        m: &[[Complex; 2]; 2],
+        exact: bool,
+        b0: f64,
+        r0: f64,
+    ) {
         self.state.apply1(p, cs, *m);
         let nz = |r: usize, c: usize| {
             if !exact || m[r][c] != Complex::ZERO {
@@ -861,7 +1040,9 @@ impl Runtime {
             self.branch[p] = if cs.is_empty() {
                 [e1, e0]
             } else {
-                let both = (e0.hypot(e1) * (1.0 + 4.0 * U)).next_up().min(self.state.bound);
+                let both = (e0.hypot(e1) * (1.0 + 4.0 * U))
+                    .next_up()
+                    .min(self.state.bound);
                 [both, both]
             };
         }
@@ -893,21 +1074,29 @@ impl Runtime {
     /// take linear work; general long cycles trade time for bounded scratch.
     pub fn map_basis(&mut self, mut f: impl FnMut(&BigUint) -> BigUint) {
         self.compact();
-        let (output_basis, changed) = loop {
+        let (output_basis, changed, table) = loop {
+            let record = self.state.len() <= REMAP_RECORD_MAX;
+            let mut table = BTreeMap::new();
             let first = f(&self.key(0));
             let mut varying = BigUint::zero();
             let mut changed = first.bitxor(&self.key(0));
+            if record && self.support_bit(0) {
+                table.insert(self.key(0), first.clone());
+            }
             for i in 1..self.state.len() {
                 let key = self.key(i);
                 let out = f(&key);
                 varying = varying.bitor(&out.bitxor(&first));
                 changed = changed.bitor(&out.bitxor(&key));
+                if record && self.support_bit(i) {
+                    table.insert(key, out);
+                }
             }
             let additional: Vec<_> = (0..varying.bits())
                 .filter(|&w| varying.bit(w) && self.position(w).is_none())
                 .collect();
             if additional.is_empty() {
-                break (first, changed);
+                break (first, changed, record.then_some(table));
             }
             for w in additional {
                 self.promote(w);
@@ -917,7 +1106,13 @@ impl Runtime {
         // whole exact support) is an exact no-op and is not logged.
         let writes: Vec<usize> = (0..changed.bits()).filter(|&w| changed.bit(w)).collect();
         if !writes.is_empty() {
-            self.log.record(OpKind::Other, false, writes, None);
+            match table {
+                Some(t) => {
+                    self.log
+                        .record(OpKind::Remap(std::sync::Arc::new(t)), true, writes, None)
+                }
+                None => self.log.record(OpKind::Opaque, false, writes, None),
+            }
         }
         let mapped = |runtime: &Self, i: usize, f: &mut dyn FnMut(&BigUint) -> BigUint| {
             let k = f(&runtime.key(i));
@@ -1006,7 +1201,16 @@ impl Runtime {
             };
             value.set_bit(i, bit);
         }
-        self.log.record(OpKind::Other, false, sorted(wires), None);
+        self.log.record(
+            OpKind::Measure {
+                wires: wires.to_vec(),
+                draw,
+                value: value.clone(),
+            },
+            false,
+            sorted(wires),
+            None,
+        );
         for &wire in wires {
             self.log.set_anchor(wire, false);
             self.remove_constant(wire, false);
@@ -1030,18 +1234,12 @@ impl Runtime {
     // (src/action.rs is outside this change); unit-tested below.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn equals(&self, other: &Self) -> bool {
-        if !self.log.merged && !other.log.merged && self.log.live_seqs() == other.log.live_seqs()
-        {
+        if !self.log.merged && !other.log.merged && self.log.live_seqs() == other.log.live_seqs() {
             return true;
         }
         let a = self.snapshot();
         let b = other.snapshot();
-        let wires: BTreeSet<usize> = self
-            .active
-            .iter()
-            .chain(&other.active)
-            .copied()
-            .collect();
+        let wires: BTreeSet<usize> = self.active.iter().chain(&other.active).copied().collect();
         let keys: BTreeSet<&BigUint> = a.keys().chain(b.keys()).collect();
         let mut total: f64 = 0.0;
         let mut per: BTreeMap<(usize, bool), f64> = BTreeMap::new();
@@ -1082,10 +1280,14 @@ impl Runtime {
         if total == 0.0 && ba == 0.0 && bb == 0.0 {
             return true;
         }
+        if let (Some(x), Some(y)) = (self.replay(), other.replay()) {
+            return x.exact_equals(&y);
+        }
         panic!(
             "dense runtime: exact state equality is undecidable within the numerical \
-             error bound (distance {total:e}, bounds {ba:e} + {bb:e}); the dense engine \
-             does not guess exact ISA decisions: rerun with the exact engine"
+             error bound (distance {total:e}, bounds {ba:e} + {bb:e}) and a history is \
+             not exactly replayable; the dense engine does not guess exact ISA \
+             decisions: rerun with the exact engine"
         );
     }
 
@@ -1228,8 +1430,11 @@ mod tests {
         let (re, rd) = (e.amplitudes(), r.snapshot());
         for (p, &w) in r.active.iter().enumerate() {
             for v in [false, true] {
-                let keys: BTreeSet<&BigUint> =
-                    re.keys().chain(rd.keys()).filter(|k| k.bit(w) == v).collect();
+                let keys: BTreeSet<&BigUint> = re
+                    .keys()
+                    .chain(rd.keys())
+                    .filter(|k| k.bit(w) == v)
+                    .collect();
                 let mut d2 = 0.0;
                 for k in keys {
                     let x = re.get(k).copied().unwrap_or((0.0, 0.0));

@@ -180,28 +180,121 @@ second amplitude vector. The interpreter's involutions take linear work;
 long general cycles can cost quadratic time to keep scratch bounded.
 The adapter is tested on a four-cycle with 80 uniform output bits.
 
-Cleanliness and reversal of numerical states are explicitly numerical.
-A candidate constant wire is factored only when its discarded branch norm
-is no larger than the current state-error allowance (capped at 1/4).
-A scaled norm confirms the candidate, so squaring a 1e-200 input amplitude
-cannot erase its support through underflow. The discarded norm, including
-rounding/underflow allowance, is added to B and recorded as a numerical
-projection. Bit removal compacts the arrays in place. Measured wires have
-already been reset by collapse; their packed coordinates are reclaimed
-without consuming additional draws. Constant measured bits are merged
-into the result in the original wire-list order. Factoring also runs before
-measurement: a boundary draw of zero after a circuit and its actual inverse
-must not sample a tiny numerical residue. The full history differential
-suite caught this case; the discarded amplitude is charged to B and an
-explicit inverse-Bell regression covers all four basis inputs.
+Discrete decisions are exact or fail loudly (beads yt9, ykb; review
+`docs/reviews/2026-11-02-design-review.md`). A numerical state cannot
+certify that a residue is zero, so constant-wire, §5.6 cleanliness and
+§7.4 rewind answers are never decided within the error allowance. A wire
+is constant only by one of three exact certificates:
 
-`exact_equals` never accepts a dense state as an exact proof. Standalone
-numerical reversal instead compares the state distance against the two
-reported error allowances, including global phase. A scaled distance
-avoids an underflow-to-zero equality result. Snapshot/transaction cloning
-at VM API boundaries retains its existing semantics and can copy a state;
-the one-vector memory statement applies to an individual state and its
-kernels, not arbitrary caller-requested snapshots or VM transactions.
+- T0, metadata: the wire is basis metadata, exact by construction.
+- T1, operation history: no live value-changing operation touches the wire
+  since it was last an exact constant. The runtime logs logical operations
+  and retires an inverse pair when the exact product of the two operands is
+  the identity and every live operation between them commutes with them
+  (operations commute when neither changes a wire the other involves). An
+  operand counts as exact only when it cannot be a binary64 projection of a
+  symbolic rotation: rx/ry projections have equal diagonal entries and rz
+  projections with a unit first entry are the identity, so H, S, T, Z, their
+  inverses, flips and phases cancel, while rotation-shaped matrices never do.
+  This classification relies on `apply_exact` carrying only
+  `Exact::rotation` matrices (true of both call sites in `action.rs`).
+  A remap over a packed domain of at most 4096 keys is recorded as its
+  key map, restricted to the support bitmap, which holds the exact support.
+  Adjacent recorded remaps compose into one entry because support bits move
+  with the map. The entry retires when the composition is the identity on
+  that support. For example, XOR, swap, XOR in an adjoint `qinplace` is
+  the identity on the support but not on the packed domain. This covers oracle compute and
+  uncompute, as in fixture `r9-codex-oracle`. Remaps over larger domains
+  are unrecorded and not replayable (bennett-vm-k8w).
+  Measurement, preparation, input states and remaps are barriers; measured and prepared wires are re-anchored to their new exact
+  value. The log is bounded (old entries merge into one barrier).
+- T2, support: a bitmap, one bit per amplitude, marks amplitudes that may be
+  nonzero in the exact or computed state. Kernels update it lane-parallel
+  (a general gate ORs the inputs with nonzero exact coefficients,
+  permutations and remaps move bits, diagonals keep them). A wire whose
+  other branch has no set bit is exactly constant. This covers Bennett
+  compute/use/uncompute with non-commuting uses in between.
+
+A wire varies only when both branch masses are certainly nonzero: the
+computed branch norm, rounded down, exceeds that branch's error bound (T3).
+Per packed wire p and value v the runtime keeps a bound on the error
+restricted to bit p = v. A kernel whose target is not p (or a diagonal one)
+acts within each branch and maps it like B; a kernel on p mixes the two
+branch bounds by the moduli of its entries; flips move them; a promoted
+wire starts at [B, 0]. Rounding terms stay global (gamma*A*(R+B)), so a
+branch bound is never below the per-gate rounding floor, but it is not
+amplified by unrelated history. When T0-T3 cannot settle a
+`constant_value` question, the runtime falls back to an exact answer. It
+replays the live operation history through the exact interpreter
+(`QuantumState::new()`), making the same calls the program made. Retired
+pairs are exact identities, so only live operations are replayed. Replay
+is possible only when every live operation has exact operands: no
+rotation-shaped matrix, no unrecorded remap and no merged history. Every
+replayed measurement (recorded with its draw) must also take the outcome
+the dense engine took. This is how algebraic cancellations are decided,
+for example a controlled -I that acts as Z between two H gates
+(conformance `interference`), which no structural certificate sees.
+Replay is checked against every certificate that did decide. It costs as
+much as the exact interpreter on the live history and runs only for
+undecided questions. `release` uses the same replay for released wires the
+certificates leave undecided, and re-anchors their history certificate.
+This keeps a residue that is exactly zero from staying materialized on a
+released wire, where a projected report would otherwise show it. Every
+other case is undecidable: `constant_value`,
+and so `is_clean`, `qfree`, region release and rewind, panics with
+"undecidable" and asks for the exact engine. Compaction before
+measurement and remaps, and release, factor only certified constants, so
+they never delete amplitude the exact state has. Dropping the computed
+residue of a certified constant is a contraction (the exact state has no
+mass there) and is not charged to B; `numerical_projections` counts such
+residue drops. A scaled norm still guards against squaring underflow.
+Measured wires are reset by collapse and their coordinates reclaimed
+without consuming draws; constant measured bits merge into the result in
+wire-list order. A randomized test checks thousands of decisions against
+the interpreter (no disagreement; about 4% undecidable on circuits that mix
+rotation-shaped matrices). Remaining coverage gaps are filed: rotation
+inverse pairs need exact operands from `action.rs` (bennett-vm-k8w).
+
+`exact_equals` never accepts a dense state as an exact proof. The dense
+reversal decision is `Runtime::equals`: true by identical live operation
+history from shared ancestry (sequence numbers are globally unique, so an
+actual inverse of exact operands certifies equality although B > 0) or by
+two error-free equal vectors. It is false when the distance, rounded
+down, exceeds the total or a per-wire-branch error bound. Otherwise it
+compares the two exact replays when both histories are replayable, and
+fails with a loud "undecidable" panic when they are not. `QuantumState::numerically_equals` in `action.rs`
+still compares against B_a + B_b and must delegate to it (bennett-vm-5vj,
+test `d1b` ignored on that bead). Snapshot/transaction cloning at VM API
+boundaries retains its existing semantics and can copy a state; the
+one-vector memory statement applies to an individual state and its kernels
+(plus the 1/128-size support bitmap), not arbitrary caller-requested
+snapshots or VM transactions.
+
+### Mixed fat objects (bennett-4ht)
+
+The decision machinery assumes nothing about the whole program. It lives
+in one `QuantumState` (one device state) and sees only logical wire IDs,
+gate operands and remap closures; it decides no entry point, argv/envp,
+handle representation or host-memory layout. Oracle remaps that read host
+memory by reference stay ordinary `map_basis` closures, and a remap that is
+the identity on the state's domain is not logged, whatever memory it read.
+Several device states in one host process are independent: the only
+shared item is a process-wide monotonic sequence counter, which keeps
+history certificates unique across states and threads. A history equality
+certificate needs shared ancestry inside one process; a state serialized
+across a host/device boundary has no history and falls back to numerical
+refutation or a loud fault, never a guess.
+
+One decision here would need a change for a mixed fat object: an
+undecidable cleanliness or equality answer is currently a Rust panic,
+because `QuantumState::constant_value`/`is_clean`/`numerically_equals`
+(src/action.rs) return `Option`/`bool`. Inside a native host binary that
+panic would abort the host process. The exact change is to return a
+`Result` from those `QuantumState` methods, so the launch ABI reports a
+device fault (a §5.6 undecidable diagnostic) to the host. That belongs
+with the action.rs plumbing in bennett-vm-5vj and bennett-vm-k8w. Engine
+selection through the process-wide `BENNETT_VM_ENGINE` predates this fix.
+A fat object would need a per-launch selection in the launch ABI.
 
 ## Floating-point bounds
 
@@ -240,7 +333,10 @@ calculations fail explicitly instead of emitting a misleading bound.
 For measurement use eta=gamma(2*n+64), absolute probability allowance
 alpha=4*2^n*MIN_POSITIVE, selected computed mass p, and
 p_low=max(0,p-eta*p-alpha). For a supported reference outcome, the
-normalized conditional-state distance is at most 2*B/sqrt(p_low),
+normalized conditional-state distance is at most 2*B_P/sqrt(p_low), where
+B_P = min(B, min over measured wires of the branch bound of the chosen
+value) bounds the error of the projected vector (the projection onto the
+outcome lies inside each measured wire's chosen branch),
 plus reduction, square-root, division and scaling error. The engine
 charges an additional 8*(eta+alpha/p). If p_low is zero it uses the
 sum-of-vector-norms bound instead of claiming relative accuracy.
@@ -286,7 +382,7 @@ runs with B=0; dense observations never emit an exhaustive proof. Fields:
 | `qubits` | Logical wire-ID extent, including released stable IDs |
 | `packed_qubits`, `state_bytes` | Materialized coordinates and their vector allocation |
 | `gates` | Gate/remap count, including virtual constant operations |
-| `numerical_projections` | Factoring operations that discard bounded nonzero numerical residue |
+| `numerical_projections` | Factorings of exactly certified constant wires that dropped a nonzero computed residue (not charged to B) |
 
 Hardware target realization error remains a separate `target_error`.
 Simulation metadata does not replace an ISA operator-norm certificate,
@@ -428,3 +524,26 @@ Formatting checks passed for all changed Rust files. The north-star
 executor plan entry was read back from the orchestrator's plan and is
 present. No integration acceptance work remains; 28-qubit single-thread
 fusion tuning is the separate open performance bead `bennett-vm-1x1`.
+
+### Exact-decision fix gates (opus-bjm-fix, beads yt9 and ykb, 2026-11-02)
+
+The review probes are ported as `tests/dense_decisions.rs`. At 701dae3,
+6 of these tests failed as expected. The rest are regression guards for
+decisions that must stay exact: inverse pairs, Bennett uncompute,
+`interference`, bell adjoint reverse, oracle and `qinplace` remaps,
+replay through measurement, and a randomized property test. The property
+test produced about 23,100 dense decisions identical to the interpreter's,
+about 900 loud "undecidable" faults, and no disagreement. d1b, reversal
+equality through `action.rs`, is ignored on bennett-vm-5vj. The full gate
+first ran at 1ec2f7b. It found three corpus programs that the
+certificates alone could not decide (`interference`, `r9-codex-oracle`,
+the `r9-sol-qinplace` reverse). Those led to the exact replay fallback,
+recorded remaps and the release replay.
+
+```
+cargo test --offline -j4 -- --test-threads=2   # 09:03-09:41Z, exit 0
+# all suites pass: lib 27, dense_decisions 17 (+1 ignored on 5vj),
+# dense_differential 12, dense_kernels 26, differential 21 (dense compared
+# on every fixture command), launch_c 2, and the rest of the crate.
+cargo build --offline -j4                      # whole crate, passed
+```

@@ -1,6 +1,10 @@
 //! Independent consumer of the published §11.1 catalog. Source linking is a
 //! separate prerequisite; successful catalog authentication is not a schedule verdict.
 mod address;
+mod calls;
+pub use calls::{BoundCalls, CallDomain, CallTarget};
+#[cfg(test)]
+mod call_domains_tests;
 mod cleanup;
 #[cfg(test)]
 #[path = "ref_library/oracle_bindings_tests.rs"]
@@ -92,6 +96,7 @@ pub struct Bindings {
     scratch: BTreeSet<String>,
     registry: Option<Rc<Registry>>,
     call_index: Rc<Cell<usize>>,
+    call_domains: Rc<RefCell<calls::CallCollector>>,
     active_symbols: Rc<RefCell<Vec<String>>>,
     source_point: Option<crate::sched::Point>,
     source_next: Rc<Cell<usize>>,
@@ -266,12 +271,7 @@ impl Catalog {
         args: &[Json],
         bindings: &Bindings,
     ) -> Result<Vec<Leaf>, String> {
-        let mut out = vec![];
-        let mut next = 0;
-        let mut active = vec![];
-        self.invoke(kind, args, bindings, &mut out, &mut next, &mut active)?;
-        resolve_lifetimes(&mut out)?;
-        Ok(out)
+        self.expand_with_calls(kind, args, bindings).map(|e| e.0)
     }
     fn invoke(
         &self,
@@ -329,6 +329,7 @@ impl Catalog {
                 local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
                 local.call_index = Rc::new(Cell::new(0));
                 local.source_next = Rc::new(Cell::new(0));
+                local.call_domain();
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
             } else if let Some(storage) = c.get("$oracle_storage") {
                 let mut local = env.clone();
@@ -604,6 +605,7 @@ impl Catalog {
                 let first_leaf = env.source_next.get();
                 let first_call = env.call_index.get();
                 let first_carrier = env.cleanup.carriers.borrow().len();
+                let first_domain = env.call_domains.borrow().records.len();
                 self.walk(field(c, "body")?, env, out, next, active)?;
                 if out[start..].iter().any(|l| l.event.is_some()) {
                     return Err(err("classical inverse requires retained §7.4 history"));
@@ -618,6 +620,26 @@ impl Catalog {
                     // independently formed source spaces inside callees.
                     let end_leaf = env.source_next.get();
                     let end_call = env.call_index.get();
+                    let mut domains = env.call_domains.borrow_mut();
+                    if let Some(index) = domains.index(&env.call_index) {
+                        let targets =
+                            &mut domains.records[index].domain.targets[first_call..end_call];
+                        for target in targets.iter_mut() {
+                            target.adjoint = !target.adjoint;
+                        }
+                        targets.reverse();
+                    }
+                    for domain in &mut domains.records[first_domain..] {
+                        if let Some(index) = domain
+                            .domain
+                            .path
+                            .get_mut(env.cleanup.prefix.len())
+                            .and_then(|p| p.call_index.as_mut())
+                        {
+                            *index = first_call + (end_call - 1 - *index);
+                        }
+                    }
+                    drop(domains);
                     for l in &mut out[start..] {
                         if let Some(a) = &mut l.address {
                             if a.path.len() == 1 {
@@ -753,6 +775,7 @@ impl Catalog {
                 callee.registry = Some(registry.clone());
                 callee.coordinate = env.coordinate.clone();
                 callee.cleanup = env.cleanup.clone();
+                callee.call_domains = env.call_domains.clone();
                 if let Some(caller) = &env.source_point {
                     let mut edge = caller.clone();
                     edge.iteration = env.source_iterations.clone();
@@ -766,6 +789,11 @@ impl Catalog {
                     return Err(err("cyclic symbol expansion"));
                 }
                 let call_index = env.call_index.get();
+                env.call_target(CallTarget {
+                    interface: registry.identities.interface[name].clone(),
+                    closure: hash.clone(),
+                    adjoint,
+                });
                 env.call_index.set(call_index + 1);
                 callee.active_symbols.borrow_mut().push(hash.clone());
                 let start = out.len();

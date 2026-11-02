@@ -126,10 +126,12 @@ impl Catalog {
         env.wire("$controls", inherited_controls);
         env.add_controls(wires(&s("$controls"), &env)?);
         let body = body(object, name, &mut env)?;
-        let leaves = self.expand("adj", &[body], &env)?;
+        let (leaves, mut calls) = self.expand_with_calls("adj", &[body], &env)?;
+        calls.region = Some(name.into());
         let cleanups = env.cleanup.carriers.borrow().clone();
         Ok(ActionExpansion {
             leaves,
+            calls,
             cleanups,
             cleanup_pairing_complete: !env.cleanup.incomplete.get(),
         })

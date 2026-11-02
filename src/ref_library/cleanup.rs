@@ -22,6 +22,7 @@ pub struct CleanupCarrier {
 #[derive(Clone, Debug, Default)]
 pub struct ActionExpansion {
     pub leaves: Vec<Leaf>,
+    pub calls: BoundCalls,
     pub cleanups: Vec<CleanupCarrier>,
     /// False for source pairs whose whole realisation is still staged. Such a
     /// default trace must not be treated as an admitted cleanup schedule.

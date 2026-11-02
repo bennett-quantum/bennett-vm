@@ -334,6 +334,7 @@ fn validate_path(
     doc: &Json,
     object: &Object,
     ids: &Identities,
+    bound: bool,
 ) -> Result<(), String> {
     use crate::object::FnKind;
     let mut oracle = doc
@@ -355,7 +356,7 @@ fn validate_path(
             oracle = Some(name);
         }
         if let Some(key) = &p.instance {
-            if f.kind == FnKind::Lproc {
+            if f.kind == FnKind::Lproc && !bound {
                 let root = oracle.ok_or(error("lproc instance has no enclosing oracle"))?;
                 if !crate::instances::for_oracle(object, root)?
                     .iter()
@@ -363,7 +364,7 @@ fn validate_path(
                 {
                     return Err(error("instance key is not formed in enclosing oracle"));
                 }
-            } else if !key.is_empty() {
+            } else if f.kind != FnKind::Lproc && !key.is_empty() {
                 return Err(error("instance must be [] outside lproc"));
             }
         }
@@ -397,6 +398,9 @@ fn validate_path(
                 return Err(error("iteration outside source qloop domain"));
             }
         }
+        if bound {
+            continue;
+        }
         let targets = semantic_targets(point.instruction);
         if p.call_index.is_some_and(|n| n >= targets.len()) {
             return Err(error("call_index outside semantic-call domain"));
@@ -413,7 +417,17 @@ fn validate_path(
     }
     Ok(())
 }
+/// Preliminary source checks. Concrete 0.9 consumers additionally validate the
+/// bound library's occurrence domains with `validate_bound_entries`.
 pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
+    validate_entries_mode(doc, object, ids, None)
+}
+fn validate_entries_mode(
+    doc: &Json,
+    object: &Object,
+    ids: &Identities,
+    calls: Option<&crate::ref_library::BoundCalls>,
+) -> Result<(), String> {
     let check = || -> Result<(), String> {
         keys(doc, &["bindings", "entries"])?;
         for e in arr(field(doc, "entries")?)? {
@@ -472,7 +486,10 @@ pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result
                 }
                 _ => unreachable!(),
             }
-            validate_path(&selector, doc, object, ids)?;
+            validate_path(&selector, doc, object, ids, calls.is_some())?;
+            if let Some(calls) = calls {
+                validate_bound_path(&selector, doc, object, ids, calls)?;
+            }
         }
         Ok(())
     };
@@ -483,6 +500,78 @@ pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result
             error(s)
         }
     })
+}
+
+/// Validate concrete source paths against a bound library expansion.
+pub fn validate_bound_entries(
+    doc: &Json,
+    object: &Object,
+    ids: &Identities,
+    calls: &crate::ref_library::BoundCalls,
+) -> Result<(), String> {
+    let region = string(field(field(doc, "bindings")?, "region")?)?;
+    if !calls.is_for(object, region) {
+        return Err(error(
+            "semantic-call domains are not bound to this object and region",
+        ));
+    }
+    validate_entries_mode(doc, object, ids, Some(calls))
+}
+
+fn path_matches(path: &[PathSelector], points: &[Point], indices: bool) -> bool {
+    path.len() <= points.len()
+        && path.iter().zip(points).all(|(p, q)| {
+            p.symbol == q.symbol
+                && p.point == q.point
+                && p.iteration.as_ref().is_none_or(|v| v == &q.iteration)
+                && p.instance.as_ref().is_none_or(|v| v == &q.instance)
+                && (!indices || p.call_index.is_none_or(|v| q.call_index == Some(v)))
+        })
+}
+
+fn validate_bound_path(
+    selector: &Selector,
+    doc: &Json,
+    object: &Object,
+    ids: &Identities,
+    calls: &crate::ref_library::BoundCalls,
+) -> Result<(), String> {
+    if selector.path.is_empty() {
+        return Ok(());
+    }
+    let root = string(field(field(doc,"bindings")?,"region")?)?;
+    let first = &selector.path[0];
+    let mut rooted = ids.interface.get(root) == Some(&first.symbol);
+    if !rooted && object.function(root).is_some_and(|f|f.kind == crate::object::FnKind::Oracle) {
+        rooted = crate::instances::for_oracle(object,root)?.iter().any(|instance|
+            ids.interface.get(&instance.symbol) == Some(&first.symbol)
+            && first.instance.as_ref().is_none_or(|key| key == &instance.key));
+    }
+    if !rooted { return Err(error("path is not rooted in the bound invocation")); }
+    let mut owner_exists = false;
+    for domain in calls.domains() {
+        if path_matches(&selector.path, &domain.path, false) {
+            owner_exists = true;
+        }
+        if path_matches(&selector.path, &domain.path, true) {
+            return Ok(());
+        }
+        for index in 0..domain.targets.len() {
+            let mut edge = domain.path.clone();
+            if let Some(point) = edge.last_mut() {
+                point.call_index = Some(index);
+            }
+            if path_matches(&selector.path, &edge, true) {
+                return Ok(());
+            }
+        }
+    }
+    if owner_exists {
+        return Err(error("call_index outside bound semantic-call domain"));
+    }
+    // A source point in a zero-trip loop emits no domain. Its structural path
+    // remains subject to source/instance checking; absence is not a tie witness.
+    validate_path(selector, doc, object, ids, false)
 }
 pub struct Bindings<'a> {
     pub region: &'a str,

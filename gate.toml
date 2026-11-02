@@ -22,3 +22,10 @@ argv = ["cargo", "build", "--offline"]
 outputs = ["reference-interpreter/target/debug/bennett-isa-ref"]
 env = { CARGO_BUILD_JOBS = "4" }
 
+[[siblings."bennett-isa-spec".build]]
+name = "published conformance harness (debug)"
+cwd = "conformance"
+argv = ["cargo", "build", "--offline"]
+outputs = ["conformance/target/debug/bennett-isa-conformance"]
+env = { CARGO_BUILD_JOBS = "4" }
+

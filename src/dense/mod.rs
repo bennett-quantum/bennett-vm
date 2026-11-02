@@ -854,6 +854,24 @@ impl DenseState {
     /// The post-measurement state bound is conditional on this outcome;
     /// evidence also reports measurement distribution uncertainty.
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (usize, String) {
+        self.measure_projected(wires, draw, &[])
+    }
+
+    /// `measure` with optional per-wire branch error bounds:
+    /// `branch[b][v]` bounds the norm of the state error restricted to
+    /// `wires[b] == v`. The projection onto the chosen outcome then has
+    /// error at most `min(B, min_b branch[b][outcome_b])`, which replaces
+    /// B in the conditional-state bound. Empty `branch` uses B alone.
+    pub(crate) fn measure_projected(
+        &mut self,
+        wires: &[usize],
+        draw: f64,
+        branch: &[[f64; 2]],
+    ) -> (usize, String) {
+        assert!(
+            branch.is_empty() || branch.len() == wires.len(),
+            "dense: measurement branch bounds do not match the measured wires"
+        );
         self.check_wires(wires);
         assert!(
             (0.0..1.0).contains(&draw),
@@ -950,8 +968,12 @@ impl DenseState {
         // amplitude-scaling roundoff, rather than charging O(n*u) alone.
         let probability_error = eta * p + absolute;
         let lower_p = (p - probability_error).max(0.0);
+        let projected = branch
+            .iter()
+            .enumerate()
+            .fold(before, |m, (b, e)| m.min(e[value >> b & 1]));
         let conditional_error = if lower_p > 0.0 {
-            2.0 * before / lower_p.sqrt()
+            2.0 * projected / lower_p.sqrt()
         } else {
             // At underflow-scale mass, use the distance bound from
             // two vector norms instead of claiming relative accuracy.

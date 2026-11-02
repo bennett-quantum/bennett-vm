@@ -72,14 +72,20 @@ fn bound_paths_reject_wrong_callees_indices_objects_and_unbound_domains() {
     }
     let doc = start_document(Json::Arr(vec![]), "root");
     assert!(sched::validate_bound_entries(&doc, &obj, &ids, &Default::default()).is_err());
-    let detached = start_document(Json::Arr(vec![point(&ids.interface["left"],"entry:0",None)]),"root");
-    assert!(sched::validate_bound_entries(&detached,&obj,&ids,&expansion.calls).is_err(),"callee source point needs its invocation prefix");
+    let detached = start_document(
+        Json::Arr(vec![point(&ids.interface["left"], "entry:0", None)]),
+        "root",
+    );
+    assert!(
+        sched::validate_bound_entries(&detached, &obj, &ids, &expansion.calls).is_err(),
+        "callee source point needs its invocation prefix"
+    );
     let changed = support::source(
-        text
-            .split_once("section functions\n")
+        text.split_once("section functions\n")
             .unwrap()
             .1
-            .replace("x w[0]", "x w[1]").trim_end(),
+            .replace("x w[0]", "x w[1]")
+            .trim_end(),
     );
     let (changed, changed_ids) = bennett_vm::load(&changed, false).unwrap();
     assert!(sched::validate_bound_entries(&doc, &changed, &changed_ids, &expansion.calls).is_err());
@@ -108,11 +114,34 @@ fn recomputed_call_domains_validate_the_actual_cleanup_owner_and_callee() {
                 }],
             )
             .unwrap();
-        let domain = expansion.calls.domains().iter().find(|d| d.path.len() == 1 && d.path[0].symbol == ids.interface["root"] && d.path[0].point == point).unwrap();
-        assert_eq!(domain.targets.iter().map(|t|t.interface.as_str()).collect::<Vec<_>>(), ["copy","other","other","copy"].map(|n|ids.interface[n].as_str()));
-        assert_eq!(domain.targets.iter().map(|t|t.adjoint).collect::<Vec<_>>(), [false,false,true,true]);
+        let domain = expansion
+            .calls
+            .domains()
+            .iter()
+            .find(|d| {
+                d.path.len() == 1
+                    && d.path[0].symbol == ids.interface["root"]
+                    && d.path[0].point == point
+            })
+            .unwrap();
+        assert_eq!(
+            domain
+                .targets
+                .iter()
+                .map(|t| t.interface.as_str())
+                .collect::<Vec<_>>(),
+            ["copy", "other", "other", "copy"].map(|n| ids.interface[n].as_str())
+        );
+        assert_eq!(
+            domain.targets.iter().map(|t| t.adjoint).collect::<Vec<_>>(),
+            [false, false, true, true]
+        );
         for (index, expected) in [(0, true), (1, true), (2, true), (3, true), (4, false)] {
-            let callee = if index == 1 || index == 2 { "other" } else { "copy" };
+            let callee = if index == 1 || index == 2 {
+                "other"
+            } else {
+                "copy"
+            };
             let doc = json::parse(&format!(r#"{{"bindings":{{"region":"root"}},"entries":[{{"path":[{{"symbol":"{}","point":"{point}","iteration":[],"call_index":{index}}},{{"symbol":"{}","point":"entry:0","iteration":[]}}],"step":"*","phase":"*","generated":"*","kind":"start","start":{{"time":0}}}}]}}"#, ids.interface["root"], ids.interface[callee])).unwrap();
             assert_eq!(
                 sched::validate_bound_entries(&doc, &obj, &ids, &expansion.calls).is_ok(),

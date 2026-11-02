@@ -539,15 +539,27 @@ fn validate_bound_path(
     if selector.path.is_empty() {
         return Ok(());
     }
-    let root = string(field(field(doc,"bindings")?,"region")?)?;
+    let root = string(field(field(doc, "bindings")?, "region")?)?;
     let first = &selector.path[0];
     let mut rooted = ids.interface.get(root) == Some(&first.symbol);
-    if !rooted && object.function(root).is_some_and(|f|f.kind == crate::object::FnKind::Oracle) {
-        rooted = crate::instances::for_oracle(object,root)?.iter().any(|instance|
-            ids.interface.get(&instance.symbol) == Some(&first.symbol)
-            && first.instance.as_ref().is_none_or(|key| key == &instance.key));
+    if !rooted
+        && object
+            .function(root)
+            .is_some_and(|f| f.kind == crate::object::FnKind::Oracle)
+    {
+        rooted = crate::instances::for_oracle(object, root)?
+            .iter()
+            .any(|instance| {
+                ids.interface.get(&instance.symbol) == Some(&first.symbol)
+                    && first
+                        .instance
+                        .as_ref()
+                        .is_none_or(|key| key == &instance.key)
+            });
     }
-    if !rooted { return Err(error("path is not rooted in the bound invocation")); }
+    if !rooted {
+        return Err(error("path is not rooted in the bound invocation"));
+    }
     let mut owner_exists = false;
     for domain in calls.domains() {
         if path_matches(&selector.path, &domain.path, false) {

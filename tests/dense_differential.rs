@@ -448,3 +448,19 @@ fn dense_numerical_equality_does_not_underflow_a_nonzero_distance() {
     ]));
     assert!(!a.numerically_equals(&b));
 }
+
+#[test]
+fn dense_measurement_after_actual_inverse_does_not_sample_roundoff_at_draw_zero() {
+    use bennett_vm::bigint::BigUint;
+    for basis in 0..4 {
+        let mut dense = QuantumState::new_dense();
+        dense.alloc_wires(2);
+        dense.prepare(&[0, 1], &BigUint::from_u64(basis));
+        dense.apply1(0, &[], h_amp());
+        dense.flip(1, &[0]);
+        dense.flip(1, &[0]);
+        dense.apply1(0, &[], h_amp());
+        let (value, _) = dense.measure(&[0, 1], 0.0);
+        assert_eq!(value, BigUint::from_u64(basis));
+    }
+}

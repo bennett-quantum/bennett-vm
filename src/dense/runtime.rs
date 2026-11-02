@@ -335,6 +335,10 @@ impl Runtime {
     }
 
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (BigUint, String) {
+        // Inverse circuits can leave bounded residue on an otherwise
+        // constant wire. Factor it, charging the discarded norm, before
+        // a boundary draw (notably zero) can sample numerical noise.
+        self.compact();
         let packed: Vec<_> = wires.iter().filter_map(|&w| self.position(w)).collect();
         let (outcome, _) = self.state.measure(&packed, draw);
         let mut value = BigUint::zero();

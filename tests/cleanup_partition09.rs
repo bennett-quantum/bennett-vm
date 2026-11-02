@@ -14,7 +14,7 @@ fn expand(
     choices: &[(&str, CleanupRealisation)],
 ) -> Result<ActionExpansion, String> {
     let functions = format!(
-        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]"
+        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b"
     );
     let (object, ids) = bennett_vm::load(&support::source(&functions), false)?;
     let entries = choices.iter().map(|(point, realisation)| {
@@ -146,7 +146,8 @@ fn a_changed_effective_control_version_breaks_the_call_pair() {
         let e = expand(body, adjoint, &[]).unwrap();
         assert!(e.cleanups.is_empty());
     }
-    let restored = "ctl z action_call @mix (x) () () ()\nx z\nx z\nctl z adj action_call @mix (x) () () ()";
+    let restored =
+        "ctl z action_call @mix (x) () () ()\nx z\nx z\nctl z adj action_call @mix (x) () () ()";
     for adjoint in [false, true] {
         let e = expand(restored, adjoint, &[]).unwrap();
         assert_eq!(e.cleanups.len(), 1);
@@ -164,13 +165,18 @@ fn one_changed_target_breaks_a_joint_multi_output_call_occurrence() {
 }
 
 #[test]
-fn restored_memory_values_do_not_restore_readonly_cell_versions() {
-    let functions = "action @root (x:wire mut) (a:wire in, z:wire in) (r:region[1,1] mut) () ()\n^entry():\naction_call @read (x) (a) (r) ()\nqstore r a z\nqstore r a z\nadj action_call @read (x) (a) (r) ()\nperm_action @read (t:wire mut) (a:wire in) (r:region[1,1] in) () ()\n^entry():\nd = qload r a\ncx d t\nqunload r a d";
+fn restored_memory_values_do_not_restore_produced_cell_versions() {
+    let functions = "action @root (x:wire mut) (a:wire in, z:wire in) (r:region[1,1] mut) () ()\n^entry():\naction_call @read (x) (a) (r) ()\nqstore r a z\nqstore r a z\nadj action_call @read (x) (a) (r) ()\nperm_action @read (t:wire mut) (a:wire in) (r:region[1,1] mut) () ()\n^entry():\nd = qload r a\ncx d t\nqunload r a d";
     let (object, _) = bennett_vm::load(&support::source(functions), false).unwrap();
     let catalog = Catalog::published().unwrap();
     for adjoint in [false, true] {
-        let e = catalog.lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[]).unwrap();
-        assert!(e.cleanups.iter().all(|c| c.address.path.len() != 1), "only the callee's intrinsic load cleanup has a carrier");
+        let e = catalog
+            .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
+            .unwrap();
+        assert!(
+            e.cleanups.iter().all(|c| c.address.path.len() != 1),
+            "only the callee's intrinsic load cleanup has a carrier"
+        );
     }
 }
 
@@ -180,6 +186,74 @@ fn release_coalescing_requires_the_original_readonly_input_versions() {
     for adjoint in [false, true] {
         let e = expand(body, adjoint, &[]).unwrap();
         assert!(!e.cleanup_pairing_complete);
-        assert!(e.cleanups.is_empty(), "a dirty lifetime is not a proved terminal inverse chain");
+        assert!(
+            e.cleanups.is_empty(),
+            "a dirty lifetime is not a proved terminal inverse chain"
+        );
+    }
+}
+
+#[test]
+fn disjoint_rows_interleave_with_a_terminal_inverse_without_changing_ownership() {
+    let body = "d = qalloc any 1\ncx x[0] d\nx z\ncx x[0] d\nx z\nqfree d";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:0" } else { "entry:5" };
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = expand(body, adjoint, &[(point, choice)]).unwrap();
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 1);
+            assert_eq!(e.cleanups[0].address.path[0].point, point);
+            for outside in ["entry:2", "entry:4"] {
+                assert_eq!(
+                    e.leaves
+                        .iter()
+                        .filter(|l| l.address.as_ref().unwrap().path[0].point == outside)
+                        .count(),
+                    1
+                );
+            }
+            if choice == CleanupRealisation::Reverse {
+                let mut expected = (0..6).map(|i| format!("entry:{i}")).collect::<Vec<_>>();
+                if adjoint {
+                    expected.reverse();
+                }
+                assert_eq!(
+                    e.leaves
+                        .iter()
+                        .map(|l| l.address.as_ref().unwrap().path[0].point.clone())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+            assert_identity(&e);
+        }
+    }
+}
+
+#[test]
+fn a_prior_cancelled_pair_is_outside_the_terminal_inverse_chain() {
+    let body = "d = qalloc any 2\nx d[0]\nx d[0]\naction_call @mix (d) () () ()\nadj action_call @mix (d) () () ()\nqfree d";
+    for adjoint in [false, true] {
+        let point = if adjoint { "entry:0" } else { "entry:5" };
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = expand(body, adjoint, &[(point, choice)]).unwrap();
+            assert!(e.cleanup_pairing_complete);
+            assert_identity(&e);
+        }
+    }
+}
+
+#[test]
+fn joint_inverse_has_one_release_owner_and_later_release_is_independent() {
+    let body = "a = qalloc any 1\nb = qalloc any 1\naction_call @pair (a, b) () () ()\nadj action_call @pair (a, b) () () ()\nqfree a\nqfree b";
+    for adjoint in [false, true] {
+        let (owner, later) = if adjoint { ("entry:1", "entry:0") } else { ("entry:4", "entry:5") };
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = expand(body, adjoint, &[(owner, choice), (later, CleanupRealisation::Recompute)]).unwrap();
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 2);
+            assert_eq!(e.cleanups.iter().map(|c| c.address.path[0].point.as_str()).collect::<BTreeSet<_>>(), BTreeSet::from([owner, later]));
+            assert_identity(&e);
+        }
     }
 }

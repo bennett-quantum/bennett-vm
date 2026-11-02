@@ -128,6 +128,9 @@ impl Catalog {
                 "unavailable.reason: nonempty call cleanup needs its exact clean-input computing sequence",
             ));
         }
+        if let Some(outside) = pair.get("before_recompute") {
+            self.walk(outside, env, out, next, active)?;
+        }
         let name = string(field(pair, "target")?)?;
         if name.is_empty() {
             return self.walk_call_recompute(pair, env, out, next, active);

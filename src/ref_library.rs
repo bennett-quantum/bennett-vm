@@ -1692,10 +1692,15 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
                     "targets",
                     "initialising",
                     "uninitialising",
+                    "before_recompute",
+                    "live_versions",
                 ],
             )?;
             syntax_inner(field(pair, "computing")?, true)?;
             syntax_inner(field(pair, "uncomputing")?, true)?;
+            if let Some(outside) = pair.get("before_recompute") {
+                syntax_inner(outside, true)?;
+            }
             syntax_inner(field(c, "body")?, true)?;
             continue;
         }

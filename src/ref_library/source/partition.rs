@@ -9,8 +9,12 @@ struct Occurrence {
     inputs: BTreeMap<String, usize>,
     matched: bool,
 }
+pub(super) struct OccurrenceMatches {
+    pub inverse: BTreeMap<usize, usize>,
+    pub entries: BTreeMap<usize, usize>,
+}
 impl Source {
-    fn locations(&self, name: &str) -> Result<BTreeSet<String>, String> {
+    pub(super) fn locations(&self, name: &str) -> Result<BTreeSet<String>, String> {
         let (base, subscript) = name
             .split_once('[')
             .map_or((name, None), |(n, i)| (n, Some(i)));
@@ -35,7 +39,7 @@ impl Source {
             Ok((0..width).map(|i| format!("{base}[{i}]")).collect())
         }
     }
-    fn read_locations(&self, row: &Instr) -> Result<BTreeSet<String>, String> {
+    pub(super) fn read_locations(&self, row: &Instr) -> Result<BTreeSet<String>, String> {
         let mut locations = BTreeSet::new();
         for operand in &row.operands {
             for name in
@@ -68,27 +72,83 @@ impl Source {
         &self,
         rows: &[Instr],
         env: &Bindings,
-    ) -> Result<BTreeMap<usize, usize>, String> {
+        adjoint: bool,
+    ) -> Result<OccurrenceMatches, String> {
         let mut current = BTreeMap::new();
         let mut occurrences: Vec<Occurrence> = vec![];
         let mut matches = BTreeMap::new();
-        let mut depth = 0;
-        for (index, row) in rows.iter().enumerate() {
-            match row.op.as_str() {
-                "qpred" => {
+        let mut entries = BTreeMap::new();
+        let mut closed_allocations = BTreeSet::new();
+        let mut depth = 0i32;
+        let mut scope_outputs = BTreeSet::new();
+        let order: Vec<_> = if adjoint {
+            (0..rows.len()).rev().collect()
+        } else {
+            (0..rows.len()).collect()
+        };
+        for index in order {
+            let row = &rows[index];
+            let outputs = if matches!(row.op.as_str(), "qpred" | "qunpred") {
+                if (row.op == "qpred") != adjoint {
                     depth += 1;
-                    continue;
-                }
-                "qunpred" => {
+                } else {
                     depth -= 1;
+                }
+                if depth < 0 {
+                    return Err(err("unmatched version-history predicate"));
+                }
+                if depth != 0 {
                     continue;
                 }
-                _ => {}
+                std::mem::take(&mut scope_outputs)
+            } else {
+                if row.op == "qloop" && row.operands.first().is_some_and(|n| n == "0") {
+                    continue;
+                }
+                let outputs = self.written_locations(row, env)?;
+                if depth != 0 {
+                    scope_outputs.extend(outputs);
+                    continue;
+                }
+                outputs
+            };
+            let release_kind = match (adjoint, row.op.as_str()) {
+                (false, "qfree") => Some(("qalloc", row.operands[0].as_str())),
+                (false, "qreturn") => Some(("qborrow", row.operands[0].as_str())),
+                (true, "qalloc") => Some(("qfree", row.lhs[0].as_str())),
+                (true, "qborrow") => Some(("qreturn", row.lhs[0].as_str())),
+                _ => None,
+            };
+            if let Some((kind, name)) = release_kind {
+                let entry = if let Some(first) = outputs.first() {
+                    current
+                        .get(first)
+                        .copied()
+                        .filter(|id| *id != 0)
+                        .map(|id| id - 1)
+                } else {
+                    occurrences.iter().rposition(|prior| {
+                        let allocation = &rows[prior.index];
+                        allocation.op == kind
+                            && !closed_allocations.contains(&prior.index)
+                            && if adjoint {
+                                allocation.operands.first().is_some_and(|n| n == name)
+                            } else {
+                                allocation.lhs.first().is_some_and(|n| n == name)
+                            }
+                    })
+                };
+                if let Some(id) = entry {
+                    let prior = &occurrences[id];
+                    if rows[prior.index].op == kind
+                        && prior.outputs == outputs
+                        && outputs.iter().all(|n| current.get(n) == Some(&(id + 1)))
+                    {
+                        entries.insert(index, prior.index);
+                        closed_allocations.insert(prior.index);
+                    }
+                }
             }
-            if depth != 0 {
-                continue;
-            }
-            let outputs = self.written_locations(row, env)?;
             let inputs = self
                 .read_locations(row)?
                 .difference(&outputs)
@@ -152,6 +212,12 @@ impl Source {
                 matched: candidate.is_some(),
             });
         }
-        Ok(matches)
+        if depth != 0 {
+            return Err(err("unclosed version-history predicate"));
+        }
+        Ok(OccurrenceMatches {
+            inverse: matches,
+            entries,
+        })
     }
 }

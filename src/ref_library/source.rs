@@ -28,7 +28,8 @@ struct Region {
 struct WholePair {
     cleanup_end: usize,
     carrier: usize,
-    computing: std::ops::RangeInclusive<usize>,
+    computing: Vec<usize>,
+    outside: Vec<usize>,
     target: String,
     perm: bool,
 }
@@ -1319,9 +1320,98 @@ impl Source {
         instructions: &[Instr],
         adjoint: bool,
         env: &Bindings,
-    ) -> BTreeMap<usize, WholePair> {
+        occurrences: &partition::OccurrenceMatches,
+    ) -> Result<BTreeMap<usize, WholePair>, String> {
         let mut pairs = BTreeMap::new();
+        let order: Vec<_> = if adjoint {
+            (0..instructions.len()).rev().collect()
+        } else {
+            (0..instructions.len()).collect()
+        };
+        let positions = order
+            .iter()
+            .enumerate()
+            .map(|(p, n)| (*n, p))
+            .collect::<BTreeMap<_, _>>();
+        for (&release, &acquire) in &occurrences.entries {
+            let target = if adjoint {
+                &instructions[release].lhs[0]
+            } else {
+                &instructions[release].operands[0]
+            };
+            let start = positions[&acquire];
+            let end = positions[&release];
+            let mut inverses = vec![];
+            for position in (start + 1..end).rev() {
+                let index = order[position];
+                let row = &instructions[index];
+                if !Self::mentions(row, target) {
+                    continue;
+                }
+                let Some(&partner) = occurrences.inverse.get(&index) else {
+                    break;
+                };
+                if positions[&partner] >= position || !Self::writes_only(row, target, env) {
+                    break;
+                }
+                inverses.push(index);
+            }
+            inverses.reverse();
+            let mut computing = vec![acquire];
+            computing.extend(inverses.iter().rev().map(|n| occurrences.inverse[n]));
+            let mut cleanup = inverses;
+            cleanup.push(release);
+            computing.sort_unstable();
+            cleanup.sort_unstable();
+            let cleanup_start = *cleanup.first().unwrap();
+            let cleanup_end = *cleanup.last().unwrap();
+            let mut touched = self.locations(target)?;
+            for n in &computing {
+                touched.extend(self.read_locations(&instructions[*n])?);
+            }
+            let mut safe = true;
+            for (offset, row) in instructions[cleanup_start..=cleanup_end].iter().enumerate() {
+                let n = cleanup_start + offset;
+                if cleanup.contains(&n) {
+                    continue;
+                }
+                if !(crate::action::is_gate_name(&row.op)
+                    || matches!(row.op.as_str(), "qxor" | "qexch"))
+                    || !self.read_locations(row)?.is_disjoint(&touched)
+                {
+                    safe = false;
+                    break;
+                }
+            }
+            if !safe {
+                continue;
+            }
+            let outside = (cleanup_start..=cleanup_end)
+                .filter(|n| !cleanup.contains(n))
+                .collect();
+            let perm = self
+                .declarations
+                .iter()
+                .find(|(n, ..)| n == target)
+                .is_some_and(|(_, _, _, state)| state == "clean")
+                && computing
+                    .iter()
+                    .filter(|n| **n != acquire)
+                    .all(|n| Self::permutation_row(&instructions[*n], env));
+            pairs.insert(
+                cleanup_start,
+                WholePair {
+                    cleanup_end,
+                    carrier: release,
+                    computing,
+                    outside,
+                    target: target.clone(),
+                    perm,
+                },
+            );
+        }
         for (end, release) in instructions.iter().enumerate() {
+            // Intrinsic endings retain their direct computing operation only.
             let target = match release.op.as_str() {
                 "qfree" | "qreturn" => &release.operands[0],
                 _ => continue,
@@ -1333,35 +1423,26 @@ impl Source {
                 continue;
             };
             let allocation = &instructions[start];
-            if (release.op == "qreturn") != (allocation.op == "qborrow") {
+            if allocation.op != "qcopy" {
                 continue;
             }
-            if release.op == "quncopy"
-                && (allocation.op != "qcopy"
-                    || release.operands != [allocation.operands[0].clone(), target.clone()])
+            if (release.op == "qreturn") != (allocation.op == "qborrow")
+                || allocation.op == "qload"
+                || instructions[start..=end]
+                    .iter()
+                    .any(|i| matches!(i.op.as_str(), "qpred" | "qunpred"))
             {
                 continue;
             }
-            if release.op == "qunload"
-                && (allocation.op != "qload"
-                    || release.operands
-                        != [
-                            allocation.operands[0].clone(),
-                            allocation.operands[1].clone(),
-                            target.clone(),
-                        ])
-            {
-                continue;
-            }
-            if allocation.op == "qload" && release.op != "qunload" {
-                continue;
-            }
-            let mut left = start + 1;
-            let mut right = end;
-            if allocation.op == "qcopy" && release.op == "qfree" {
+            let rows = (start..=end)
+                .filter(|n| Self::mentions(&instructions[*n], target))
+                .collect::<Vec<_>>();
+            let mut left = 1;
+            let mut right = rows.len() - 1;
+            if allocation.op == "qcopy" {
                 if right <= left
-                    || instructions[right - 1].op != "qxor"
-                    || instructions[right - 1].operands
+                    || instructions[rows[right - 1]].op != "qxor"
+                    || instructions[rows[right - 1]].operands
                         != [allocation.operands[0].clone(), target.clone()]
                 {
                     continue;
@@ -1370,54 +1451,70 @@ impl Source {
             }
             let inverse_end = right;
             while left + 1 < right
-                && Self::writes_only(&instructions[left], target, env)
-                && Self::inverse_rows(&instructions[left], &instructions[right - 1])
+                && Self::writes_only(&instructions[rows[left]], target, env)
+                && occurrences.inverse.get(&rows[left]) == Some(&rows[right - 1])
             {
                 left += 1;
                 right -= 1;
             }
-            // Do not infer a computation from an unmatched target mutation.
-            // An untouched allocation can still have an empty inverse pair.
-            if left == start + 1
-                && allocation.op != "qcopy"
-                && instructions[left..right]
-                    .iter()
-                    .any(|i| Self::mentions(i, target))
-            {
-                continue;
-            }
-            // A pair may not cross an effective-control scope. Those scopes
-            // are formed recursively by sequence instead.
-            if instructions[start..=end]
-                .iter()
-                .any(|i| matches!(i.op.as_str(), "qpred" | "qunpred"))
-            {
+            if left == 1 && allocation.op != "qcopy" && left < right {
                 continue;
             }
             let k = inverse_end - right;
-            let cleanup_start = if adjoint { start } else { right };
-            let cleanup_end = if adjoint { start + k } else { end };
             let computing = if adjoint {
-                right..=end
+                rows[right..].to_vec()
             } else {
-                start..=start + k
+                rows[..=k].to_vec()
             };
+            let cleanup = if adjoint {
+                rows[..=k].to_vec()
+            } else {
+                rows[right..].to_vec()
+            };
+            let cleanup_start = *cleanup.first().unwrap();
+            let cleanup_end = *cleanup.last().unwrap();
+            let mut touched = self.locations(target)?;
+            for n in &computing {
+                touched.extend(self.read_locations(&instructions[*n])?);
+            }
+            // These interleaved rows commute with every owned computing and
+            // inverse row. They retain source ownership and are emitted before
+            // the fresh carrier replacement. More general cross-lifetime and
+            // joint-output partitioning is handled separately.
+            let mut safe = true;
+            for n in (start..=end).filter(|n| !rows.contains(n)) {
+                let row = &instructions[n];
+                if !(crate::action::is_gate_name(&row.op)
+                    || matches!(row.op.as_str(), "qxor" | "qexch"))
+                    || !self.read_locations(row)?.is_disjoint(&touched)
+                {
+                    safe = false;
+                    break;
+                }
+            }
+            if !safe {
+                continue;
+            }
+            let outside = (cleanup_start..=cleanup_end)
+                .filter(|n| !cleanup.contains(n))
+                .collect();
             let perm = allocation.op != "qborrow"
-                && instructions[start + 1..start + k + 1]
+                && rows[1..=k]
                     .iter()
-                    .all(|i| Self::permutation_row(i, env));
+                    .all(|n| Self::permutation_row(&instructions[*n], env));
             pairs.insert(
                 cleanup_start,
                 WholePair {
                     cleanup_end,
                     carrier: if adjoint { start } else { end },
                     computing,
+                    outside,
                     target: target.clone(),
                     perm,
                 },
             );
         }
-        pairs
+        Ok(pairs)
     }
     fn raw_sequence(
         &self,
@@ -1525,7 +1622,8 @@ impl Source {
         env: &mut Bindings,
     ) -> Result<Vec<Json>, String> {
         let mut out = vec![];
-        let whole_pairs = self.whole_pairs(instructions, adjoint, env);
+        let occurrences = self.inverse_occurrences(instructions, env, adjoint)?;
+        let whole_pairs = self.whole_pairs(instructions, adjoint, env, &occurrences)?;
         let mut empty_pairs = BTreeMap::new();
         for pair in instructions.windows(2) {
             if matches!(pair[0].op.as_str(), "qalloc" | "qborrow")
@@ -1537,9 +1635,8 @@ impl Source {
             }
         }
         let mut call_pairs = BTreeMap::new();
-        let occurrences = self.inverse_occurrences(instructions, env)?;
         for (index, i) in instructions.iter().enumerate() {
-            let Some(&prior) = occurrences.get(&index) else {
+            let Some(&prior) = occurrences.inverse.get(&index) else {
                 continue;
             };
             if prior >= index || !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
@@ -1574,18 +1671,21 @@ impl Source {
         while index < instructions.len() {
             let i = &instructions[index];
             if let Some(pair) = whole_pairs.get(&index) {
-                let computing =
-                    self.raw_sequence(&instructions[pair.computing.clone()], adjoint, false, env)?;
-                let uncomputing =
-                    self.raw_sequence(&instructions[pair.computing.clone()], !adjoint, false, env)?;
+                let computing_rows = pair
+                    .computing
+                    .iter()
+                    .map(|n| instructions[*n].clone())
+                    .collect::<Vec<_>>();
+                let computing = self.raw_sequence(&computing_rows, adjoint, false, env)?;
+                let uncomputing = self.raw_sequence(&computing_rows, !adjoint, false, env)?;
                 let body =
                     self.raw_sequence(&instructions[index..=pair.cleanup_end], adjoint, true, env)?;
                 let computing_start = if adjoint {
-                    *pair.computing.end()
+                    *pair.computing.last().unwrap()
                 } else {
-                    *pair.computing.start()
+                    *pair.computing.first().unwrap()
                 };
-                let annotation = self.pair_annotation(
+                let mut annotation = self.pair_annotation(
                     &pair.target,
                     &self.points[&instructions[computing_start].line],
                     computing,
@@ -1593,6 +1693,21 @@ impl Source {
                     body,
                     pair.perm,
                 );
+                if !pair.outside.is_empty() {
+                    let rows = pair
+                        .outside
+                        .iter()
+                        .map(|n| instructions[*n].clone())
+                        .collect::<Vec<_>>();
+                    let outside = self.raw_sequence(&rows, adjoint, true, env)?;
+                    let Json::Obj(c) = &mut annotation else {
+                        unreachable!()
+                    };
+                    let Some(Json::Obj(p)) = c.get_mut("$cleanup") else {
+                        unreachable!()
+                    };
+                    p.insert("before_recompute".into(), Json::Arr(outside));
+                }
                 out.push(self.source_annotation(
                     &instructions[pair.carrier],
                     adjoint,

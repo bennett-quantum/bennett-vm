@@ -49,6 +49,7 @@ pub(super) struct Source {
     images: BTreeMap<String, String>,
     readonly: BTreeSet<String>,
     history_replay: bool,
+    forbidden_witnesses: BTreeSet<String>,
 }
 struct HistoryDomain<'a> {
     iterations: &'a [usize],
@@ -278,6 +279,7 @@ pub(super) fn action_body(
         images: object.data.clone(),
         readonly: f.lists[1].iter().map(|p| p.name.clone()).collect(),
         history_replay: false,
+        forbidden_witnesses: BTreeSet::new(),
     };
 
     for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -968,6 +970,7 @@ impl Source {
                     // cannot supply the captured value. Keep this live binding
                     // distinct from the fresh reconstructed owned history.
                     if targets.iter().any(|n| base(n) == *name)
+                        || self.forbidden_witnesses.contains(name)
                         || !env.values.contains_key(name)
                         || prefix[at + 1..]
                             .iter()
@@ -1065,10 +1068,140 @@ impl Source {
             versioned: versioned.then(|| steps.into_values().collect()),
         })
     }
+    /// Different outputs of a terminal chain may enter at different source
+    /// occurrences. Compute each captured input in an isolated workspace, copy
+    /// it into its fresh target and uncompute that workspace. This preserves
+    /// live secondary outputs and never uses a post-call target as a witness.
+    fn resolve_joint_inputs(&self, pair: &Json, env: &Bindings) -> Result<Json, String> {
+        let request = field(pair, "input_request")?;
+        let targets = arr(field(request, "targets")?)?
+            .iter()
+            .map(|n| string(n).map(String::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        let entries = arr(field(request, "entry_points")?)?;
+        let mut source = self.clone();
+        source.forbidden_witnesses.extend(targets.iter().cloned());
+        let mut initialising = vec![];
+        let mut allocations = vec![];
+        let mut live = BTreeSet::new();
+        let mut found = BTreeSet::new();
+        let mut result = pair.clone();
+        let Json::Obj(p) = &mut result else {
+            return Err(err("invalid joint cleanup"));
+        };
+        for target in &targets {
+            let (_, width, class, state) = self
+                .declarations
+                .iter()
+                .find(|(n, ..)| n == target)
+                .ok_or_else(|| err("joint cleanup target lacks a source declaration"))?;
+            if state != "clean" {
+                p.insert("recompute_supported".into(), Json::Bool(false));
+                return Ok(result);
+            }
+            allocations.push(Json::obj(vec![
+                ("name", text(target)),
+                ("width", num(*width)),
+                ("class", text(class)),
+            ]));
+            initialising.push(invocation("qalloc", vec![text(target)]));
+        }
+        for entry in entries {
+            keys(entry, &["target", "compute"])?;
+            let target = string(field(entry, "target")?)?;
+            if !targets.iter().any(|n| n == target) || !found.insert(target.to_string()) {
+                return Err(err("invalid joint input target partition"));
+            }
+            let mut nested = pair.clone();
+            let Json::Obj(n) = &mut nested else {
+                unreachable!()
+            };
+            n.insert(
+                "input_request".into(),
+                Json::obj(vec![
+                    ("compute", field(entry, "compute")?.clone()),
+                    ("cleanup", field(request, "cleanup")?.clone()),
+                    ("adjoint", field(request, "adjoint")?.clone()),
+                    ("targets", Json::Arr(vec![text(target)])),
+                ]),
+            );
+            let input = source.resolve_call_inputs(&nested, env)?;
+            if input.get("recompute_supported") == Some(&Json::Bool(false)) {
+                p.insert("recompute_supported".into(), Json::Bool(false));
+                return Ok(result);
+            }
+            if let Some(names) = input.get("live_versions") {
+                for name in arr(names)? {
+                    live.insert(string(name)?.to_string());
+                }
+            }
+            let mut body = arr(field(&input, "initialising")?)?.clone();
+            body.push(invocation(
+                "bind.qxor",
+                vec![
+                    num(self.width(target)?),
+                    text(target),
+                    text("$history.target"),
+                ],
+            ));
+            body.extend(arr(field(&input, "uninitialising")?)?.iter().cloned());
+            let mut temporaries = BTreeSet::new();
+            for allocation in arr(field(&input, "allocations")?)?.iter().rev() {
+                if !temporaries.insert(string(field(allocation, "name")?)?.to_string()) {
+                    continue;
+                }
+                body = vec![Json::obj(vec![
+                    ("declare", field(allocation, "name")?.clone()),
+                    ("width", field(allocation, "width")?.clone()),
+                    (
+                        "class",
+                        Json::obj(vec![("class", field(allocation, "class")?.clone())]),
+                    ),
+                    ("state", text("clean")),
+                    ("body", Json::Arr(body)),
+                ])];
+            }
+            initialising.push(Json::obj(vec![
+                (
+                    "$history_target",
+                    Json::obj(vec![
+                        ("target", text(target)),
+                        (
+                            "temporaries",
+                            Json::Arr(temporaries.iter().map(text).collect()),
+                        ),
+                    ]),
+                ),
+                ("body", Json::Arr(body)),
+            ]));
+        }
+        if found.len() != targets.len() {
+            return Err(err("missing joint input target"));
+        }
+        p.insert("recompute_supported".into(), Json::Bool(true));
+        p.insert(
+            "targets".into(),
+            Json::Arr(targets.iter().map(text).collect()),
+        );
+        p.insert("allocations".into(), Json::Arr(allocations));
+        p.insert(
+            "live_versions".into(),
+            Json::Arr(live.iter().map(text).collect()),
+        );
+        p.insert("initialising".into(), Json::Arr(initialising.clone()));
+        p.insert(
+            "uninitialising".into(),
+            Json::Arr(vec![inverse(initialising)]),
+        );
+        Ok(result)
+    }
     /// Resolve only when the carrier is generated: enclosing loop indices are
     /// not known while forming the source recipe (and a zero-trip body is inert).
     pub(super) fn resolve_call_inputs(&self, pair: &Json, env: &Bindings) -> Result<Json, String> {
         let request = field(pair, "input_request")?;
+        if request.get("entry_points").is_some() {
+            return self.resolve_joint_inputs(pair, env);
+        }
         let compute_line = field(request, "compute")?
             .as_usize()
             .ok_or_else(|| err("invalid computing line"))?;
@@ -1350,41 +1483,59 @@ impl Source {
             let start = positions[&acquire];
             let end = positions[&release];
             let mut inverses = vec![];
-            let mut bundle: Option<Vec<String>> = None;
-            for position in (start + 1..end).rev() {
-                let index = order[position];
-                let row = &instructions[index];
-                if !Self::mentions(row, target) {
-                    continue;
-                }
-                let Some(&partner) = occurrences.inverse.get(&index) else {
-                    break;
-                };
-                if positions[&partner] >= position || claimed.contains(&index) {
-                    break;
-                }
-                if !Self::writes_only(row, target, env) {
-                    // A joint inverse is indivisible. Its first released
-                    // output owns it; later releases do not own it again.
-                    // Multirow joint chains need per-output entry histories.
-                    let names = Self::outputs(row, env)
-                        .into_iter()
-                        .map(|n| n.split('[').next().unwrap().to_string())
-                        .collect::<BTreeSet<_>>();
-                    if !inverses.is_empty()
-                        || names.len() < 2
-                        || !names
-                            .iter()
-                            .all(|name| self.declarations.iter().any(|(n, ..)| n == name))
+            let mut owned_targets = BTreeSet::from([target.clone()]);
+            loop {
+                inverses.clear();
+                let mut expanded = false;
+                for position in (start + 1..end).rev() {
+                    let index = order[position];
+                    let row = &instructions[index];
+                    if !owned_targets
+                        .iter()
+                        .any(|target| Self::mentions(row, target))
                     {
+                        continue;
+                    }
+                    let Some(&partner) = occurrences.inverse.get(&index) else {
+                        break;
+                    };
+                    if positions[&partner] >= position || claimed.contains(&index) {
                         break;
                     }
-                    bundle = Some(names.into_iter().collect());
+                    if !owned_targets
+                        .iter()
+                        .any(|target| Self::writes_only(row, target, env))
+                    {
+                        // Expand the connected output set, then rescan the
+                        // suffix: an inverse skipped before this expansion can
+                        // restore a newly included target nearer the release.
+                        let names = Self::outputs(row, env)
+                            .into_iter()
+                            .map(|n| n.split('[').next().unwrap().to_string())
+                            .collect::<BTreeSet<_>>();
+                        if names.is_empty()
+                            || names.is_disjoint(&owned_targets)
+                            || !names
+                                .iter()
+                                .all(|name| self.declarations.iter().any(|(n, ..)| n == name))
+                        {
+                            break;
+                        }
+                        let before = owned_targets.len();
+                        owned_targets.extend(names);
+                        if owned_targets.len() != before {
+                            expanded = true;
+                            break;
+                        }
+                    }
                     inverses.push(index);
+                }
+                if !expanded {
                     break;
                 }
-                inverses.push(index);
             }
+            let bundle = (owned_targets.len() > 1)
+                .then(|| owned_targets.iter().cloned().collect::<Vec<_>>());
             inverses.reverse();
             let mut computing = if bundle.is_some() {
                 vec![]
@@ -1757,6 +1908,25 @@ impl Source {
                     let Some(Json::Obj(p)) = c.get_mut("$cleanup") else {
                         unreachable!()
                     };
+                    let mut ordered = pair.computing.clone();
+                    if adjoint {
+                        ordered.reverse();
+                    }
+                    let mut entry_points = vec![];
+                    for target in targets {
+                        let first = ordered
+                            .iter()
+                            .find(|n| {
+                                Self::outputs(&instructions[**n], env)
+                                    .iter()
+                                    .any(|name| name.split('[').next().unwrap() == target)
+                            })
+                            .ok_or_else(|| err("joint target has no computing occurrence"))?;
+                        entry_points.push(Json::obj(vec![
+                            ("target", text(target)),
+                            ("compute", num(instructions[*first].line)),
+                        ]));
+                    }
                     p.insert(
                         "input_request".into(),
                         Json::obj(vec![
@@ -1764,6 +1934,7 @@ impl Source {
                             ("cleanup", num(instructions[pair.carrier].line)),
                             ("adjoint", Json::Bool(adjoint)),
                             ("targets", Json::Arr(targets.iter().map(text).collect())),
+                            ("entry_points", Json::Arr(entry_points)),
                         ]),
                     );
                     p.insert("zero_targets".into(), Json::Arr(vec![text(&pair.target)]));

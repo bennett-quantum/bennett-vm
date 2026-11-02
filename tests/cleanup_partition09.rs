@@ -300,11 +300,57 @@ fn fixed_loop_visits_restore_call_versions_only_after_matched_inverse_visits() {
 #[test]
 fn joint_owner_preserves_the_other_live_targets_nonzero_entry_values() {
     let body = "a = qalloc any 1\nb = qalloc any 1\ncx x[0] b\naction_call @pair (a, b) () () ()\nadj action_call @pair (a, b) () () ()\nqfree a\ncx x[0] b\nqfree b";
-    for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
-        let e = expand(body, false, &[("entry:5", choice), ("entry:7", CleanupRealisation::Recompute)]).unwrap();
-        assert!(e.cleanup_pairing_complete);
-        assert_eq!(e.cleanups.len(), 2);
-        assert_eq!(e.cleanups[0].address.path[0].point, "entry:5");
-        assert_identity(&e);
+    for adjoint in [false, true] {
+        let (owner, later) = if adjoint {
+            ("entry:1", "entry:0")
+        } else {
+            ("entry:5", "entry:7")
+        };
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = expand(
+                body,
+                adjoint,
+                &[(owner, choice), (later, CleanupRealisation::Recompute)],
+            )
+            .unwrap_or_else(|error| panic!("adjoint={adjoint}, choice={choice:?}: {error}"));
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 2);
+            assert_eq!(e.cleanups[0].address.path[0].point, owner);
+            assert_identity(&e);
+        }
+    }
+}
+
+#[test]
+fn connected_joint_inverses_have_one_owner_in_each_traversal_direction() {
+    let body = "a = qalloc any 1\nb = qalloc any 1\nc = qalloc any 1\naction_call @pair (a, b) () () ()\naction_call @pair (b, c) () () ()\nadj action_call @pair (b, c) () () ()\nadj action_call @pair (a, b) () () ()\nqfree a\nqfree b\nqfree c";
+    for adjoint in [false, true] {
+        let points = if adjoint {
+            ["entry:2", "entry:1", "entry:0"]
+        } else {
+            ["entry:7", "entry:8", "entry:9"]
+        };
+        for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+            let e = expand(
+                body,
+                adjoint,
+                &[
+                    (points[0], choice),
+                    (points[1], CleanupRealisation::Recompute),
+                    (points[2], CleanupRealisation::Recompute),
+                ],
+            )
+            .unwrap_or_else(|error| panic!("adjoint={adjoint}, choice={choice:?}: {error}"));
+            assert!(e.cleanup_pairing_complete);
+            assert_eq!(e.cleanups.len(), 3);
+            assert_eq!(
+                e.cleanups
+                    .iter()
+                    .map(|c| c.address.path[0].point.as_str())
+                    .collect::<Vec<_>>(),
+                points
+            );
+            assert_identity(&e);
+        }
     }
 }

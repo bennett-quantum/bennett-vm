@@ -364,6 +364,21 @@ impl Catalog {
                 let mut local = env.clone();
                 local.oracle_invocation = Some(Json::obj(vec![("token", value.clone())]));
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if let Some(target) = c.get("$history_target") {
+                let name = string(field(target, "target")?)?;
+                let Some(value @ Bound::Allocation(_)) = env.values.get(name) else {
+                    return Err(err("history copy target is not an allocation"));
+                };
+                let mut local = env.clone();
+                // Reserved, lexical binding: nested history workspaces may
+                // shadow it without changing the enclosing target capability.
+                local.values.insert("$history.target".into(), value.clone());
+                for name in arr(field(target, "temporaries")?)? {
+                    let name = string(name)?;
+                    local.values.remove(name);
+                    local.locals.remove(name);
+                }
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
             } else if c.get("$cleanup_pending").is_some() {
                 self.walk_pending_cleanup(c, env, out, next, active)?;
             } else if c.get("$cleanup").is_some() {
@@ -1664,6 +1679,17 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
         }
         if source_formed && c.get("$source").is_some() {
             keys(c, &["$source", "body"])?;
+            syntax_inner(field(c, "body")?, true)?;
+            continue;
+        }
+        if source_formed && c.get("$history_target").is_some() {
+            keys(c, &["$history_target", "body"])?;
+            let target = field(c, "$history_target")?;
+            keys(target, &["target", "temporaries"])?;
+            string(field(target, "target")?)?;
+            for name in arr(field(target, "temporaries")?)? {
+                string(name)?;
+            }
             syntax_inner(field(c, "body")?, true)?;
             continue;
         }

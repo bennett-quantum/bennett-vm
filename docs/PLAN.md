@@ -89,23 +89,22 @@ frames, never re-execution.
    Logical budgets, activation/history boundaries, object identities and
    observable label values remain reference-defined. Other hosts fail explicitly;
    native execution is opt-in via `BENNETT_VM_ENGINE=jit`.
-6. **Performance: dense state-vector engine (standalone implemented 2026-11-01,
-   bead bennett-vm-bjm; engine-selection wiring pending).** A qHiPSTER-style
-   dense simulator in `src/dense/` alongside the exact sparse engine: SoA
-   binary64 amplitudes (16 bytes/amplitude, one state vector + O(1) scratch),
-   in-place blocked pair kernels, cache-resident gate fusion, diagonal/permutation fast paths,
-   XOR-oracle branch enumeration, measurement with collapse, `std::thread`
-   static partitioning and AVX2/FMA with a tested scalar fallback. Measurement
-   uses balanced prefix reductions without an outcome table. Simulation evidence is
-   always kind `numerical` with state and measurement error bounds, never
-   `exhaustive` (design: `docs/design/dense-engine.md`; benchmarks:
-   `examples/dense_bench.rs`, numbers recorded in the design doc). Remaining:
-   selection via `BENNETT_VM_ENGINE=dense` in the Q-action/CC paths and the
-   full action corpus differential and certificate provenance. rhc has
-   landed; integration also needs ownership of the `src/jit.rs` selector
-   and `src/qcli.rs` action-report path (the selected-engine red test rejects
-   dense before execution). State-error metadata does not replace ISA 0.9's
-   interval-checked numerical claims.
+6. **Performance: dense state-vector engine (integrated 2026-11-02,
+   bead bennett-vm-bjm).** `BENNETT_VM_ENGINE=dense` selects the dense
+   simulator for Q-action/CC execution and C ABI resources. SoA binary64
+   amplitudes use 16 bytes per materialized amplitude, blocked in-place
+   kernels, cache-resident fusion, diagonal/permutation fast paths, oracle
+   branch enumeration, balanced measurement/collapse and `std::thread`
+   static partitions. Runtime AVX2/FMA has a tested scalar fallback.
+   Constant logical wires stay virtual; diagnostic sparse snapshots are
+   explicit. Reports and ABI snapshots carry kind `numerical` with state
+   and measurement error bounds, never an exhaustive simulation proof.
+   Exact reference/certificate states remain separate; simulation error
+   metadata does not replace ISA interval-checked numerical claims.
+   The existing action corpus is additionally compared against dense
+   within the stated bound (design/results: `docs/design/dense-engine.md`;
+   harness: `examples/dense_bench.rs`). Single-thread fusion tuning at
+   28 qubits remains follow-up bennett-vm-1x1.
 
 ## ISA 0.9 watch list (draft, not accepted; build stays on 0.8)
 

@@ -1,16 +1,13 @@
 # Dense state-vector engine — bennett-vm-bjm
 
-The standalone engine is implemented in `src/dense/`. The orchestrator
-confirmed `bennett-vm-rhc` closed and merged here as `644a212` on
-2026-11-01 at 22:39 UTC, clearing the original integration dependency.
-Engine-selected action/CC execution remains incomplete. Its new red CLI
-test fails in `src/jit.rs::selection` before reaching the action executor:
-`unimplemented: execution engine dense (milestone 5)`. Finishing selection
-and action-report provenance requires `src/jit.rs` and `src/qcli.rs`,
-which are outside this job's current write scope. The integration-stage
-note permits narrow wiring in `src/action.rs` / `src/cc.rs`; those files
-have not been edited by this job. The full action-corpus differential
-and actual numerical provenance remain integration acceptance items.
+`BENNETT_VM_ENGINE=dense` selects dense quantum execution for standalone
+actions, CC programs and C ABI resources. The CC tier uses the interpreter;
+other existing engine choices keep their previous behavior. Reports and
+ABI snapshots include numerical simulation provenance. Exact reference
+and certificate-replay states remain independent of engine selection.
+The standalone kernels and the stable-wire runtime adapter are in
+`src/dense/`; execution wiring in `action.rs`, `cc.rs`, `qcli.rs` and the
+selector in `jit.rs` is deliberately small.
 
 ## Literature actually read
 
@@ -153,6 +150,55 @@ classical evaluation. Neither measurement nor fusion allocates a
 second state vector. The benchmark also drops each state before
 allocating the next, including its fused/sequential comparison.
 
+## Runtime integration and stable wires
+
+`QuantumState::new()` remains the exact semantic reference, including for
+certificate checking. `new_selected()` is used at execution entry points;
+`new_dense()` explicitly constructs a dense state for Rust callers/tests.
+The dense variant does not keep the exact map or binary64 sparse shadow.
+`amplitudes()` materializes a diagnostic snapshot only when requested.
+The legacy public `amps` cache belongs to exact states and stays empty
+for a dense state. Standalone action JSON requests one such snapshot.
+
+The runtime maps stable logical wire IDs onto packed dense coordinates.
+A constant logical register is stored as basis metadata, so a 192-bit
+basis value does not allocate 2^192 amplitudes. A gate that makes a wire
+vary promotes that wire into the vector, extending the arrays in place.
+Logical controls known false make the gate an identity; known true
+controls are omitted from the packed kernel. Pure constant flips and
+uniform remap outputs update basis metadata without complex arithmetic.
+This preserves arbitrary logical bit widths while the dense vector still
+has the usual exponential cost in the number of materialized wires.
+
+The shared action/CC oracle helper from rhc retains projected-input and
+memory memoization, fault XOR, controls and budgets. It calls the same
+basis-remap interface as swaps and coherent memory operations. The dense
+adapter finds a closed packed coordinate space, keeps uniform output bits
+virtual, and moves amplitudes along permutation cycles. Cycle leaders use
+one complex carry and bounded wire metadata, with no visited table or
+second amplitude vector. The interpreter's involutions take linear work;
+long general cycles can cost quadratic time to keep scratch bounded.
+The adapter is tested on a four-cycle with 80 uniform output bits.
+
+Cleanliness and reversal of numerical states are explicitly numerical.
+A candidate constant wire is factored only when its discarded branch norm
+is no larger than the current state-error allowance (capped at 1/4).
+A scaled norm confirms the candidate, so squaring a 1e-200 input amplitude
+cannot erase its support through underflow. The discarded norm, including
+rounding/underflow allowance, is added to B and recorded as a numerical
+projection. Bit removal compacts the arrays in place. Measured wires have
+already been reset by collapse; their packed coordinates are reclaimed
+without consuming additional draws. Constant measured bits are merged
+into the result in the original wire-list order.
+
+`exact_equals` never accepts a dense state as an exact proof. Standalone
+numerical reversal instead compares the state distance against the two
+reported error allowances, including global phase. A scaled distance
+avoids an underflow-to-zero equality result. Snapshot/transaction cloning
+at VM API boundaries retains its existing semantics and can copy a state;
+the one-vector memory statement applies to an individual state and its
+kernels, not arbitrary caller-requested snapshots or VM transactions.
+
 ## Floating-point bounds
 
 `error_bound()` is a forward 2-norm state-error allowance B. Prepared
@@ -160,7 +206,11 @@ input is assumed normalized; `set_amplitude` is an input-preparation
 operation and does not certify a different input or renormalize it.
 Reference gate matrices are the binary64 entries handed to the engine.
 Rounding of an ideal angle or symbolic matrix into those entries is a
-separate caller obligation.
+separate caller obligation. The runtime charges an additional
+32*u*(R+B) for the bounded symbolic-to-binary64 projection used by the
+ISA gate alphabet; arbitrary external symbolic matrices require their
+own coefficient-error accounting. Proof checking still uses exact
+symbolic states rather than this numerical allowance.
 
 Let u=2^-53 and gamma(j)=j*u/(1-j*u). Let R bound the exact reference
 state norm (initially 1), and A bound the gate operator norm. A is an
@@ -217,22 +267,29 @@ operator-norm bound for every invocation context, with `subject`,
 `src/certificate.rs` enforces the corresponding claim kinds. A single
 state-vector error B or measurement total-variation estimate cannot
 be substituted for this operator-norm certificate or its interval
-checker. The standalone engine emits no certificate today.
+checker. The VM verifies supplied formal certificates; it does not
+turn an observed state vector into a new formal unitary/channel proof.
 
-The integration must propagate engine provenance and simulation
-uncertainty to its report, prevent dense observations from generating
-an exhaustive/epsilon-zero semantic claim, and retain the published
-interval-checker path for formal numerical claims. Measurement-channel
-claims additionally require the published channel checker; state-error
-metadata is not a diamond-norm witness. No new certificate fields or
-weakened checker semantics are introduced by this design.
+Dense action/CC reports and ABI snapshots emit a separate `simulation`
+object. Its `kind` is always `numerical`, including permutation-only
+runs with B=0; dense observations never emit an exhaustive proof. Fields:
 
-Before that integration is complete, run the existing action corpus
-with dense selection, compare exact and dense results within the
-reported bound and explicitly test certificate kinds. Include CC
-oracle-then-gate, controls, fault bits, K17 draws, allocations/releases
-and cleanliness checks after merging rhc. Until then acceptance items
-for selected execution and actual certificate output remain open.
+| Field | Meaning |
+|---|---|
+| `engine`, `kind`, `metric` | `dense`, `numerical`, `state_2_norm` |
+| `error_bound` | Current conditional state 2-norm allowance B |
+| `measurement_error_bound` | Accumulated measurement-distribution allowance |
+| `qubits` | Logical wire-ID extent, including released stable IDs |
+| `packed_qubits`, `state_bytes` | Materialized coordinates and their vector allocation |
+| `gates` | Gate/remap count, including virtual constant operations |
+| `numerical_projections` | Factoring operations that discard bounded nonzero numerical residue |
+
+Hardware target realization error remains a separate `target_error`.
+Simulation metadata does not replace an ISA operator-norm certificate,
+channel diamond-norm witness, or their interval checkers. No published
+certificate fields or admission semantics were changed. Exact proof
+states are constructed explicitly through the default exact constructor,
+even while an execution in the same process selects dense.
 
 ## Verification and benchmark results
 
@@ -331,28 +388,19 @@ Interpretation and limits:
   preliminary rows had one-minute load 14–23. Final rows supersede them;
   shared-machine variation prevents a controlled before/after claim.
 
-Standalone gate after the empty-register compatibility fix (before
-adding the selected-engine integration regression):
+Integration validation on 2026-11-02 adds a dense comparison to every
+existing differential-harness invocation. The original byte-identical
+reference and JIT comparisons remain unchanged. Dense diagnostics and
+discrete outputs must agree exactly. Complex state distance must fit the
+reported B plus a separate allowance for the reference's binary64 display;
+missing sparse zero entries are handled within that distance bound.
+Numerical provenance is required for successful selected execution.
 
-```
-timeout 300 cargo test -j4 --offline --test dense_kernels --test dense_differential -- --test-threads=4
-# 26 kernel tests + 5 exact-interpreter differential tests passed; none failed.
-timeout 300 cargo build -j4 --offline
-# Whole crate build passed.
-rustfmt --edition 2024 --check src/dense/mod.rs examples/dense_bench.rs tests/dense_kernels.rs tests/dense_differential.rs
-# Passed.
-```
-
-The empty-register fix was made after the benchmark run; it changes
-only measurement, which the benchmark does not call. The benchmarked
-pair, SIMD and fusion kernels are unchanged. Full action selection and
-certificate-output verification still await the integration boundary.
-
-The next integration gate is now red in
-`selected_dense_cli_executes_bell_and_labels_numerical_evidence`: dense
-selection must execute the existing Bell fixture, preserve its amplitudes,
-and emit a `simulation` object containing kind `numerical` and an error
-bound. This report metadata is separate from formal ISA certificate
-claims. The five existing exact-interpreter differential tests and all
-26 kernel tests still pass; the whole crate builds. No test was skipped
-or weakened to conceal the selector failure.
+The complete existing coherent fixture corpus passed with 552 dense
+command comparisons, including 126 `run-action` calls and their reversal
+cases (600-second debug gate, 518.10 seconds). CC oracle-then-gate,
+budget/control/fault regressions also passed with the added dense check.
+Runtime tests cover wide virtual constants, allocation/cleanup, measured
+wire reset, general permutation cycles, scaled support/equality checks,
+exact-proof separation and actual CLI/ABI numerical labels. The final
+combined release gate and build results are recorded in the handoff.

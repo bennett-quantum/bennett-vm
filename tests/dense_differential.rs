@@ -327,14 +327,24 @@ fn dense_runtime_virtualizes_wide_constant_registers_and_cleans_inverse() {
     dense.flip(2, &[129]);
     let snapshot = dense.amplitudes();
     assert_eq!(snapshot.len(), 2);
-    assert!(snapshot.keys().all(|k| k.bit(180) && k.bit(2) == k.bit(129)));
-    assert!(dense.amps.is_empty(), "dense execution must not maintain a sparse amplitude shadow");
+    assert!(
+        snapshot
+            .keys()
+            .all(|k| k.bit(180) && k.bit(2) == k.bit(129))
+    );
+    assert!(
+        dense.amps.is_empty(),
+        "dense execution must not maintain a sparse amplitude shadow"
+    );
     dense.flip(2, &[129]);
     dense.apply1(129, &[], h_amp());
     assert!(dense.is_clean(&[2, 129]));
     assert_eq!(dense.constant_value(&wires), Some(value));
     let evidence = dense.simulation_evidence().unwrap();
-    assert_eq!(evidence.get("kind").and_then(|v| v.as_str()), Some("numerical"));
+    assert_eq!(
+        evidence.get("kind").and_then(|v| v.as_str()),
+        Some("numerical")
+    );
     // Numerical observations must never satisfy exact proof equality.
     assert!(!dense.exact_equals(&dense.clone()));
 }
@@ -349,7 +359,9 @@ fn dense_runtime_oracle_map_then_gate_and_measurement_reset() {
         state.apply1(0, &[], h_amp());
         state.map_basis(|k| {
             let mut out = k.clone();
-            if k.bit(0) { out.set_bit(70, !k.bit(70)); }
+            if k.bit(0) {
+                out.set_bit(70, !k.bit(70));
+            }
             out
         });
         state.flip(70, &[]);
@@ -373,5 +385,66 @@ fn dense_runtime_does_not_erase_underflow_scale_input_support() {
         (bennett_vm::bigint::BigUint::zero(), (1.0, 0.0)),
         (bennett_vm::bigint::BigUint::from_u64(1), (1e-200, 0.0)),
     ]));
-    assert!(!state.is_clean(&[0]), "squared-probability underflow is not exact zero support");
+    assert!(
+        !state.is_clean(&[0]),
+        "squared-probability underflow is not exact zero support"
+    );
+}
+
+#[test]
+fn dense_runtime_general_permutation_keeps_uniform_output_bits_virtual() {
+    use bennett_vm::bigint::BigUint;
+    let initial: BTreeMap<_, _> = (0..4)
+        .map(|i| {
+            (
+                BigUint::from_u64(i),
+                match i {
+                    0 => (0.5, 0.0),
+                    1 => (0.0, 0.5),
+                    2 => (-0.5, 0.0),
+                    _ => (0.0, -0.5),
+                },
+            )
+        })
+        .collect();
+    let mut dense = QuantumState::new_dense();
+    let mut exact = QuantumState::new();
+    assert!(exact.simulation_evidence().is_none());
+    let fixed = BigUint::from_u64(1)
+        .shl(80)
+        .sub(&BigUint::from_u64(1))
+        .shl(100);
+    for state in [&mut dense, &mut exact] {
+        state.alloc_wires(192);
+        state.set_state(initial.clone());
+        state.map_basis(|key| {
+            let v = (key.mask(2).to_usize().unwrap() + 1) & 3;
+            let mut out = key.bitxor(&fixed);
+            out.set_bit(0, v & 1 != 0);
+            out.set_bit(1, v & 2 != 0);
+            out
+        });
+    }
+    assert_eq!(dense.amplitudes(), exact.amplitudes());
+    let evidence = dense.simulation_evidence().unwrap();
+    assert_eq!(
+        evidence.get("packed_qubits").and_then(|v| v.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        evidence.get("state_bytes").and_then(|v| v.as_u64()),
+        Some(64)
+    );
+}
+
+#[test]
+fn dense_numerical_equality_does_not_underflow_a_nonzero_distance() {
+    let mut a = QuantumState::new_dense();
+    a.alloc_wires(1);
+    let mut b = a.clone();
+    b.set_state(BTreeMap::from([
+        (bennett_vm::bigint::BigUint::zero(), (1.0, 0.0)),
+        (bennett_vm::bigint::BigUint::from_u64(1), (1e-200, 0.0)),
+    ]));
+    assert!(!a.numerically_equals(&b));
 }

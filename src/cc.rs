@@ -2203,6 +2203,9 @@ impl RuntimeRun {
                 Json::Str(self.machine.quantum.target_error().decimal()),
             ));
         }
+        if let Some(evidence) = self.machine.quantum.simulation_evidence() {
+            out.push(("simulation", evidence));
+        }
         Ok(Json::obj(out))
     }
 }
@@ -2215,6 +2218,26 @@ thread_local! {
 #[cfg(test)]
 mod scaling_tests {
     use super::*;
+
+    #[test]
+    fn dense_abi_snapshot_carries_numerical_provenance() {
+        let mut run = run_for("ret");
+        run.machine.quantum = QuantumState::new_dense();
+        let wires = run.machine.quantum.alloc_wires(1);
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        run.machine
+            .quantum
+            .apply1(wires[0], &[], [[(h, 0.0), (h, 0.0)], [(h, 0.0), (-h, 0.0)]]);
+        let snapshot = run.snapshot("RUNNING").unwrap();
+        let evidence = snapshot
+            .get("simulation")
+            .expect("ABI snapshot needs simulation provenance");
+        assert_eq!(
+            evidence.get("kind").and_then(Json::as_str),
+            Some("numerical")
+        );
+        assert!(evidence.get("error_bound").is_some());
+    }
 
     fn run_for(body: &str) -> RuntimeRun {
         let source = format!(

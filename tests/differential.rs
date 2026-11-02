@@ -131,7 +131,9 @@ fn run(bin: &Path, args: &[String]) -> Output {
         let dense = raw_run(bin, args, "dense");
         compare_dense(&baseline, &dense, args);
         DENSE_COMMANDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if args[0] == "run-action" { DENSE_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+        if args[0] == "run-action" {
+            DENSE_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
     baseline
 }
@@ -140,67 +142,118 @@ fn run(bin: &Path, args: &[String]) -> Output {
 // retain their original exact byte and diagnostic checks.
 fn compare_dense(exact: &Output, dense: &Output, args: &[String]) {
     use bennett_vm::json::Json;
-    assert_eq!(exact.status.code(), dense.status.code(),
-        "DENSE STATUS {args:?}\nexact {}\ndense {}", show(exact), show(dense));
-    let diagnostics = |output: &Output| String::from_utf8_lossy(&output.stderr).lines()
-        .filter(|l| !l.starts_with("JIT_AUDIT ")).collect::<Vec<_>>().join("\n");
-    assert_eq!(diagnostics(exact), diagnostics(dense), "DENSE DIAGNOSTIC {args:?}");
+    assert_eq!(
+        exact.status.code(),
+        dense.status.code(),
+        "DENSE STATUS {args:?}\nexact {}\ndense {}",
+        show(exact),
+        show(dense)
+    );
+    let diagnostics = |output: &Output| {
+        String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .filter(|l| !l.starts_with("JIT_AUDIT "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        diagnostics(exact),
+        diagnostics(dense),
+        "DENSE DIAGNOSTIC {args:?}"
+    );
     if !exact.status.success() {
         assert_eq!(exact.stdout, dense.stdout, "DENSE FAILED STDOUT {args:?}");
         return;
     }
     // Commands such as hash print plain text; they must remain identical.
     let Ok(a) = bennett_vm::json::parse(std::str::from_utf8(&exact.stdout).unwrap().trim()) else {
-        assert_eq!(exact.stdout, dense.stdout, "DENSE TEXT {args:?}"); return;
+        assert_eq!(exact.stdout, dense.stdout, "DENSE TEXT {args:?}");
+        return;
     };
     let mut b = bennett_vm::json::parse(std::str::from_utf8(&dense.stdout).unwrap().trim())
         .unwrap_or_else(|e| panic!("DENSE JSON {args:?}: {e}"));
     let mut bound = 0.0;
-    let evidence = if let Json::Obj(fields) = &mut b { fields.remove("simulation") } else { None };
+    let evidence = if let Json::Obj(fields) = &mut b {
+        fields.remove("simulation")
+    } else {
+        None
+    };
     if let Some(evidence) = evidence {
-        assert_eq!(evidence.get("kind").and_then(Json::as_str), Some("numerical"));
+        assert_eq!(
+            evidence.get("kind").and_then(Json::as_str),
+            Some("numerical")
+        );
         assert_eq!(evidence.get("engine").and_then(Json::as_str), Some("dense"));
         bound = match evidence.get("error_bound").unwrap() {
             Json::Num(v) => v.parse::<f64>().unwrap(),
             other => panic!("invalid state bound {other:?}"),
         };
-        assert!(bound.is_finite() && bound >= 0.0, "{args:?}: invalid bound {bound}");
+        assert!(
+            bound.is_finite() && bound >= 0.0,
+            "{args:?}: invalid bound {bound}"
+        );
     } else if matches!(args[0].as_str(), "run-action" | "run-cc" | "run-program") {
         panic!("{args:?}: selected dense execution omitted numerical provenance");
     }
     fn compare(a: &Json, b: &Json, path: &str, bound: f64) {
         match (a, b) {
-            (Json::Obj(a), Json::Obj(b)) if path.ends_with(".state") || path.ends_with(".forward_state") => {
-                let number = |v: &Json| match v { Json::Num(v) => v.parse::<f64>().unwrap(), _ => panic!("invalid amplitude {v:?}") };
+            (Json::Obj(a), Json::Obj(b))
+                if path.ends_with(".state") || path.ends_with(".forward_state") =>
+            {
+                let number = |v: &Json| match v {
+                    Json::Num(v) => v.parse::<f64>().unwrap(),
+                    _ => panic!("invalid amplitude {v:?}"),
+                };
                 let amp = |v: Option<&Json>| match v {
                     Some(Json::Arr(v)) if v.len() == 2 => (number(&v[0]), number(&v[1])),
-                    None => (0.0, 0.0), other => panic!("invalid amplitude {other:?}"),
+                    None => (0.0, 0.0),
+                    other => panic!("invalid amplitude {other:?}"),
                 };
                 let keys: std::collections::BTreeSet<_> = a.keys().chain(b.keys()).collect();
                 let mut distance2 = 0.0;
                 for k in &keys {
-                    let (ar, ai) = amp(a.get(*k)); let (br, bi) = amp(b.get(*k));
-                    distance2 += (ar-br).powi(2) + (ai-bi).powi(2);
+                    let (ar, ai) = amp(a.get(*k));
+                    let (br, bi) = amp(b.get(*k));
+                    distance2 += (ar - br).powi(2) + (ai - bi).powi(2);
                 }
                 // Exact engine's final f64 projection has a separate allowance.
                 let projection = 8.0 * f64::EPSILON * (keys.len() as f64).sqrt();
-                assert!(distance2.sqrt() <= bound + projection,
-                    "DENSE AMPLITUDES {path}: distance {} > bound {bound} + projection {projection}", distance2.sqrt());
+                assert!(
+                    distance2.sqrt() <= bound + projection,
+                    "DENSE AMPLITUDES {path}: distance {} > bound {bound} + projection {projection}",
+                    distance2.sqrt()
+                );
             }
             (Json::Obj(a), Json::Obj(b)) => {
-                assert_eq!(a.keys().collect::<Vec<_>>(), b.keys().collect::<Vec<_>>(), "DENSE FIELDS {path}");
-                for (k, v) in a { compare(v, &b[k], &format!("{path}.{k}"), bound); }
+                assert_eq!(
+                    a.keys().collect::<Vec<_>>(),
+                    b.keys().collect::<Vec<_>>(),
+                    "DENSE FIELDS {path}"
+                );
+                for (k, v) in a {
+                    compare(v, &b[k], &format!("{path}.{k}"), bound);
+                }
             }
             (Json::Arr(a), Json::Arr(b)) => {
                 assert_eq!(a.len(), b.len(), "DENSE ARRAY {path}");
-                for (i, (a, b)) in a.iter().zip(b).enumerate() { compare(a, b, &format!("{path}[{i}]"), bound); }
+                for (i, (a, b)) in a.iter().zip(b).enumerate() {
+                    compare(a, b, &format!("{path}[{i}]"), bound);
+                }
             }
             _ => assert_eq!(a, b, "DENSE VALUE {path}"),
         }
     }
     compare(&a, &b, &format!("{args:?}"), bound);
     if std::env::var_os("BENNETT_HARNESS_COUNTS").is_some() {
-        eprintln!("DENSE_HARNESS {} {}", args[0], if dense.status.success() { "json" } else { "diagnostic" });
+        eprintln!(
+            "DENSE_HARNESS {} {}",
+            args[0],
+            if dense.status.success() {
+                "json"
+            } else {
+                "diagnostic"
+            }
+        );
     }
 }
 
@@ -1604,9 +1657,11 @@ fn coherent_commands_on_every_fixture() {
     for path in fixture_files() {
         coherent_corpus(&path);
     }
-    eprintln!("DENSE_CORPUS commands={} run_action={}",
+    eprintln!(
+        "DENSE_CORPUS commands={} run_action={}",
         DENSE_COMMANDS.load(std::sync::atomic::Ordering::Relaxed),
-        DENSE_ACTIONS.load(std::sync::atomic::Ordering::Relaxed));
+        DENSE_ACTIONS.load(std::sync::atomic::Ordering::Relaxed)
+    );
 }
 
 #[test]

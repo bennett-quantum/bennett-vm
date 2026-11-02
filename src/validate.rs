@@ -1127,9 +1127,8 @@ const LIFTED_TERMINATORS: [&str; 6] = [
 ];
 
 fn validate_terminators(obj: &Object, f: &Function) -> Result<(), String> {
-    if matches!(f.kind, FnKind::Cc | FnKind::R) && obj.isa != "0.8" {
-        // 0.9 §3.4 (K5): br, ret, trap and fault end a block; nothing follows them.
-        // 0.8's §3.4 has no such sentence: a row after a `trap` stays accepted there.
+    if matches!(f.kind, FnKind::Cc | FnKind::R) {
+        // §3.4: br, ret, trap and fault end a block; nothing follows them.
         for b in &f.blocks {
             let rows = &b.instrs[..b.instrs.len().saturating_sub(1)];
             if rows

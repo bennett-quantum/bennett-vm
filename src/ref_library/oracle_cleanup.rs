@@ -19,6 +19,8 @@ struct Identity {
     callee: String,
     token: String,
     inputs: Vec<String>,
+    /// `tgt` and `fr'`: part of the match at 0.8 and 0.9, as in the reference.
+    targets: Vec<String>,
     memory: Vec<String>,
     arguments: Vec<String>,
 }
@@ -30,6 +32,7 @@ fn key(i: &Instr) -> Result<Option<Identity>, String> {
         callee: i.operands[0].clone(),
         token: i.operands[1].clone(),
         inputs: crate::validate::list_operand(&i.operands[2])?,
+        targets: i.operands[3..5].to_vec(),
         memory: crate::validate::list_operand(&i.operands[5])?,
         arguments: crate::validate::list_operand(&i.operands[6])?,
     }))
@@ -61,8 +64,8 @@ fn reachable(edges: &[Vec<usize>], start: usize, stop: Option<usize>) -> Vec<boo
 
 /// Balanced-path saturation handles branches and balanced cycles without
 /// unrolling a source path or bounding the number of retained invocations.
-/// Each §5.5 operand identity has an independent LIFO stack. Other call
-/// identities are neutral for this stack.
+/// Each §5.5 operand identity (`tgt` and `fr'` included) has an independent LIFO
+/// stack. Other call identities are neutral for this stack.
 pub(super) fn pairs(
     f: &Function,
     first: usize,
@@ -154,13 +157,6 @@ pub(super) fn pairs(
                 ));
             }
             let open = candidates[0];
-            if rows[open].operands[3..5] != i.operands[3..5] {
-                return Err(failure(
-                    f,
-                    i,
-                    "uncall must use the matched call's successor targets",
-                ));
-            }
             let inputs = crate::validate::list_operand(&i.operands[2])?;
             let mut reverse = vec![vec![]; n + 1];
             for (a, successors) in edges.iter().enumerate() {

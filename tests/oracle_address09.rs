@@ -184,11 +184,14 @@ fn load_verdicts_match_the_binding_stage() {
         "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
         "lift.oracle_call @id tk (x) r fr () ()\nqbranch x ^left ^right\n^left():\nqjump ^join\n^right():\nqjump ^join\n^join():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
         "lift.oracle_call @id tk (x) r fr () ()\nqjump ^body\n^body():\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nqbranch x ^body ^done\n^done():\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        // `tgt` and `fr'` are part of the match (ruling R1, as the reference): a pair
+        // may cross another on different targets, and an unmatched call is retained.
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.retval r",
     ] {
         bennett_vm::load(&paired_text(rows), false).unwrap();
     }
     for rows in [
-        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
         "lift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
         "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id other (x) r fr () ()\nlift.retval r",
         "s = lift.mov x\nlift.oracle_call @id tk (s) r fr () ()\ns = lift.mov x\nlift.oracle_uncall @id tk (s) r fr () ()\nlift.retval r",
@@ -219,15 +222,27 @@ fn lifted_uncall_source_pairing_is_lifo_and_keeps_exact_target_locations() {
         assert!(pair.cleanup_point.instance.is_empty());
         assert!(pair.cleanup_point.call_index.is_none());
     }
-    let bad = paired_source(
+    // `tgt` and `fr'` are part of the match at 0.8 and 0.9, as in the reference
+    // (ruling R1, 2026-11-02): an uncall on r pairs with the call on r even past a
+    // later call on s, which is retained; two pairs on different targets may cross.
+    let skipped = paired_source(
         "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
     );
-    env.address_oracle(&bad, "root").unwrap();
-    assert!(
-        env.oracle_cleanup_pairs()
-            .unwrap_err()
-            .contains("successor targets")
+    env.address_oracle(&skipped, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].computing_point.point, "entry:0");
+    assert_eq!(pairs[0].cleanup_point.point, "entry:2");
+    let crossing = paired_source(
+        "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_call @id tk (x) s fs () ()\nlift.oracle_uncall @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) s fs () ()\nlift.retval r",
     );
+    env.address_oracle(&crossing, "root").unwrap();
+    let pairs = env.oracle_cleanup_pairs().unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0].computing_point.point, "entry:0");
+    assert_eq!(pairs[0].cleanup_point.point, "entry:2");
+    assert_eq!(pairs[1].computing_point.point, "entry:1");
+    assert_eq!(pairs[1].cleanup_point.point, "entry:3");
 }
 
 #[test]

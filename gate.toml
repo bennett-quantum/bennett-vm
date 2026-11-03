@@ -12,8 +12,8 @@ name = "cargo test"
 argv = ["cargo", "test", "--offline"]
 
 [siblings."bennett-isa-spec"]
-sha = "ecaaac060c44e317d1181345fa6b8e38c096c099"
-note = "ISA main as gated by the 2026-11-02 push wave"
+sha = "fd626d37aba1f719c3b7b2059be46cbfaf462886"
+note = "ISA main with published K83 fixtures and accepted ISA 0.9 repairs (shift 4)"
 
 [[siblings."bennett-isa-spec".build]]
 name = "reference interpreter (debug)"

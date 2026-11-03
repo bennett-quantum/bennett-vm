@@ -23,7 +23,9 @@ pub(crate) enum AllocationError {
 }
 impl std::fmt::Display for AllocationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { Self::Capacity(message) | Self::Host(message) => f.write_str(message) }
+        match self {
+            Self::Capacity(message) | Self::Host(message) => f.write_str(message),
+        }
     }
 }
 type OutcomeCache = BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)>;
@@ -98,16 +100,24 @@ impl QuantumState {
     }
     pub fn alloc_wire(&mut self) -> usize {
         let w = self.next_wire;
-        self.next_wire = self.next_wire.checked_add(1).expect("host limit: wire identity");
+        self.next_wire = self
+            .next_wire
+            .checked_add(1)
+            .expect("host limit: wire identity");
         w
     }
     pub fn alloc_wires(&mut self, n: usize) -> Vec<usize> {
         self.try_alloc_wires(n).unwrap_or_else(|e| panic!("{e}"))
     }
     pub(crate) fn try_alloc_wires(&mut self, n: usize) -> Result<Vec<usize>, String> {
-        let end = self.next_wire.checked_add(n).ok_or("host limit: wire identities")?;
+        let end = self
+            .next_wire
+            .checked_add(n)
+            .ok_or("host limit: wire identities")?;
         let mut wires = Vec::new();
-        wires.try_reserve_exact(n).map_err(|e| format!("host limit: quantum register of {n} wires: {e}"))?;
+        wires
+            .try_reserve_exact(n)
+            .map_err(|e| format!("host limit: quantum register of {n} wires: {e}"))?;
         wires.extend(self.next_wire..end);
         self.next_wire = end;
         Ok(wires)
@@ -2275,18 +2285,28 @@ pub fn execute_perm_basis(
 
 impl QuantumState {
     pub fn target_alloc(&mut self, n: usize, requested: &str) -> Result<Vec<usize>, String> {
-        self.checked_target_alloc(n, requested).map_err(|e| e.to_string())
+        self.checked_target_alloc(n, requested)
+            .map_err(|e| e.to_string())
     }
-    pub(crate) fn checked_target_alloc(&mut self, n: usize, requested: &str) -> Result<Vec<usize>, AllocationError> {
+    pub(crate) fn checked_target_alloc(
+        &mut self,
+        n: usize,
+        requested: &str,
+    ) -> Result<Vec<usize>, AllocationError> {
         let class = if let Some(t) = &self.target {
             let mut used = BTreeMap::new();
             for c in self.wire_classes.values() {
                 *used.entry(c.clone()).or_insert(0) += 1;
             }
-            Some(t.class_for(requested, n, &used).map_err(AllocationError::Capacity)?)
+            Some(
+                t.class_for(requested, n, &used)
+                    .map_err(AllocationError::Capacity)?,
+            )
         } else {
             if requested != "any" {
-                return Err(AllocationError::Capacity("§8.3: concrete allocation class requires a target".into()));
+                return Err(AllocationError::Capacity(
+                    "§8.3: concrete allocation class requires a target".into(),
+                ));
             }
             None
         };

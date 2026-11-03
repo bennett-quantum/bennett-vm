@@ -223,7 +223,9 @@ fn is_measure(op: &str) -> bool {
     op.split('.').next() == Some("measure")
 }
 fn pure(op: &str) -> bool {
-    if matches!(op, "qreg.width" | "qreg.id" | "qreg.from_id") { return true; }
+    if matches!(op, "qreg.width" | "qreg.id" | "qreg.from_id") {
+        return true;
+    }
     matches!(
         op.split('.').next().unwrap(),
         "const"
@@ -393,7 +395,10 @@ impl Data {
     }
     fn new_handle(&mut self, wires: Vec<usize>, parent: Option<u64>) -> u64 {
         let id = self.next_handle;
-        self.next_handle = self.next_handle.checked_add(1).expect("host limit: register identities");
+        self.next_handle = self
+            .next_handle
+            .checked_add(1)
+            .expect("host limit: register identities");
         self.handles.insert(
             id,
             Handle {
@@ -436,22 +441,36 @@ impl Machine {
     fn dimension(&self, name: &str) -> Result<BigUint, u64> {
         if crate::validate::is_int_literal(name) {
             BigUint::parse_int(name).map_err(|_| 4)
-        } else { self.bits(name) }
+        } else {
+            self.bits(name)
+        }
     }
     fn token_budget(&self, token: &Value) -> Result<value::Budget, u64> {
         match token {
             Value::Token(budget) => Ok(*budget),
-            Value::TokenId(id, budget) if self.data.tokens.get(id).is_some_and(|(_, b)| b == budget) => Ok(*budget),
+            Value::TokenId(id, budget)
+                if self.data.tokens.get(id).is_some_and(|(_, b)| b == budget) =>
+            {
+                Ok(*budget)
+            }
             _ => Err(4),
         }
     }
     fn transfer(&self, values: &[Value], params: &[crate::object::Param]) -> Result<(), u64> {
-        if self.obj.isa != "0.9" { return Ok(()); }
+        if self.obj.isa != "0.9" {
+            return Ok(());
+        }
         for (value, param) in values.iter().zip(params) {
             if matches!(param.ty, Type::Qreg(_) | Type::QregDynamic) {
-                let Value::Qreg(id) = value else { return Err(4); };
+                let Value::Qreg(id) = value else {
+                    return Err(4);
+                };
                 let handle = self.data.handle(*id)?;
-                if handle.parent.is_some() || matches!(param.ty, Type::Qreg(n) if n != handle.wires.len()) { return Err(4); }
+                if handle.parent.is_some()
+                    || matches!(param.ty, Type::Qreg(n) if n != handle.wires.len())
+                {
+                    return Err(4);
+                }
             }
         }
         Ok(())
@@ -551,7 +570,9 @@ impl Machine {
                 let mut writes = std::mem::take(&mut self.data.writes);
                 writes.extend(frame.memory_keys.iter().cloned());
                 self.data = d.clone();
-                if self.obj.isa == "0.9" { self.data.next_handle = self.data.next_handle.max(next_handle); }
+                if self.obj.isa == "0.9" {
+                    self.data.next_handle = self.data.next_handle.max(next_handle);
+                }
                 self.data.writes = writes;
             }
         }
@@ -730,8 +751,12 @@ impl Machine {
             definitions: self.definitions.clone(),
             next_activation,
             memory_keys: addresses,
-            tokens_created: before.tokens.changed_keys(&self.data.tokens).into_iter()
-                .filter(|id| !before.tokens.contains_key(id) && self.data.tokens.contains_key(id)).collect(),
+            tokens_created: before
+                .tokens
+                .changed_keys(&self.data.tokens)
+                .into_iter()
+                .filter(|id| !before.tokens.contains_key(id) && self.data.tokens.contains_key(id))
+                .collect(),
             data: (!pure(&ins.op)).then_some(before),
             after: self.stateful.then(|| self.data.clone()),
             control,
@@ -875,9 +900,18 @@ impl Machine {
                 return Ok(Some(if code == 0 { 4 } else { code }));
             }
             "budget" if obj.isa == "0.9" => {
-                let budget = value::Budget { steps: get!(self.number(&xs[1])), heap: get!(self.number(&xs[2])), stack: get!(self.number(&xs[3])), depth: get!(self.number(&xs[4])) };
-                if cliargs::validate_budget(&obj, &budget).is_err() { return Ok(Some(4)); }
-                let id = self.data.mint_token(xs[0].trim_start_matches('@').into(), budget);
+                let budget = value::Budget {
+                    steps: get!(self.number(&xs[1])),
+                    heap: get!(self.number(&xs[2])),
+                    stack: get!(self.number(&xs[3])),
+                    depth: get!(self.number(&xs[4])),
+                };
+                if cliargs::validate_budget(&obj, &budget).is_err() {
+                    return Ok(Some(4));
+                }
+                let id = self
+                    .data
+                    .mint_token(xs[0].trim_start_matches('@').into(), budget);
                 result = Some(Value::TokenId(id, budget));
             }
             "br" => {
@@ -1016,9 +1050,12 @@ impl Machine {
             "qreg" => match op {
                 "qreg.new" => {
                     let ws = if obj.isa == "0.9" {
-                        let n = get!(self.dimension(&xs[1])).to_usize().ok_or("host limit: quantum register width")?;
-                        if self.quantum.target.is_none() { self.quantum.try_alloc_wires(n)? }
-                        else {
+                        let n = get!(self.dimension(&xs[1]))
+                            .to_usize()
+                            .ok_or("host limit: quantum register width")?;
+                        if self.quantum.target.is_none() {
+                            self.quantum.try_alloc_wires(n)?
+                        } else {
                             match self.quantum.checked_target_alloc(n, &xs[0]) {
                                 Ok(wires) => wires,
                                 Err(action::AllocationError::Capacity(_)) => return Ok(Some(2)),
@@ -1047,9 +1084,13 @@ impl Machine {
                     let (lo, n) = if obj.isa == "0.9" {
                         let lo = get!(self.dimension(&xs[1]));
                         let n = get!(self.dimension(&xs[2]));
-                        if lo.add(&n) > u(h.wires.len() as u64) { return Ok(Some(4)); }
+                        if lo.add(&n) > u(h.wires.len() as u64) {
+                            return Ok(Some(4));
+                        }
                         (lo.to_usize().unwrap(), n.to_usize().unwrap())
-                    } else { (xs[1].parse().map_err(err)?, xs[2].parse().map_err(err)?) };
+                    } else {
+                        (xs[1].parse().map_err(err)?, xs[2].parse().map_err(err)?)
+                    };
                     if h.parent.is_some() || lo.checked_add(n).is_none_or(|end| end > h.wires.len())
                     {
                         return Ok(Some(4));
@@ -1076,14 +1117,27 @@ impl Machine {
                 "qreg.width" | "qreg.id" if obj.isa == "0.9" => {
                     let id = get!(self.id(&xs[0]));
                     let handle = self.data.handle(id).unwrap();
-                    if handle.parent.is_some() { return Ok(Some(4)); }
-                    result = Some(Value::int(64, u(if op == "qreg.id" { id } else { handle.wires.len() as u64 })));
+                    if handle.parent.is_some() {
+                        return Ok(Some(4));
+                    }
+                    result = Some(Value::int(
+                        64,
+                        u(if op == "qreg.id" {
+                            id
+                        } else {
+                            handle.wires.len() as u64
+                        }),
+                    ));
                 }
                 "qreg.from_id" if obj.isa == "0.9" => {
                     let id = get!(self.number(&xs[0]));
-                    if self.unavailable_handle == Some(id) { return Ok(Some(4)); }
+                    if self.unavailable_handle == Some(id) {
+                        return Ok(Some(4));
+                    }
                     let handle = get!(self.data.handle(id));
-                    if handle.parent.is_some() { return Ok(Some(4)); }
+                    if handle.parent.is_some() {
+                        return Ok(Some(4));
+                    }
                     result = Some(Value::Qreg(id));
                 }
                 _ => return Err(format!("unimplemented: {op} (milestone 2)")),
@@ -1266,7 +1320,9 @@ impl Machine {
             // current instance traps.
             let args = binding!(self.operands(&list(&xs[4])?));
             for arg in &args {
-                if matches!(arg, Value::Token(_) | Value::TokenId(..)) { binding!(self.token_budget(arg)); }
+                if matches!(arg, Value::Token(_) | Value::TokenId(..)) {
+                    binding!(self.token_budget(arg));
+                }
             }
             Invocation::Action {
                 name,
@@ -1306,7 +1362,9 @@ impl Machine {
             let budget = binding!(self.token_budget(&binding!(self.read(&xs[1]))));
             let args = binding!(self.operands(&list(&xs[6])?));
             for arg in &args {
-                if matches!(arg, Value::Token(_) | Value::TokenId(..)) { binding!(self.token_budget(arg)); }
+                if matches!(arg, Value::Token(_) | Value::TokenId(..)) {
+                    binding!(self.token_budget(arg));
+                }
             }
             Invocation::Oracle {
                 name,
@@ -1577,7 +1635,9 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                 Value::Token(b)
             }
             (ty @ (Type::Qreg(_) | Type::QregDynamic), cliargs::RawArg::QregBits(bits)) => {
-                if matches!(ty, Type::Qreg(n) if bits.len() != *n) || !bits.bytes().all(|b| b == b'0' || b == b'1') {
+                if matches!(ty, Type::Qreg(n) if bits.len() != *n)
+                    || !bits.bytes().all(|b| b == b'0' || b == b'1')
+                {
                     return Err("§10: E_ARG: qreg bits differ from signature".into());
                 }
                 let ws = quantum.target_alloc(bits.len(), "any")?;
@@ -1857,7 +1917,9 @@ fn first_difference(
     if da.handles != db.handles || !quantum_identity {
         return Some("quantum registers differ".into());
     }
-    if da.tokens != db.tokens { return Some("token validity differs".into()); }
+    if da.tokens != db.tokens {
+        return Some("token validity differs".into());
+    }
     None
 }
 
@@ -1951,12 +2013,24 @@ pub(crate) struct Resources {
     quantum: QuantumState,
 }
 impl Resources {
-    pub(crate) fn token(&self, id: u64) -> Option<&(String, value::Budget)> { self.data.tokens.get(&id) }
-    pub(crate) fn token_for_budget(&self, budget: &value::Budget) -> Option<u64> {
-        self.data.tokens.iter().find(|(_, (_, b))| b == budget).map(|(id, _)| *id)
+    pub(crate) fn token(&self, id: u64) -> Option<&(String, value::Budget)> {
+        self.data.tokens.get(&id)
     }
-    pub(crate) fn mint_token(&mut self, name: String, budget: value::Budget) -> u64 { self.data.mint_token(name, budget) }
-    pub(crate) fn revoke_tokens(&mut self, tokens: &[u64]) { for id in tokens { self.data.tokens.remove(id); } }
+    pub(crate) fn token_for_budget(&self, budget: &value::Budget) -> Option<u64> {
+        self.data
+            .tokens
+            .iter()
+            .find(|(_, (_, b))| b == budget)
+            .map(|(id, _)| *id)
+    }
+    pub(crate) fn mint_token(&mut self, name: String, budget: value::Budget) -> u64 {
+        self.data.mint_token(name, budget)
+    }
+    pub(crate) fn revoke_tokens(&mut self, tokens: &[u64]) {
+        for id in tokens {
+            self.data.tokens.remove(id);
+        }
+    }
     pub(crate) fn has_target(&self) -> bool {
         self.quantum.target.is_some()
     }
@@ -1974,7 +2048,11 @@ impl Resources {
         Ok(self.data.new_handle(ws, None))
     }
     pub(crate) fn reg_width(&self, id: u64) -> Option<usize> {
-        self.data.handle(id).ok().filter(|h| h.parent.is_none()).map(|h| h.wires.len())
+        self.data
+            .handle(id)
+            .ok()
+            .filter(|h| h.parent.is_none())
+            .map(|h| h.wires.len())
     }
     pub(crate) fn clean(&self, id: u64) -> bool {
         self.data
@@ -2119,14 +2197,22 @@ impl RuntimeRun {
         &self.machine.results
     }
     pub(crate) fn minted_tokens(&self) -> Vec<u64> {
-        self.machine.history.iter().flat_map(|f| f.tokens_created.iter().copied()).collect()
+        self.machine
+            .history
+            .iter()
+            .flat_map(|f| f.tokens_created.iter().copied())
+            .collect()
     }
-    pub(crate) fn unavailable_handle(&mut self, id: Option<u64>) { self.machine.unavailable_handle = id; }
+    pub(crate) fn unavailable_handle(&mut self, id: Option<u64>) {
+        self.machine.unavailable_handle = id;
+    }
     pub(crate) fn from_id_target(&self) -> Option<u64> {
         let m = &self.machine;
         let a = m.stack.last()?;
         let instruction = &m.obj.function(&a.function)?.blocks[a.block].instrs[a.index];
-        (instruction.op == "qreg.from_id").then(|| m.number(&instruction.operands[0]).ok()).flatten()
+        (instruction.op == "qreg.from_id")
+            .then(|| m.number(&instruction.operands[0]).ok())
+            .flatten()
     }
     pub(crate) fn measured(&self) -> bool {
         self.machine.history.iter().any(|f| f.measured)
@@ -2203,7 +2289,9 @@ impl RuntimeRun {
             if let Ok(id) = m.number(&i.operands[0])
                 && m.unavailable_handle != Some(id)
                 && m.data.handle(id).is_ok_and(|h| h.parent.is_none())
-            { regs.push(id); }
+            {
+                regs.push(id);
+            }
         }
         for text in &i.operands {
             for name in

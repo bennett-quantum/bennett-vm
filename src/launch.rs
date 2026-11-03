@@ -179,7 +179,10 @@ impl bennett_program_t {
             return Err(error(INVALID, "§10: step requires RUNNING"));
         }
         run.runtime.sync(&self.resources);
-        let unavailable = run.runtime.from_id_target().filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
+        let unavailable = run
+            .runtime
+            .from_id_target()
+            .filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
         run.runtime.unavailable_handle(unavailable);
         let (memory, regs) = self.runs[&r].runtime.touches();
         if memory.iter().any(|key| {
@@ -480,14 +483,17 @@ pub unsafe extern "C" fn bennett_run(
                     regs.push(*q);
                     Value::Qreg(*q)
                 }
-                (Type::QregDynamic, Some(Arg::Qreg(q))) if p.obj.isa == "0.9" && p.resources.reg_width(*q).is_some() => {
+                (Type::QregDynamic, Some(Arg::Qreg(q)))
+                    if p.obj.isa == "0.9" && p.resources.reg_width(*q).is_some() =>
+                {
                     p.unlocked(*q)?;
                     regs.push(*q);
                     Value::Qreg(*q)
                 }
                 (Type::Token, Some(Arg::Token(t))) => Value::TokenId(
                     *t,
-                    p.resources.token(*t)
+                    p.resources
+                        .token(*t)
                         .ok_or_else(|| error(ARG, "§10: token not scoped to this program"))?
                         .1,
                 ),
@@ -541,7 +547,10 @@ impl bennett_result_t {
                     Value::Qreg(q) => (2, 64, q.to_le_bytes().to_vec()),
                     Value::TokenId(t, _) => (3, 64, t.to_le_bytes().to_vec()),
                     Value::Token(b) => {
-                        let t = p.resources.token_for_budget(b).unwrap_or_else(|| p.resources.mint_token(String::new(), *b));
+                        let t = p
+                            .resources
+                            .token_for_budget(b)
+                            .unwrap_or_else(|| p.resources.mint_token(String::new(), *b));
                         (3, 64, t.to_le_bytes().to_vec())
                     }
                 };
@@ -864,7 +873,9 @@ pub unsafe extern "C" fn bennett_estimate_run(
             .function(name)
             .filter(|f| matches!(f.kind, FnKind::Oracle | FnKind::Action | FnKind::PermAction))
             .ok_or_else(|| error(ARG, "§10: E_ARG: unknown/non-region estimate subject"))?;
-        let (token_region, _budget) = p.resources.token(token)
+        let (token_region, _budget) = p
+            .resources
+            .token(token)
             .ok_or_else(|| error(ARG, "§10: E_ARG: unknown program-scoped token"))?;
         if token_region != name {
             return Err(error(

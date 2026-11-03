@@ -442,15 +442,15 @@ impl<'a> FrameAnalysis<'a> {
                     self.flush()?;
                     self.entry.release(&flags);
                 }
-                "qalloc" | "qborrow" => {
+                "qalloc" | "qborrow" | "qalloc_restore" | "qborrow_restore" => {
                     let n = i.operands[1]
                         .parse()
                         .map_err(|_| err("5.6", "unresolved allocation width"))?;
                     self.env.insert(i.lhs[0].clone(), n);
                     let ws = wires(&self.env, &i.lhs[0])?;
                     self.entry
-                        .allocate(&ws, if i.op == "qalloc" { Some(false) } else { None });
-                    if i.op == "qborrow" {
+                        .allocate(&ws, if matches!(i.op.as_str(), "qalloc" | "qalloc_restore") { Some(false) } else { None });
+                    if matches!(i.op.as_str(), "qborrow" | "qborrow_restore") {
                         self.borrowed.extend(ws.clone());
                         self.frames.insert(
                             i.lhs[0].clone(),
@@ -628,7 +628,11 @@ impl<'a> FrameAnalysis<'a> {
                     let targets = wires(&self.env, target)?;
                     let all = [
                         region,
-                        wires(&self.env, &i.operands[1])?,
+                        if self.obj.isa == "0.9" && i.operands[1] == "()" {
+                            vec![]
+                        } else {
+                            wires(&self.env, &i.operands[1])?
+                        },
                         targets.clone(),
                         pred.clone(),
                     ]

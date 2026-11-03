@@ -1,7 +1,7 @@
 //! Resolve source-local allocation names before forming an action adjoint.
 //! Loop backedges identify the entry/exit slots; physical lifetime occurrences
 //! are still assigned after literal traversal, including each loop visit.
-use crate::object::{Function, Instr};
+use crate::object::{Function, Instr, Type};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn substitute(s: &str, names: &BTreeMap<String, String>) -> String {
@@ -105,4 +105,60 @@ pub(crate) fn bind_allocations(f: &Function) -> Function {
     }
     for block in &mut result.blocks { finish(&mut block.instrs, &aliases); }
     result
+}
+
+pub(super) type ReleasePlan = BTreeMap<(usize, Vec<usize>), (usize, String)>;
+
+/// Allocation/release rows are unconditional. Resolve their metadata over the
+/// literal forward visits before reversing gates; predicates need no sampling.
+pub(super) fn release_metadata(f: &Function) -> ReleasePlan {
+    let mut regions = f.lists[2].iter().filter_map(|p| match p.ty {
+        Type::Region(_, width) => Some((p.name.clone(), width)),
+        _ => None,
+    }).collect::<BTreeMap<_, _>>();
+    let mut flat = vec![];
+    f.flat_instrs(&mut flat);
+    for i in flat {
+        if i.op == "qregion" {
+            regions.insert(i.operands[0].clone(), i.operands[2].parse().expect("validated region width"));
+        }
+    }
+    let mut live = f.lists[..2].iter().flatten().filter_map(|p| match p.ty {
+        Type::Wire(width) => Some((p.name.clone(), (width, "any".to_string()))),
+        _ => None,
+    }).collect::<BTreeMap<_, _>>();
+    fn walk(rows: &[Instr], live: &mut BTreeMap<String, (usize, String)>, regions: &BTreeMap<String, usize>, iterations: &mut Vec<usize>, plan: &mut ReleasePlan) {
+        for i in rows {
+            match i.op.as_str() {
+                "qalloc" | "qborrow" => {
+                    live.insert(i.lhs[0].clone(), (i.operands[1].parse().expect("validated allocation width"), i.operands[0].clone()));
+                }
+                "qcopy" => {
+                    let source = &i.operands[0];
+                    let width = if source.contains('[') { 1 } else { live.get(source).expect("live source copy").0 };
+                    live.insert(i.lhs[0].clone(), (width, "any".into()));
+                }
+                "qload" => { live.insert(i.lhs[0].clone(), (regions[&i.operands[0]], "any".into())); }
+                "qfree" | "qreturn" => {
+                    let metadata = live.remove(&i.operands[0]).expect("validated live release");
+                    assert!(plan.insert((i.line, iterations.clone()), metadata).is_none(), "unique literal source visit");
+                }
+                "quncopy" => { live.remove(&i.operands[1]).expect("validated live uncopy"); }
+                "qunload" => { live.remove(&i.operands[2]).expect("validated live unload"); }
+                "qloop" => {
+                    for visit in 0..i.operands[0].parse().expect("validated loop bound") {
+                        iterations.push(visit);
+                        walk(&i.nested[0], live, regions, iterations, plan);
+                        iterations.pop();
+                    }
+                }
+                _ => {
+                    for arm in &i.nested { walk(arm, live, regions, iterations, plan); }
+                }
+            }
+        }
+    }
+    let mut plan = ReleasePlan::new();
+    for block in &f.blocks { walk(&block.instrs, &mut live, &regions, &mut vec![], &mut plan); }
+    plan
 }

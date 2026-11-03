@@ -357,6 +357,19 @@ pub(super) fn action_body(
     Ok(Json::Arr(body))
 }
 impl Source {
+    fn allocation_metadata(&self, instruction: &Instr, body: Vec<Json>) -> Vec<Json> {
+        if !matches!(instruction.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload") {
+            return body;
+        }
+        vec![Json::obj(vec![
+            ("$source_allocation", Json::obj(vec![
+                ("name", text(&instruction.lhs[0])),
+                ("class", text(if matches!(instruction.op.as_str(), "qalloc" | "qborrow") { instruction.operands[0].as_str() } else { "any" })),
+                ("state", text(if instruction.op == "qborrow" { "borrowed" } else { "clean" })),
+            ])),
+            ("body", Json::Arr(body)),
+        ])]
+    }
     fn region_width(&self, r: &Region) -> Result<usize, String> {
         u32::try_from(r.address)
             .ok()
@@ -445,8 +458,8 @@ impl Source {
                     .first()
                     .ok_or_else(|| err("allocation result missing"))?;
                 if let Some(previous) = self.declarations.iter().find(|(n, ..)| n == name) {
-                    if previous.1 != width || previous.2 != class || previous.3 != state {
-                        return Err(err("loop-carried allocation metadata differs"));
+                    if previous.1 != width {
+                        return Err(err("loop-carried allocation width differs"));
                     }
                 } else {
                     self.widths.insert(name.clone(), width);
@@ -2446,17 +2459,17 @@ impl Source {
                 } else {
                     op.into()
                 };
-                return Ok(vec![invocation(
+                return Ok(self.allocation_metadata(i, vec![invocation(
                     &kind,
                     vec![
                         num(r.address),
                         num(width / r.cell),
                         num(r.cell),
-                        text(&operands[1]),
+                        if r.address == 0 { Json::Arr(vec![]) } else { text(&operands[1]) },
                         if load && r.local { region } else { text(name) },
                         text(value),
                     ],
-                )]);
+                )]));
             }
             "qif" => {
                 let body = vec![invocation(
@@ -2496,6 +2509,6 @@ impl Source {
                 )));
             }
         };
-        Ok(vec![invocation(kind, args)])
+        Ok(self.allocation_metadata(i, vec![invocation(kind, args)]))
     }
 }

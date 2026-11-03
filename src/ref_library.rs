@@ -176,6 +176,9 @@ pub struct Leaf {
     pub event: Option<Json>,
     pub allocation: Option<String>,
     pub scratch: bool,
+    // The original source acquisition fixes its lifetime's metadata in either
+    // traversal. A loop-carried slot can be acquired with a new class.
+    pub(crate) source_allocation: bool,
     pub invocation: Vec<SemanticCall>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -338,6 +341,24 @@ impl Catalog {
                 local.source_next = Rc::new(Cell::new(0));
                 local.call_domain();
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            } else if let Some(metadata) = c.get("$source_allocation") {
+                let name = string(field(metadata, "name")?)?;
+                let Some(Bound::Allocation(allocation)) = env.values.get(name) else {
+                    return Err(err("unbound source allocation slot"));
+                };
+                let mut allocation = allocation.borrow().clone();
+                allocation.class = string(field(metadata, "class")?)?.into();
+                allocation.state = string(field(metadata, "state")?)?.into();
+                let identity = allocation.identity.clone();
+                let mut local = env.clone();
+                local.values.insert(name.into(), Bound::Allocation(Rc::new(RefCell::new(allocation))));
+                let start = out.len();
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+                for leaf in &mut out[start..] {
+                    if leaf.allocation.as_ref() == Some(&identity) {
+                        leaf.source_allocation = true;
+                    }
+                }
             } else if let Some(storage) = c.get("$oracle_storage") {
                 let mut local = env.clone();
                 for entry in arr(storage)? {
@@ -431,6 +452,7 @@ impl Catalog {
                     event: None,
                     allocation: None,
                     scratch: false,
+                    source_allocation: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("alloc") {
@@ -491,6 +513,7 @@ impl Catalog {
                     event: None,
                     allocation: Some(identity),
                     scratch: env.scratch.contains(name),
+                    source_allocation: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("release") {
@@ -511,6 +534,7 @@ impl Catalog {
                     event: None,
                     allocation: Some(a.identity.clone()),
                     scratch: false,
+                    source_allocation: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("image") {
@@ -537,6 +561,7 @@ impl Catalog {
                                 event: None,
                                 allocation: None,
                                 scratch: false,
+                                source_allocation: false,
                             });
                             *next += 1;
                         }
@@ -584,6 +609,7 @@ impl Catalog {
                     event: Some(event),
                     allocation: None,
                     scratch: false,
+                    source_allocation: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("for") {
@@ -755,6 +781,7 @@ impl Catalog {
                     event: None,
                     allocation: Some(a.identity.clone()),
                     scratch: acquire && env.scratch.contains(string(n)?),
+                    source_allocation: false,
                 });
                 *next += 1;
             } else if let Some(n) = c.get("call") {
@@ -955,6 +982,7 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
     let mut open = BTreeMap::new();
     let mut marked = BTreeSet::new();
     let mut origins = BTreeMap::new();
+    let mut metadata = vec![];
     for (i, l) in leaves.iter().enumerate() {
         if l.operation == "alloc" {
             let id = l
@@ -970,6 +998,17 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
                 .as_deref()
                 .ok_or_else(|| err("release identity missing"))?;
             let start = open.remove(id).ok_or_else(|| err("unmatched release"))?;
+            let acquisition = &leaves[start];
+            let original = if acquisition.source_allocation { acquisition } else { l };
+            if original.source_allocation {
+                if acquisition.wires.len() != l.wires.len()
+                    || (acquisition.source_allocation && l.source_allocation
+                        && (acquisition.class != l.class || acquisition.state != l.state))
+                {
+                    return Err(err("conflicting source lifetime metadata"));
+                }
+                metadata.push((start, i, original.class.clone(), original.state.clone()));
+            }
             if l.scratch || leaves[start].scratch {
                 marked.insert(start);
             }
@@ -998,6 +1037,12 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
         .map(|(rank, &start)| (start, format!("$alloc{rank}")))
         .collect::<BTreeMap<_, _>>();
     drop(origins);
+    for (start, end, class, state) in metadata {
+        for index in [start, end] {
+            leaves[index].class = class.clone();
+            leaves[index].state = state.clone();
+        }
+    }
 
     let mut wires = BTreeMap::<String, String>::new();
     let mut live = BTreeMap::<String, (String, Option<String>, Option<String>, bool, usize)>::new();
@@ -1686,6 +1731,19 @@ fn syntax_inner(body: &Json, source_formed: bool) -> Result<(), String> {
         }
         if source_formed && c.get("$source").is_some() {
             keys(c, &["$source", "body"])?;
+            syntax_inner(field(c, "body")?, true)?;
+            continue;
+        }
+        if source_formed && c.get("$source_allocation").is_some() {
+            keys(c, &["$source_allocation", "body"])?;
+            let metadata = field(c, "$source_allocation")?;
+            keys(metadata, &["name", "class", "state"])?;
+            string(field(metadata, "name")?)?;
+            if string(field(metadata, "class")?)?.is_empty()
+                || !["clean", "borrowed"].contains(&string(field(metadata, "state")?)?)
+            {
+                return Err(err("invalid source allocation metadata"));
+            }
             syntax_inner(field(c, "body")?, true)?;
             continue;
         }

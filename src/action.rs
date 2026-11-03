@@ -551,6 +551,8 @@ pub struct Exec<'o> {
     idle: Vec<usize>,
     func: String,
     exact_required: bool,
+    releases: allocation_bindings::ReleasePlan,
+    iterations: Vec<usize>,
 }
 
 fn diag(rule: &str, msg: impl std::fmt::Display) -> String {
@@ -568,6 +570,22 @@ fn parse_wire_operand(token: &str) -> (String, Option<usize>) {
 }
 
 impl<'o> Exec<'o> {
+    fn memory_address(&self, token: &str, width: usize) -> Result<Vec<usize>, String> {
+        if self.obj.isa != "0.9" {
+            return self.bundle(&base_name(token));
+        }
+        let wires = if width == 0 && token == "()" {
+            vec![]
+        } else if parse_wire_operand(token).1.is_some() {
+            vec![self.wire(token)?]
+        } else {
+            self.bundle(token)?
+        };
+        if wires.len() != width {
+            return Err(diag("4.6", "memory address width differs from the region"));
+        }
+        Ok(wires)
+    }
     fn bundle(&self, name: &str) -> Result<Vec<usize>, String> {
         self.bundles.get(name).cloned().ok_or_else(|| {
             diag(
@@ -1098,21 +1116,24 @@ impl<'o> Exec<'o> {
             return self.gate(ins);
         }
         match op {
-            "qalloc" | "qborrow" => {
-                let n: usize = ins.operands[1].parse().map_err(|_| {
+            "qalloc" | "qborrow" | "qalloc_restore" | "qborrow_restore" => {
+                let (n, requested) = if matches!(op, "qalloc_restore" | "qborrow_restore") {
+                    self.releases.get(&(ins.line, self.iterations.clone()))
+                        .expect("validated inverse release visit").clone()
+                } else { (ins.operands[1].parse().map_err(|_| {
                     diag(
                         "4.3",
                         format!("{op} size in @{} is not an integer", self.func),
                     )
-                })?;
-                let wires = if op == "qborrow" {
+                })?, ins.operands[0].clone()) };
+                let borrowing = matches!(op, "qborrow" | "qborrow_restore");
+                let wires = if borrowing {
                     if self.idle.len() < n {
                         return Err(diag(
                             "5.6",
                             "designated idle set lacks requested borrowed wires",
                         ));
                     }
-                    let requested = &ins.operands[0];
                     let selected = self
                         .idle
                         .iter()
@@ -1120,7 +1141,7 @@ impl<'o> Exec<'o> {
                         .filter(|w| {
                             self.state.target.is_none()
                                 || requested == "any"
-                                || self.state.wire_classes.get(w) == Some(requested)
+                                || self.state.wire_classes.get(w) == Some(&requested)
                         })
                         .take(n)
                         .collect::<Vec<_>>();
@@ -1133,9 +1154,9 @@ impl<'o> Exec<'o> {
                     self.state.dirty.extend(&selected);
                     selected
                 } else {
-                    self.state.target_alloc(n, &ins.operands[0])?
+                    self.state.target_alloc(n, &requested)?
                 };
-                if op == "qborrow" {
+                if borrowing {
                     self.borrowed.push(ins.lhs[0].clone());
                 }
                 self.bundles.insert(ins.lhs[0].clone(), wires);
@@ -1214,14 +1235,14 @@ impl<'o> Exec<'o> {
             "qregion_release" => Ok(()),
             "qload" => {
                 let region = self.region(&ins.operands[0])?;
-                let addr = self.bundle(&base_name(&ins.operands[1]))?;
+                let addr = self.memory_address(&ins.operands[1], region.a)?;
                 let dst = self.state.target_alloc(region.w, "any")?;
                 self.bundles.insert(ins.lhs[0].clone(), dst.clone());
                 self.region_dispatch(&region, &addr, &dst, "load")
             }
             "qunload" => {
                 let region = self.region(&ins.operands[0])?;
-                let addr = self.bundle(&base_name(&ins.operands[1]))?;
+                let addr = self.memory_address(&ins.operands[1], region.a)?;
                 let dname = base_name(&ins.operands[2]);
                 let dst = self.bundle(&dname)?;
                 self.region_dispatch(&region, &addr, &dst, "load")?;
@@ -1240,13 +1261,13 @@ impl<'o> Exec<'o> {
             }
             "qstore" => {
                 let region = self.region(&ins.operands[0])?;
-                let addr = self.bundle(&base_name(&ins.operands[1]))?;
+                let addr = self.memory_address(&ins.operands[1], region.a)?;
                 let v = self.bundle(&base_name(&ins.operands[2]))?;
                 self.region_dispatch(&region, &addr, &v, "store")
             }
             "qexchm" => {
                 let region = self.region(&ins.operands[0])?;
-                let addr = self.bundle(&base_name(&ins.operands[1]))?;
+                let addr = self.memory_address(&ins.operands[1], region.a)?;
                 let v = self.bundle(&base_name(&ins.operands[2]))?;
                 self.region_dispatch(&region, &addr, &v, "exch")
             }
@@ -1311,8 +1332,11 @@ impl<'o> Exec<'o> {
         })?;
         let body = ins.nested[0].clone();
         if ins.operands.len() == 1 {
-            for _ in 0..n {
-                self.exec_list(&body)?;
+            for visit in (0..n).map(|i| if adjoint { n - 1 - i } else { i }) {
+                self.iterations.push(visit);
+                let result = self.exec_list(&body);
+                self.iterations.pop();
+                result?;
             }
             return Ok(());
         }
@@ -1340,14 +1364,18 @@ impl<'o> Exec<'o> {
             }
             for i in (0..n).rev() {
                 self.pred.push(flags[i]);
+                self.iterations.push(i);
                 let result = self.exec_list(&body);
+                self.iterations.pop();
                 self.pred.pop();
                 result?;
             }
         } else {
             for i in 0..n {
                 self.pred.push(flags[i]);
+                self.iterations.push(i);
                 let result = self.exec_list(&body);
+                self.iterations.pop();
                 self.pred.pop();
                 result?;
                 if i + 1 < n {
@@ -1854,6 +1882,8 @@ pub fn execute_action_with_idle(
         idle: idle.to_vec(),
         func: name.to_string(),
         exact_required: f.kind == crate::object::FnKind::PermAction,
+        releases: if obj.isa == "0.9" && adjoint { allocation_bindings::release_metadata(f) } else { BTreeMap::new() },
+        iterations: vec![],
     };
     // §4.6: all lexical regions exist at entry, including those inside
     // zero-trip loops or declared after their first use.
@@ -1994,7 +2024,7 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &s
                 .expect("validated allocation has width/class");
             renamed(
                 ins,
-                "qalloc",
+                if isa == "0.9" { "qalloc_restore" } else { "qalloc" },
                 vec![name],
                 vec![class, n.to_string()],
                 vec![],
@@ -2009,7 +2039,7 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &s
                 .expect("validated allocation has width/class");
             renamed(
                 ins,
-                "qborrow",
+                if isa == "0.9" { "qborrow_restore" } else { "qborrow" },
                 vec![name],
                 vec![class, n.to_string()],
                 vec![],
@@ -2109,7 +2139,7 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &s
             ],
         ),
         "qloop" => {
-            if ins.operands.len() == 3 {
+            if ins.operands.len() == 3 || isa == "0.9" {
                 renamed(
                     ins,
                     "qloop_adj",

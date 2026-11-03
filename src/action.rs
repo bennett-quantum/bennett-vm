@@ -28,7 +28,12 @@ pub struct GateRequest {
 #[derive(Clone, Debug)]
 pub struct QuantumState {
     pub amps: BTreeMap<BigUint, Amp>,
+    // The physical amplitudes are exact numerators / sqrt(normalization).
+    // Keeping the positive common denominator avoids introducing rounded
+    // coefficients when measurement selects an arbitrary exact Born weight.
     exact: BTreeMap<BigUint, Exact>,
+    normalization: Exact,
+    normalization_approx: f64,
     next_wire: usize,
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
     pub(crate) wire_classes: crate::persistent::Map<usize, String>,
@@ -48,6 +53,8 @@ impl QuantumState {
         QuantumState {
             amps,
             exact: BTreeMap::from([(BigUint::zero(), Exact::one())]),
+            normalization: Exact::one(),
+            normalization_approx: 1.0,
             next_wire: 0,
             target: None,
             wire_classes: crate::persistent::Map::new(),
@@ -90,10 +97,23 @@ impl QuantumState {
         self.amps = self
             .exact
             .iter()
-            .map(|(k, a)| (k.clone(), a.value()))
+            .map(|(k, a)| {
+                let value = if self.normalization_approx > 0.0 {
+                    let (re, im) = a.value();
+                    (
+                        re / self.normalization_approx,
+                        im / self.normalization_approx,
+                    )
+                } else {
+                    a.normalized_value(&self.normalization)
+                };
+                (k.clone(), value)
+            })
             .collect();
     }
     pub fn set_state(&mut self, state: BTreeMap<BigUint, Amp>) {
+        self.normalization = Exact::one();
+        self.normalization_approx = 1.0;
         self.exact = state
             .into_iter()
             .map(|(k, (r, i))| (k, Exact::pair(r, i)))
@@ -101,7 +121,28 @@ impl QuantumState {
         self.refresh();
     }
     pub fn exact_equals(&self, other: &Self) -> bool {
-        self.exact == other.exact
+        if self.exact == other.exact && self.normalization == other.normalization {
+            return true;
+        }
+        if self.exact.keys().ne(other.exact.keys()) {
+            return false;
+        }
+        let Some((key, a)) = self.exact.first_key_value() else {
+            return false;
+        };
+        let b = &other.exact[key];
+        let phase = a.mul(&b.conj());
+        if phase != phase.conj() || phase.real_sign() <= 0 {
+            return false;
+        }
+        let left_weight = a.mul(&a.conj()).mul(&other.normalization);
+        let right_weight = b.mul(&b.conj()).mul(&self.normalization);
+        if left_weight != right_weight {
+            return false;
+        }
+        self.exact
+            .iter()
+            .all(|(key, value)| value.mul(b) == other.exact[key].mul(a))
     }
     /// Set basis bits on wires that start at zero in every component.
     pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
@@ -253,23 +294,42 @@ impl QuantumState {
         let value = chosen
             .or_else(|| ordered.last().map(|(v, _)| (*v).clone()))
             .expect("§4.1: a quantum state has at least one outcome");
-        let p = probs.get(&value).copied().unwrap_or(1.0);
-        let norm = if p > 0.0 { 1.0 / p.sqrt() } else { 1.0 };
-        self.amps = std::mem::take(&mut self.amps)
+        self.exact = std::mem::take(&mut self.exact)
             .into_iter()
             .filter(|(k, _)| Self::extract(k, wires) == value)
             .map(|(mut k, a)| {
                 for w in wires {
                     k.set_bit(*w, false);
                 }
-                (k, (a.0 * norm, a.1 * norm))
+                (k, a)
             })
             .collect();
-        self.exact = self
-            .amps
-            .iter()
-            .map(|(k, (r, i))| (k.clone(), Exact::pair(*r, *i)))
-            .collect();
+        let weight = |amplitudes: &BTreeMap<BigUint, Exact>| {
+            amplitudes
+                .values()
+                .fold(Exact::zero(), |total, a| total.add(&a.mul(&a.conj())))
+        };
+        let selected = weight(&self.exact);
+        if probs.len() != 1 || selected != self.normalization {
+            // Balance coefficients with an exact positive dyadic factor. Long
+            // sequences of postselection then do not underflow their common
+            // numerator, and normalized physical amplitudes are unchanged.
+            let exponent = self
+                .exact
+                .values()
+                .filter_map(Exact::coefficient_exponent)
+                .max()
+                .expect("selected outcome has nonzero exact support");
+            for a in self.exact.values_mut() {
+                *a = a.scale_pow2(-exponent);
+            }
+            self.normalization = weight(&self.exact);
+            self.normalization_approx = self.exact.values().fold(0.0_f64, |norm, a| {
+                let (re, im) = a.value();
+                norm.hypot(re).hypot(im)
+            });
+        }
+        self.refresh();
         let mut bits = String::new();
         for i in 0..wires.len() {
             bits.push(if value.bit(i) { '1' } else { '0' });

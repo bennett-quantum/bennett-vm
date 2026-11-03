@@ -167,6 +167,58 @@ impl Exact {
     pub fn is_zero(&self) -> bool {
         self.0.is_empty()
     }
+    pub(crate) fn coefficient_exponent(&self) -> Option<i128> {
+        self.0
+            .values()
+            .map(|c| c.mag.bits() as i128 - 1 - c.scale as i128)
+            .max()
+    }
+    /// A positive power-of-two rescaling changes no exact phase or support.
+    pub(crate) fn scale_pow2(&self, exponent: i128) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|(key, c)| {
+                    let coefficient = if exponent >= 0 {
+                        let shift = exponent as usize;
+                        let cancelled = shift.min(c.scale);
+                        Dyad::new(c.neg, c.mag.shl(shift - cancelled), c.scale - cancelled)
+                    } else {
+                        Dyad::new(c.neg, c.mag.clone(), c.scale + (-exponent) as usize)
+                    };
+                    (key.clone(), coefficient)
+                })
+                .collect(),
+        )
+    }
+    /// Display a / sqrt(weight) without squaring or dividing tiny binary64
+    /// values. Used when ordinary evaluation loses a nonzero numerator.
+    pub(crate) fn normalized_value(&self, weight: &Self) -> (f64, f64) {
+        let conjugate = self.conj();
+        let real = self.add(&conjugate).mul(&Self::pair(0.5, 0.0));
+        let imaginary = self.add(&conjugate.neg()).mul(&Self::pair(0.0, -0.5));
+        let component = |value: Self| {
+            let sign = value.real_sign();
+            if sign == 0 {
+                return 0.0;
+            }
+            let square = value.mul(&value);
+            let mut lo = 0;
+            let mut hi = f64::MAX.to_bits();
+            while lo < hi {
+                let mid = lo + (hi - lo).div_ceil(2);
+                let candidate = Self::pair(f64::from_bits(mid), 0.0);
+                let bound = weight.mul(&candidate.mul(&candidate));
+                if square.add(&bound.neg()).real_sign() >= 0 {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            f64::from_bits(lo) * sign as f64
+        };
+        (component(real), component(imaginary))
+    }
     /// The complex conjugate: exp(i a) -> exp(-i a), i -> -i, sqrt(2) fixed.
     pub fn conj(&self) -> Self {
         let mut x = Self::zero();

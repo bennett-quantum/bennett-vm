@@ -831,6 +831,34 @@ fn retained_instances_survive_segment_cancellation() {
 }
 
 #[test]
+fn spectator_measurement_preserves_rotation_inverse() {
+    let functions = "action @rotate (t:wire mut) () () () ()\n^entry():\nry 0.123 t\nfn cc @main () (r:i1) () () ()\n^entry():\nq = qreg.new any 1\ns = qreg.new any 1\naction_call @rotate (q) () () ()\nr = measure s\nadj action_call @rotate (q) () () ()\nqreg.free q\nret r";
+    for version in ["0.8", "0.9"] {
+        let text = source09::source_at(version, functions);
+        let path = temp_object(&format!("spectator-{version}"), &text);
+        for command in ["run-cc", "run-program"] {
+            let args = s(&[command, &path, "main", "--draws", "0.5"]);
+            assert_outcome("spectator measurement", &args);
+            let output = raw_run(Path::new(vm()), &args, "interpreter");
+            assert!(output.status.success(), "{}", show(&output));
+            let result =
+                bennett_vm::json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+            assert_eq!(
+                result
+                    .get("status")
+                    .and_then(bennett_vm::json::Json::as_str),
+                Some("COMPLETED")
+            );
+            assert_eq!(result.get("fault"), Some(&bennett_vm::json::Json::Null));
+            assert_eq!(
+                result.get("results"),
+                Some(&bennett_vm::json::parse(r#"[{"type":"i1","value":"0"}]"#).unwrap())
+            );
+        }
+    }
+}
+
+#[test]
 fn host_reply_and_prefix_reversal_differential() {
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(".tmp/host-replies.json");
     std::fs::write(

@@ -142,3 +142,28 @@ fn repeated_postselection_keeps_a_finite_normalized_display() {
         assert_eq!(state.amps[&BigUint::zero()], (1.0, 0.0));
     }
 }
+
+#[test]
+fn tiny_positive_phase_weight_is_not_lost_at_the_cdf_boundary() {
+    for angle in [
+        std::f64::consts::PI,
+        std::f64::consts::PI.next_up(),
+        std::f64::consts::PI.next_down(),
+    ] {
+        for draw in [0.0, 1e-40] {
+            let mut state = QuantumState::new();
+            state.alloc_wire();
+            state.apply_exact(0, &[], Exact::rotation("ry", angle));
+            assert_eq!(
+                state.measure(&[0], draw).0,
+                BigUint::zero(),
+                "angle={angle}, draw={draw}"
+            );
+            let mut expected = QuantumState::new();
+            if (angle / 2.0).cos() < 0.0 {
+                expected.phase_if_all(&[], (-1.0, 0.0));
+            }
+            assert!(state.exact_equals(&expected));
+        }
+    }
+}

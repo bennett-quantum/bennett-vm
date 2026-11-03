@@ -22,16 +22,16 @@ impl Interval {
     pub fn exact(n: u64, p: usize) -> Self {
         Self::new(R::from(n), R::from(n), p).unwrap()
     }
-    fn add(&self, b: &Self) -> Self {
+    pub(crate) fn add(&self, b: &Self) -> Self {
         Self::new(self.lo.add(&b.lo), self.hi.add(&b.hi), self.p).unwrap()
     }
-    fn neg(&self) -> Self {
+    pub(crate) fn neg(&self) -> Self {
         Self::new(R::zero().sub(&self.hi), R::zero().sub(&self.lo), self.p).unwrap()
     }
     fn sub(&self, b: &Self) -> Self {
         self.add(&b.neg())
     }
-    fn mul(&self, b: &Self) -> Self {
+    pub(crate) fn mul(&self, b: &Self) -> Self {
         let v = [
             self.lo.mul(&b.lo),
             self.lo.mul(&b.hi),
@@ -64,6 +64,32 @@ impl Interval {
             self.p,
         )
         .unwrap()
+    }
+}
+/// Integer Newton iteration gives floor(sqrt(2) * 2^p), so adjacent dyadic
+/// endpoints enclose sqrt(2) without a floating-point approximation.
+pub(crate) fn sqrt_two(p: usize) -> Result<Interval, String> {
+    use crate::bigint::BigUint;
+    let exponent = p
+        .checked_mul(2)
+        .and_then(|n| n.checked_add(1))
+        .ok_or("host limit: square-root precision")?;
+    let one = BigUint::from_u64(1);
+    let target = one.shl(exponent);
+    let mut root = one.shl(
+        p.checked_add(1)
+            .ok_or("host limit: square-root precision")?,
+    );
+    loop {
+        let next = root.add(&target.divmod(&root).0).shr(1);
+        if next >= root {
+            return Interval::new(
+                R::from_dyadic(false, root.clone(), p),
+                R::from_dyadic(false, root.add(&one), p),
+                p,
+            );
+        }
+        root = next;
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -338,7 +364,12 @@ pub fn sin_cos(theta: &R, p: usize) -> Result<(Interval, Interval), String> {
             let a = degree.checked_add(1).ok_or("host limit: Taylor degree")?;
             let b = degree.checked_add(2).ok_or("host limit: Taylor degree")?;
             let divisor = R::from(a).mul(&R::from(b));
-            remainder = remainder.mul(radius2).div(&divisor)?;
+            // Keep a rigorous upper bound at the working precision instead
+            // of growing an exact denominator at every Taylor term.
+            remainder = remainder
+                .mul(radius2)
+                .div(&divisor)?
+                .binary_round(p, true)?;
             // The bound uses the first nonzero omitted term: intervening zero
             // coefficients are included in the Taylor polynomial (§17 item 8).
             if remainder < *eps {

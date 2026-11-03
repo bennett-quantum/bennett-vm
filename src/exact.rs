@@ -1,7 +1,7 @@
 //! Exact finite sums c sqrt(2)^s i^j exp(i a), with dyadic c and a.
 //! All binary64 inputs are embedded as their exact dyadic values. No epsilon
 //! enters support, cleanliness or equality. Numerical evaluation is display only.
-use crate::bigint::BigUint;
+use crate::{bigint::BigUint, interval::Interval, rational::Rational};
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Dyad {
@@ -230,12 +230,17 @@ impl Exact {
     /// The sign of a real value (-1, 0, 1). Zero is exact: the terms c sqrt(2)^s
     /// i^j exp(i a) with distinct dyadic a are linearly independent over the
     /// algebraic numbers (Lindemann-Weierstrass), so a nonzero sum is nonzero.
-    /// Without phases, p + q sqrt(2) is decided exactly; with them the nonzero
-    /// value is compared numerically.
+    /// Without phases, p + q sqrt(2) is decided algebraically; otherwise refine
+    /// rigorous enclosures until they separate the nonzero value from zero.
     pub fn real_sign(&self) -> i32 {
         if self.is_zero() {
             return 0;
         }
+        assert_eq!(
+            self,
+            &self.conj(),
+            "§4.1: sign requires an exactly real value"
+        );
         let zero = Dyad::int(0);
         if self.0.keys().all(|(a, _, i)| *a == zero && !*i) {
             let get = |s: bool| self.0.get(&(zero.clone(), s, false));
@@ -250,12 +255,58 @@ impl Exact {
             let p_dominates = !p.mul(p).add(&q.mul(q).twice().neg()).neg;
             return if p_dominates { sp } else { sq };
         }
-        let (re, im) = self.value();
-        assert!(
-            re.is_finite() && im.abs() <= 1e-6 * re.abs().max(1.),
-            "§4.1: Born weight must be real: {re} + {im}i"
-        );
-        if re > 0. { 1 } else { -1 }
+        // Angle reduction must retain absolute precision even for angles
+        // larger than binary64. Subsequent refinement resolves cancellation.
+        let angle_bits = self
+            .0
+            .keys()
+            .map(|(a, _, _)| a.mag.bits().saturating_sub(a.scale))
+            .max()
+            .unwrap();
+        let mut precision = angle_bits
+            .checked_add(64)
+            .expect("host limit: phase precision");
+        loop {
+            let mut phases = BTreeMap::new();
+            let sqrt_two = self.0.keys().any(|(_, s, _)| *s).then(|| {
+                crate::interval::sqrt_two(precision).expect("exact square-root enclosure")
+            });
+            let mut sum = Interval::exact(0, precision);
+            for ((a, s, i), c) in &self.0 {
+                let mut positive = a.clone();
+                positive.neg = false;
+                let (sin, cos) = phases.entry(positive.clone()).or_insert_with(|| {
+                    if positive.mag.is_zero() {
+                        (Interval::exact(0, precision), Interval::exact(1, precision))
+                    } else {
+                        let angle = Rational::from_dyadic(false, positive.mag, positive.scale);
+                        crate::interval::sin_cos(&angle, precision).expect("exact phase enclosure")
+                    }
+                });
+                let trig = if *i {
+                    // Re(i exp(i a)) = -sin(a).
+                    if a.neg { sin.clone() } else { sin.neg() }
+                } else {
+                    cos.clone()
+                };
+                let coefficient = Rational::from_dyadic(c.neg, c.mag.clone(), c.scale);
+                let mut term =
+                    trig.mul(&Interval::new(coefficient.clone(), coefficient, precision).unwrap());
+                if *s {
+                    term = term.mul(sqrt_two.as_ref().unwrap());
+                }
+                sum = sum.add(&term);
+            }
+            if sum.lo > Rational::zero() {
+                return 1;
+            }
+            if sum.hi < Rational::zero() {
+                return -1;
+            }
+            precision = precision
+                .checked_mul(2)
+                .expect("host limit: phase precision");
+        }
     }
     pub fn value(&self) -> (f64, f64) {
         let mut re = 0.;
@@ -293,6 +344,31 @@ impl Exact {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn real_sign_preserves_tiny_positive_phase_weights() {
+        for angle in [std::f64::consts::PI, -std::f64::consts::PI, 1e-12, 1e-30] {
+            let value = if angle.abs() > 1.0 {
+                Exact::rotation("ry", angle)[0][0].clone()
+            } else {
+                Exact::phase(Dyad::float(angle)).add(&Exact::one().neg())
+            };
+            let weight = value.mul(&value.conj());
+            assert!(!weight.is_zero());
+            assert_eq!(weight.real_sign(), 1, "angle={angle}");
+            assert_eq!(weight.neg().real_sign(), -1, "angle={angle}");
+            assert_eq!(weight.add(&weight.neg()).real_sign(), 0);
+            assert_eq!(weight.mul(&Exact::sqrt_half()).real_sign(), 1);
+        }
+    }
+    #[test]
+    fn real_sign_accepts_phase_sums_larger_than_binary64() {
+        let phase = Exact::phase(Dyad::float(f64::MAX)).mul(&Exact::phase(Dyad::float(f64::MAX)));
+        let difference = phase.add(&Exact::one().neg());
+        let weight = difference.mul(&difference.conj());
+        assert!(!weight.is_zero());
+        assert_eq!(weight.real_sign(), 1);
+        assert_eq!(weight.neg().real_sign(), -1);
+    }
     #[test]
     fn combined_finite_rotation_angles_have_finite_display() {
         // §3.1 allows every finite f64 gate angle, even if a symbolic sum

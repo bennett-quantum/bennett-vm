@@ -96,3 +96,55 @@ fn typed_measurement_uncall_traps_interpreter() {
 fn typed_measurement_uncall_traps_jit() {
     check("jit", true);
 }
+
+#[test]
+fn finite_pi_rotation_keeps_a_positive_first_outcome_on_both_engines() {
+    for version in ["0.8", "0.9"] {
+        for angle in [
+            std::f64::consts::PI,
+            std::f64::consts::PI.next_up(),
+            std::f64::consts::PI.next_down(),
+        ] {
+            let text = support::source_at(
+                version,
+                &format!(
+                    "action @rotate (q:wire mut) () () () ()\n^entry():\nry {angle} q\nfn cc @sample () (r:i1) () () ()\n^entry():\nq = qreg.new any 1\naction_call @rotate (q) () () ()\nr = measure q\nret r"
+                ),
+            );
+            let path = std::env::temp_dir().join(format!(
+                "measure-phase-{version}-{}-{}.bisa",
+                angle.to_bits(),
+                std::process::id()
+            ));
+            std::fs::write(&path, text).unwrap();
+            for engine in ["interpreter", "jit"] {
+                for command in ["run-cc", "run-program"] {
+                    // Binary64 PI is dyadic, so cos(PI/2)^2 is positive.
+                    // Its neighbours also have weights between 1e-40 and 1e-30.
+                    for (draw, expected) in [("0", "0"), ("1e-40", "0"), ("1e-30", "1")] {
+                        let out = run(&path, engine, command, "sample", draw);
+                        assert!(
+                            out.status.success(),
+                            "{engine} {command}: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        );
+                        let result =
+                            json::parse(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                        assert_eq!(
+                            result.get("status").and_then(Json::as_str),
+                            Some("COMPLETED")
+                        );
+                        assert_eq!(
+                            result.get("results").unwrap().as_arr().unwrap()[0]
+                                .get("value")
+                                .and_then(Json::as_str),
+                            Some(expected),
+                            "{version} {engine} {command} {angle} draw={draw}"
+                        );
+                    }
+                }
+            }
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}

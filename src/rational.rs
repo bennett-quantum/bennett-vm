@@ -8,8 +8,26 @@ pub struct Rational {
     d: U,
 }
 impl Rational {
+    pub(crate) fn from_dyadic(negative: bool, magnitude: U, scale: usize) -> Self {
+        if magnitude.is_zero() {
+            return Self::zero();
+        }
+        let mut cancelled = 0;
+        while cancelled < scale && !magnitude.bit(cancelled) {
+            cancelled += 1;
+        }
+        Self {
+            neg: negative,
+            n: magnitude.shr(cancelled),
+            d: U::from_u64(1).shl(scale - cancelled),
+        }
+    }
     fn new(neg: bool, n: U, d: U) -> Self {
         assert!(!d.is_zero());
+        let scale = d.bits() - 1;
+        if d == U::from_u64(1).shl(scale) {
+            return Self::from_dyadic(neg, n, scale);
+        }
         let mut a = n.clone();
         let mut b = d.clone();
         while !b.is_zero() {
@@ -54,7 +72,7 @@ impl Rational {
         Ok(if shift >= 0 {
             Self::new(self.neg, q.shl(shift as usize), U::from_u64(1))
         } else {
-            Self::new(self.neg, q, U::from_u64(1).shl(shift.unsigned_abs()))
+            Self::from_dyadic(self.neg, q, shift.unsigned_abs())
         })
     }
     pub fn zero() -> Self {

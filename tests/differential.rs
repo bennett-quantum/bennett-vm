@@ -493,12 +493,19 @@ fn run_oracle_differential() {
 /// Memory digests are opaque implementation fingerprints (the ISA does not
 /// prescribe their encoding). Compare every other field, including trace.
 fn validate_memory_digests(outcome: &mut bennett_vm::json::Json, command: &str) {
-    if let bennett_vm::json::Json::Obj(m) = outcome {
+    if let bennett_vm::json::Json::Obj(fields) = outcome {
         for key in ["memory_digest", "entry_memory_digest"] {
-            if command == "run-oracle" || (key == "entry_memory_digest" && command == "run-cc") { continue; }
-            let digest = m.remove(key).expect("required digest field");
+            if command == "run-oracle" || (key == "entry_memory_digest" && command == "run-cc") {
+                continue;
+            }
+            let digest = fields.remove(key).expect("required digest field");
             let text = digest.as_str().expect("digest must be a string");
-            assert!(text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+            assert!(
+                text.len() == 64
+                    && text
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            );
         }
     }
 }
@@ -826,16 +833,7 @@ fn retained_instances_survive_segment_cancellation() {
 #[test]
 fn admitted_classical09_rows_differential() {
     let functions = "oracle @o (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l:reg[1] }\n^entry():\nl = lift.const.i1 0\nlift.retval l\naction @flip (t:wire mut) () () () ()\n^entry():\nx t\nfn r @fixed (q:qreg[2]) (r:qreg[2]) () () ()\n^entry():\nret q\nfn r @fixed_result (q:qreg[*]) (r:qreg[2]) () () ()\n^entry():\nret q\nfn cc @sizes (n:i64) (w:i64, same:i1) () () ()\n^entry():\nq = qreg.new any n\nid = qreg.id q\nalias = qreg.from_id id\nw = qreg.width alias\nagain = qreg.id alias\nsame = icmp.eq id again\nqreg.free alias\nret w same\nfn cc @transfer (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nr = call @fixed q\nw = qreg.width r\nqreg.free r\nret w\nfn cc @result (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nr = call @fixed_result q\nw = qreg.width r\nqreg.free r\nret w\nfn cc @block (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nbr ^next(q)\n^next(r:qreg[2]):\nw = qreg.width r\nqreg.free r\nret w\nfn cc @slice (lo:i64, len:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any 3\nv = qreg.slice q lo len\naction_call @flip (v) () () ()\nv2 = qreg.slice q lo len\naction_call @flip (v2) () () ()\nw = qreg.width q\nqreg.free q\nret w\nfn cc @mint (s:i64, h:i64, st:i64, d:i64) (tk:token) () () ()\n^entry():\ntk = budget.mint @o s h st d\nret tk\nfn cc @stop0 () () () () ()\n^entry():\nfault 0\nfn cc @stop42 () () () () ()\n^entry():\nfault 42\nfn cc @stopmax () () () () ()\n^entry():\nfault 18446744073709551615";
-    // The reference parser still rejects the published qreg[*] header. Retain
-    // that source for the VM and compare a static-parameter model separately.
-    let text = source09::source(functions);
-    let original = Path::new(env!("CARGO_MANIFEST_DIR")).join(".tmp").join(format!("classical09-dynamic-{}.bisa", std::process::id()));
-    std::fs::write(&original, text).unwrap();
-    let original = original.to_str().unwrap();
-    let check = run(Path::new(vm()), &s(&["check", original]));
-    assert!(check.status.success(), "{}", show(&check));
-    let model = functions.replace("@fixed_result (q:qreg[*])", "@fixed_result (q:qreg[2])");
-    let path = temp_object("classical09-rows", &source09::source(&model));
+    let path = temp_object("classical09-rows", &source09::source(functions));
     let mut cases = vec![];
     for entry in ["sizes", "transfer", "result", "block"] {
         for n in ["0", "1", "2", "3"] {
@@ -869,32 +867,47 @@ fn admitted_classical09_rows_differential() {
             for param in &params {
                 args.extend(s(&["--arg", param]));
             }
-            assert_outcome("admitted0.9 classical rows", &args);
-            let mut actual_args = args.clone();
-            actual_args[1] = original.into();
-            let actual = run(Path::new(vm()), &actual_args);
-            let expected = raw_run(Path::new(vm()), &args, "interpreter");
-            assert!(actual.status.success(), "{}", show(&actual));
-            assert!(expected.status.success(), "{}", show(&expected));
-            let mut actual = bennett_vm::json::parse(std::str::from_utf8(&actual.stdout).unwrap()).unwrap();
-            let mut expected = bennett_vm::json::parse(std::str::from_utf8(&expected.stdout).unwrap()).unwrap();
-            validate_memory_digests(&mut actual, command);
-            validate_memory_digests(&mut expected, command);
-            if entry == "result" && params[0] != "2" {
-                assert_eq!(actual.get("steps").and_then(bennett_vm::json::Json::as_u64), Some(3));
-                assert_eq!(expected.get("steps").and_then(bennett_vm::json::Json::as_u64), Some(2));
-                if command == "run-cc" {
-                    let row = actual.get("trace").unwrap().as_arr().unwrap().last().unwrap();
-                    assert_eq!(row.get("function").and_then(bennett_vm::json::Json::as_str), Some("fixed_result"));
-                    assert_eq!(row.get("op").and_then(bennett_vm::json::Json::as_str), Some("ret"));
+            if entry == "mint" && params == ["32", "0", "0", "0"] && command == "run-program" {
+                // The CLI describes the first unequal component; it does not
+                // prescribe a private token/namespace Debug representation.
+                // Preserve that component check and compare all typed values.
+                let a = run(&reference(), &args);
+                let b = run(Path::new(vm()), &args);
+                assert!(
+                    a.status.success() && b.status.success(),
+                    "ref {} vm {}",
+                    show(&a),
+                    show(&b)
+                );
+                let mut a_json =
+                    bennett_vm::json::parse(std::str::from_utf8(&a.stdout).unwrap()).unwrap();
+                let mut b_json =
+                    bennett_vm::json::parse(std::str::from_utf8(&b.stdout).unwrap()).unwrap();
+                for outcome in [&mut a_json, &mut b_json] {
+                    validate_memory_digests(outcome, command);
+                    assert_eq!(
+                        outcome.get("equals_entry"),
+                        Some(&bennett_vm::json::Json::Bool(false))
+                    );
+                    let description = outcome.get("first_difference").unwrap().as_str().unwrap();
+                    assert!(
+                        description
+                            .starts_with("instances of (0, \"tk\"): None differs from Some("),
+                        "{description}"
+                    );
+                    let bennett_vm::json::Json::Obj(fields) = outcome else {
+                        panic!("outcome object");
+                    };
+                    fields.insert(
+                        "first_difference".into(),
+                        bennett_vm::json::Json::Str("instances of (0, tk) differ".into()),
+                    );
                 }
-                for outcome in [&mut actual, &mut expected] {
-                    let bennett_vm::json::Json::Obj(fields) = outcome else { panic!("outcome object"); };
-                    fields.remove("trace");
-                    fields.remove("steps");
-                }
+                assert_eq!(a_json, b_json);
+                record(&args, &a);
+            } else {
+                assert_outcome("admitted0.9 classical rows", &args);
             }
-            assert_eq!(actual, expected, "dynamic versus static model: {command}, {entry}, {params:?}");
         }
     }
 }

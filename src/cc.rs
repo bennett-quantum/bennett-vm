@@ -1785,6 +1785,11 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         &m.stack,
         m.next_activation,
         m.quantum_events.is_empty(),
+        if obj.isa == "0.9" && !reversing {
+            m.fault
+        } else {
+            None
+        },
     );
     out.extend(vec![
         (
@@ -1877,6 +1882,7 @@ fn first_difference(
     stack: &Seq<Activation>,
     next_activation: u64,
     quantum_identity: bool,
+    fault: Option<u64>,
 ) -> Option<String> {
     let keys: BTreeSet<_> = a.keys().chain(b.keys()).collect();
     for k in keys {
@@ -1894,6 +1900,9 @@ fn first_difference(
                 fmt(bv)
             ));
         }
+    }
+    if let Some(code) = fault {
+        return Some(format!("fault: None differs from Some({code})"));
     }
     if entry_stack != stack || next_activation != 1 {
         return Some(format!(

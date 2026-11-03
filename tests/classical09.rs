@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-fn execute(engine: &str, functions: &str, command: &str, args: &[&str]) -> Json {
+fn run(binary: &std::path::Path, engine: &str, functions: &str, command: &str, args: &[&str]) -> std::process::Output {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
         "classical09-{engine}-{}-{}.bisa",
@@ -15,7 +15,7 @@ fn execute(engine: &str, functions: &str, command: &str, args: &[&str]) -> Json 
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::write(&path, support::source(functions)).unwrap();
-    let mut run = Command::new(env!("CARGO_BIN_EXE_bennett-vm"));
+    let mut run = Command::new(binary);
     run.arg(command)
         .arg(&path)
         .arg("main")
@@ -24,13 +24,17 @@ fn execute(engine: &str, functions: &str, command: &str, args: &[&str]) -> Json 
         run.args(["--arg", arg]);
     }
     let output = run.output().unwrap();
+    std::fs::remove_file(path).unwrap();
+    output
+}
+fn execute(engine: &str, functions: &str, command: &str, args: &[&str]) -> Json {
+    let output = run(std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")), engine, functions, command, args);
     assert!(
         output.status.success(),
         "{engine}, {command}, {args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let result = json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
-    std::fs::remove_file(path).unwrap();
     result
 }
 fn completed(result: &Json, expected: &[&str]) {
@@ -80,6 +84,21 @@ fn dynamic_register_rows_jit() {
     register_rows("jit");
 }
 
+#[test]
+fn unallocatable_dynamic_register_is_a_host_limit_diagnostic() {
+    let functions = "fn cc @main (n:i64) () () () ()\n^entry():\nq = qreg.new any n\nret";
+    for engine in ["interpreter", "jit"] {
+        let output = run(std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")), engine, functions, "run-program", &["18446744073709551615"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("host limit") && !error.contains("panicked"),
+            "{engine}: {error}"
+        );
+    }
+}
+
 fn identities_and_aliases(engine: &str) {
     let prefix = "fn r @make () (q:qreg[1]) () () ()\n^entry():\nq = qreg.new any 1\nret q\n";
     let fresh = format!(
@@ -90,6 +109,14 @@ fn identities_and_aliases(engine: &str) {
         "{prefix}fn cc @main () () () () ()\n^entry():\nq = call @make\nold = qreg.id q\nuncall @make () (q)\nnewq = qreg.new any 1\nalias = qreg.from_id old\nret"
     );
     failed(&execute(engine, &stale, "run-program", &[]), 4);
+    let stale_alias = format!(
+        "{prefix}fn cc @main () (w:i64) () () ()\n^entry():\nq = call @make\nid = qreg.id q\nalias = qreg.from_id id\nuncall @make () (q)\nw = qreg.width alias\nret w"
+    );
+    failed(&execute(engine, &stale_alias, "run-program", &[]), 4);
+    let aliased_concat = "fn cc @main () () () () ()\n^entry():\nq = qreg.new any 1\nid = qreg.id q\nalias = qreg.from_id id\nr = qreg.concat q alias\nret";
+    failed(&execute(engine, aliased_concat, "run-program", &[]), 4);
+    let viewed_id = "action @flip (t:wire mut) () () () ()\n^entry():\nx t\nfn cc @main () () () () ()\n^entry():\nq = qreg.new any 1\nid = qreg.id q\nv = qreg.slice q 0 1\nalias = qreg.from_id id\naction_call @flip (v) () () ()\nret";
+    failed(&execute(engine, viewed_id, "run-program", &[]), 4);
     for id in ["0", "18446744073709551615"] {
         let invalid = format!(
             "fn cc @main () () () () ()\n^entry():\nid = const.i64 {id}\nq = qreg.from_id id\nret"
@@ -215,4 +242,22 @@ fn minted_budget_rows_interpreter() {
 #[test]
 fn minted_budget_rows_jit() {
     minted_budgets("jit");
+}
+
+#[test]
+fn incoming_tokens_with_equal_tuples_keep_distinct_identities() {
+    let distinct = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token, b:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (b) (r)\nret";
+    let same = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (a) (r)\nret";
+    let reference = std::env::var_os("BENNETT_ISA_REF").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref"));
+    for (functions, args, fault) in [(distinct, vec!["token:32", "token:32"], true), (same, vec!["token:32"], false)] {
+        let output = run(&reference, "interpreter", functions, "run-program", &args);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let result = json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+        if fault { failed(&result, 4); } else { completed(&result, &[]); }
+    }
+    for engine in ["interpreter", "jit"] {
+        failed(&execute(engine, distinct, "run-program", &["token:32", "token:32"]), 4);
+        completed(&execute(engine, same, "run-program", &["token:32"]), &[]);
+    }
 }

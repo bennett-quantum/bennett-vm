@@ -43,8 +43,8 @@ pub(super) struct Source {
     regions: BTreeMap<String, Region>,
     declarations: Vec<(String, usize, String, String)>,
     locals: Vec<Instr>,
-    computations: BTreeMap<String, Instr>,
-    cleanup_sites: BTreeMap<String, usize>,
+    computations: BTreeMap<String, Vec<Instr>>,
+    cleanup_sites: BTreeMap<String, Vec<usize>>,
     history: Vec<Instr>,
     images: BTreeMap<String, String>,
     readonly: BTreeSet<String>,
@@ -358,15 +358,35 @@ pub(super) fn action_body(
 }
 impl Source {
     fn allocation_metadata(&self, instruction: &Instr, body: Vec<Json>) -> Vec<Json> {
-        if !matches!(instruction.op.as_str(), "qalloc" | "qborrow" | "qcopy" | "qload") {
+        if !matches!(
+            instruction.op.as_str(),
+            "qalloc" | "qborrow" | "qcopy" | "qload"
+        ) {
             return body;
         }
         vec![Json::obj(vec![
-            ("$source_allocation", Json::obj(vec![
-                ("name", text(&instruction.lhs[0])),
-                ("class", text(if matches!(instruction.op.as_str(), "qalloc" | "qborrow") { instruction.operands[0].as_str() } else { "any" })),
-                ("state", text(if instruction.op == "qborrow" { "borrowed" } else { "clean" })),
-            ])),
+            (
+                "$source_allocation",
+                Json::obj(vec![
+                    ("name", text(&instruction.lhs[0])),
+                    (
+                        "class",
+                        text(if matches!(instruction.op.as_str(), "qalloc" | "qborrow") {
+                            instruction.operands[0].as_str()
+                        } else {
+                            "any"
+                        }),
+                    ),
+                    (
+                        "state",
+                        text(if instruction.op == "qborrow" {
+                            "borrowed"
+                        } else {
+                            "clean"
+                        }),
+                    ),
+                ]),
+            ),
             ("body", Json::Arr(body)),
         ])]
     }
@@ -423,13 +443,22 @@ impl Source {
     fn declarations(&mut self, instructions: &[Instr]) -> Result<(), String> {
         for i in instructions {
             if matches!(i.op.as_str(), "qcopy" | "qload") {
-                self.computations.insert(i.lhs[0].clone(), i.clone());
+                self.computations
+                    .entry(i.lhs[0].clone())
+                    .or_default()
+                    .push(i.clone());
             }
             if i.op == "quncopy" {
-                self.cleanup_sites.insert(i.operands[1].clone(), i.line);
+                self.cleanup_sites
+                    .entry(i.operands[1].clone())
+                    .or_default()
+                    .push(i.line);
             }
             if i.op == "qunload" {
-                self.cleanup_sites.insert(i.operands[2].clone(), i.line);
+                self.cleanup_sites
+                    .entry(i.operands[2].clone())
+                    .or_default()
+                    .push(i.line);
             }
             let allocation = match i.op.as_str() {
                 "qalloc" | "qborrow" => Some((
@@ -463,7 +492,8 @@ impl Source {
                     }
                 } else {
                     self.widths.insert(name.clone(), width);
-                    self.declarations.push((name.clone(), width, class, state.into()));
+                    self.declarations
+                        .push((name.clone(), width, class, state.into()));
                 }
             }
             for arm in &i.nested {
@@ -2123,7 +2153,10 @@ impl Source {
                 Ok(body)
             };
         };
-        let Some(compute) = self.computations.get(target) else {
+        // A loop-carried slot can have different producing source rows on
+        // different visits. Keep its default trace until visit-local pairing
+        // has established which occurrence owns this cleanup.
+        let Some([compute]) = self.computations.get(target).map(Vec::as_slice) else {
             return self.defer_cleanup(body, env);
         };
         if !adjoint {
@@ -2141,7 +2174,7 @@ impl Source {
             }
         }
         let line = if adjoint {
-            let Some(line) = self.cleanup_sites.get(target) else {
+            let Some([line]) = self.cleanup_sites.get(target).map(Vec::as_slice) else {
                 return self.defer_cleanup(body, env);
             };
             *line
@@ -2459,17 +2492,24 @@ impl Source {
                 } else {
                     op.into()
                 };
-                return Ok(self.allocation_metadata(i, vec![invocation(
-                    &kind,
-                    vec![
-                        num(r.address),
-                        num(width / r.cell),
-                        num(r.cell),
-                        if r.address == 0 { Json::Arr(vec![]) } else { text(&operands[1]) },
-                        if load && r.local { region } else { text(name) },
-                        text(value),
-                    ],
-                )]));
+                return Ok(self.allocation_metadata(
+                    i,
+                    vec![invocation(
+                        &kind,
+                        vec![
+                            num(r.address),
+                            num(width / r.cell),
+                            num(r.cell),
+                            if r.address == 0 {
+                                Json::Arr(vec![])
+                            } else {
+                                text(&operands[1])
+                            },
+                            if load && r.local { region } else { text(name) },
+                            text(value),
+                        ],
+                    )],
+                ));
             }
             "qif" => {
                 let body = vec![invocation(

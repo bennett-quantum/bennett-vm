@@ -831,6 +831,65 @@ fn retained_instances_survive_segment_cancellation() {
 }
 
 #[test]
+fn reallocated_action_names_and_loop_bindings() {
+    let functions = "action @rebind (t:wire mut) (p:wire in) () () ()\nregs {  } bounds {3}\n^entry():\nd = qalloc cold 2\nx d[1]\nx d[1]\nqfree d\nd = qcopy t\nquncopy t d\nd = qalloc cold 1\nqloop 3 {\nqfree d\nd = qalloc hot 1\n}\nqfree d\nfn r @inner (t:qreg[1], p:qreg[1]) () () () ()\n^entry():\naction_call @rebind (t) (p) () ()\nret\nfn cc @main () () () () ()\n^entry():\nt = qreg.new any 1\np = qreg.new any 1\ncall @inner t p\nret";
+    let path = temp_object("reallocated-action", &source09::source(functions));
+    for t in ["0", "1"] {
+        for p in ["0", "1"] {
+            for adjoint in [false, true] {
+                let mut args = s(&["run-action", &path, "rebind", "--mut", t, "--in", p]);
+                if adjoint {
+                    args.push("--adjoint".into());
+                }
+                assert_bytes("reallocated action names", &args);
+            }
+        }
+    }
+    for command in ["run-cc", "run-program", "reverse"] {
+        assert_outcome(
+            "reallocated action in R frame",
+            &s(&[command, &path, "main"]),
+        );
+    }
+}
+
+#[test]
+fn zero_and_indexed_memory_addresses() {
+    for (width, address, memory) in [(0, "()", "r=02"), (1, "a[1]", "r=0201")] {
+        let functions = format!(
+            "action @memory (t:wire[2] mut) (a:wire[2] in) (r:region[{width},2] mut) () ()\n^entry():\nd = qload r {address}\nqxor d t\nqxor d t\nqunload r {address} d\nqstore r {address} t\nqstore r {address} t\nqexchm r {address} t\nqexchm r {address} t"
+        );
+        let layout = bennett_vm::json::parse(r#"{"ptr_width":32,"H":6,"A_tab":2,"S_cells":4,"null_size":16,"heap_base":32,"heap_limit_max":32,"globals":{},"interface_regions":{}}"#).unwrap().to_jcs();
+        let text = format!(
+            "{}\nsection layout\n{layout}\n",
+            source09::source(&functions)
+        );
+        let path = temp_object(&format!("memory-address-{width}"), &text);
+        for t in ["0", "1", "2", "3"] {
+            for a in ["0", "1", "2", "3"] {
+                for adjoint in [false, true] {
+                    let mut args = s(&[
+                        "run-action",
+                        &path,
+                        "memory",
+                        "--mut",
+                        t,
+                        "--in",
+                        a,
+                        "--mem",
+                        memory,
+                    ]);
+                    if adjoint {
+                        args.push("--adjoint".into());
+                    }
+                    assert_bytes("zero/indexed memory address", &args);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn cross_arm_qif_adjoint_and_reversal() {
     let functions = "action @cross (t:wire mut) (p:wire in) () () ()\n^entry():\nqif p {\nd = qalloc any 1\n} {\nqfree d\n}\nfn r @inner (q:qreg[1], p:qreg[1]) () () () ()\n^entry():\naction_call @cross (q) (p) () ()\nret\nfn cc @main () () () () ()\n^entry():\nq = qreg.new any 1\np = qreg.new any 1\ncall @inner q p\nret";
     let text = source09::source(functions);

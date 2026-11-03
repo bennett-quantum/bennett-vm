@@ -351,7 +351,10 @@ impl Catalog {
                 allocation.state = string(field(metadata, "state")?)?.into();
                 let identity = allocation.identity.clone();
                 let mut local = env.clone();
-                local.values.insert(name.into(), Bound::Allocation(Rc::new(RefCell::new(allocation))));
+                local.values.insert(
+                    name.into(),
+                    Bound::Allocation(Rc::new(RefCell::new(allocation))),
+                );
                 let start = out.len();
                 self.walk(field(c, "body")?, &mut local, out, next, active)?;
                 for leaf in &mut out[start..] {
@@ -999,10 +1002,15 @@ fn resolve_lifetimes(leaves: &mut [Leaf]) -> Result<(), String> {
                 .ok_or_else(|| err("release identity missing"))?;
             let start = open.remove(id).ok_or_else(|| err("unmatched release"))?;
             let acquisition = &leaves[start];
-            let original = if acquisition.source_allocation { acquisition } else { l };
+            let original = if acquisition.source_allocation {
+                acquisition
+            } else {
+                l
+            };
             if original.source_allocation {
                 if acquisition.wires.len() != l.wires.len()
-                    || (acquisition.source_allocation && l.source_allocation
+                    || (acquisition.source_allocation
+                        && l.source_allocation
                         && (acquisition.class != l.class || acquisition.state != l.state))
                 {
                     return Err(err("conflicting source lifetime metadata"));

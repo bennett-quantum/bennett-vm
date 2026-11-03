@@ -448,8 +448,14 @@ impl<'a> FrameAnalysis<'a> {
                         .map_err(|_| err("5.6", "unresolved allocation width"))?;
                     self.env.insert(i.lhs[0].clone(), n);
                     let ws = wires(&self.env, &i.lhs[0])?;
-                    self.entry
-                        .allocate(&ws, if matches!(i.op.as_str(), "qalloc" | "qalloc_restore") { Some(false) } else { None });
+                    self.entry.allocate(
+                        &ws,
+                        if matches!(i.op.as_str(), "qalloc" | "qalloc_restore") {
+                            Some(false)
+                        } else {
+                            None
+                        },
+                    );
                     if matches!(i.op.as_str(), "qborrow" | "qborrow_restore") {
                         self.borrowed.extend(ws.clone());
                         self.frames.insert(

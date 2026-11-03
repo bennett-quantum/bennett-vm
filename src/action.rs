@@ -1118,14 +1118,21 @@ impl<'o> Exec<'o> {
         match op {
             "qalloc" | "qborrow" | "qalloc_restore" | "qborrow_restore" => {
                 let (n, requested) = if matches!(op, "qalloc_restore" | "qborrow_restore") {
-                    self.releases.get(&(ins.line, self.iterations.clone()))
-                        .expect("validated inverse release visit").clone()
-                } else { (ins.operands[1].parse().map_err(|_| {
-                    diag(
-                        "4.3",
-                        format!("{op} size in @{} is not an integer", self.func),
+                    self.releases
+                        .get(&(ins.line, self.iterations.clone()))
+                        .expect("validated inverse release visit")
+                        .clone()
+                } else {
+                    (
+                        ins.operands[1].parse().map_err(|_| {
+                            diag(
+                                "4.3",
+                                format!("{op} size in @{} is not an integer", self.func),
+                            )
+                        })?,
+                        ins.operands[0].clone(),
                     )
-                })?, ins.operands[0].clone()) };
+                };
                 let borrowing = matches!(op, "qborrow" | "qborrow_restore");
                 let wires = if borrowing {
                     if self.idle.len() < n {
@@ -1153,6 +1160,9 @@ impl<'o> Exec<'o> {
                     self.idle.retain(|w| !selected.contains(w));
                     self.state.dirty.extend(&selected);
                     selected
+                } else if self.obj.isa == "0.9" && self.state.target.is_none() {
+                    // Logical execution precedes class/capacity realisation.
+                    self.state.alloc_wires(n)
                 } else {
                     self.state.target_alloc(n, &requested)?
                 };
@@ -1882,7 +1892,11 @@ pub fn execute_action_with_idle(
         idle: idle.to_vec(),
         func: name.to_string(),
         exact_required: f.kind == crate::object::FnKind::PermAction,
-        releases: if obj.isa == "0.9" && adjoint { allocation_bindings::release_metadata(f) } else { BTreeMap::new() },
+        releases: if obj.isa == "0.9" && adjoint {
+            allocation_bindings::release_metadata(f)
+        } else {
+            BTreeMap::new()
+        },
         iterations: vec![],
     };
     // §4.6: all lexical regions exist at entry, including those inside
@@ -2024,7 +2038,11 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &s
                 .expect("validated allocation has width/class");
             renamed(
                 ins,
-                if isa == "0.9" { "qalloc_restore" } else { "qalloc" },
+                if isa == "0.9" {
+                    "qalloc_restore"
+                } else {
+                    "qalloc"
+                },
                 vec![name],
                 vec![class, n.to_string()],
                 vec![],
@@ -2039,7 +2057,11 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &s
                 .expect("validated allocation has width/class");
             renamed(
                 ins,
-                if isa == "0.9" { "qborrow_restore" } else { "qborrow" },
+                if isa == "0.9" {
+                    "qborrow_restore"
+                } else {
+                    "qborrow"
+                },
                 vec![name],
                 vec![class, n.to_string()],
                 vec![],

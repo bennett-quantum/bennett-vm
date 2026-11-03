@@ -40,6 +40,11 @@ impl Schema {
         Ok(())
     }
     fn bundle(&self, name: &str, width: usize, modified: bool) -> Result<Vec<Wire>, String> {
+        // §4.6 admits () only as the zero-bit address of region[0,W].
+        // No declared wire/value type has width zero.
+        if name == "()" && width == 0 {
+            return Ok(vec![]);
+        }
         let (name, index) = if let Some((base, bit)) = name.split_once('[') {
             (
                 base,

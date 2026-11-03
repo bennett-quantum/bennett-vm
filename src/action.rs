@@ -12,6 +12,8 @@ use crate::exact::Exact;
 use crate::object::{Function, Instr, Object};
 use crate::value::{Budget, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+mod allocation_bindings;
+pub(crate) use allocation_bindings::bind_allocations;
 
 pub type Amp = (f64, f64);
 type OutcomeCache = BTreeMap<(Vec<BigUint>, Vec<Vec<BigUint>>), (BigUint, BigUint)>;
@@ -1267,20 +1269,8 @@ impl<'o> Exec<'o> {
                 }
                 Ok(())
             }
-            "qif" => {
-                let w = self.wire(&ins.operands[0])?;
-                self.pred.push(w);
-                self.exec_list(&ins.nested[0].clone())?;
-                self.pred.pop();
-                let pred = self.pred.clone();
-                self.implicit_gate("x", &[], &[w], &pred)?;
-                self.pred.push(w);
-                self.exec_list(&ins.nested[1].clone())?;
-                self.pred.pop();
-                let pred = self.pred.clone();
-                self.implicit_gate("x", &[], &[w], &pred)?;
-                Ok(())
-            }
+            "qif" => self.exec_qif(ins, false),
+            "qif_adj" => self.exec_qif(ins, true),
             "qloop" => self.exec_qloop(ins, false),
             "qloop_adj" => self.exec_qloop(ins, true),
             "oracle_call" | "action_call" | "adj" | "ctl" => self.exec_region_call(ins),
@@ -1290,6 +1280,26 @@ impl<'o> Exec<'o> {
                 self.func
             )),
         }
+    }
+
+    fn exec_qif(&mut self, ins: &Instr, adjoint: bool) -> Result<(), String> {
+        let w = self.wire(&ins.operands[0])?;
+        let pred = self.pred.clone();
+        // Forward: A, X, B, X. Inverse: X, adj B, X, adj A. Arm
+        // lifetimes remain unconditional even when a gate predicate is false.
+        for arm in if adjoint { [1, 0] } else { [0, 1] } {
+            if adjoint {
+                self.implicit_gate("x", &[], &[w], &pred)?;
+            }
+            self.pred.push(w);
+            let result = self.exec_list(&ins.nested[arm].clone());
+            self.pred.pop();
+            result?;
+            if !adjoint {
+                self.implicit_gate("x", &[], &[w], &pred)?;
+            }
+        }
+        Ok(())
     }
 
     fn exec_qloop(&mut self, ins: &Instr, adjoint: bool) -> Result<(), String> {
@@ -1752,6 +1762,8 @@ pub fn execute_action_with_idle(
     let f = obj
         .function(name)
         .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking (milestone 2)")))?;
+    let bound = (obj.isa == "0.9").then(|| bind_allocations(f));
+    let f = bound.as_ref().unwrap_or(f);
     if !matches!(
         f.kind,
         crate::object::FnKind::Action | crate::object::FnKind::PermAction
@@ -1826,7 +1838,7 @@ pub fn execute_action_with_idle(
     let widths = bundle_widths(obj, f);
     let body_source: Vec<Instr> = f.blocks.iter().flat_map(|b| b.instrs.clone()).collect();
     let body = if adjoint {
-        adjoint_list(&body_source, &widths)
+        adjoint_list(&body_source, &widths, &obj.isa)
     } else {
         body_source.clone()
     };
@@ -1931,10 +1943,11 @@ pub(crate) fn bundle_widths(_obj: &Object, f: &Function) -> HashMap<String, (usi
 pub(crate) fn adjoint_list(
     instrs: &[Instr],
     widths: &HashMap<String, (usize, String)>,
+    isa: &str,
 ) -> Vec<Instr> {
     let mut out = Vec::new();
     for ins in instrs.iter().rev() {
-        out.push(adjoint_instr(ins, widths));
+        out.push(adjoint_instr(ins, widths, isa));
     }
     out
 }
@@ -1956,7 +1969,7 @@ fn renamed(
     }
 }
 
-fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>) -> Instr {
+fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>, isa: &str) -> Instr {
     let op = ins.op.as_str();
     match op {
         "s" => renamed(ins, "sdg", vec![], ins.operands.clone(), vec![]),
@@ -2081,14 +2094,18 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>) -> Inst
         }
         "qpred" => renamed(ins, "qunpred", vec![], ins.operands.clone(), vec![]),
         "qunpred" => renamed(ins, "qpred", vec![], ins.operands.clone(), vec![]),
-        "qif" => renamed(
+        "qif" | "qif_adj" => renamed(
             ins,
-            "qif",
+            if isa == "0.9" && op == "qif" {
+                "qif_adj"
+            } else {
+                "qif"
+            },
             vec![],
             ins.operands.clone(),
             vec![
-                adjoint_list(&ins.nested[0], widths),
-                adjoint_list(&ins.nested[1], widths),
+                adjoint_list(&ins.nested[0], widths, isa),
+                adjoint_list(&ins.nested[1], widths, isa),
             ],
         ),
         "qloop" => {
@@ -2098,7 +2115,7 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>) -> Inst
                     "qloop_adj",
                     vec![],
                     ins.operands.clone(),
-                    vec![adjoint_list(&ins.nested[0], widths)],
+                    vec![adjoint_list(&ins.nested[0], widths, isa)],
                 )
             } else {
                 renamed(
@@ -2106,7 +2123,7 @@ fn adjoint_instr(ins: &Instr, widths: &HashMap<String, (usize, String)>) -> Inst
                     "qloop",
                     vec![],
                     ins.operands.clone(),
-                    vec![adjoint_list(&ins.nested[0], widths)],
+                    vec![adjoint_list(&ins.nested[0], widths, isa)],
                 )
             }
         }

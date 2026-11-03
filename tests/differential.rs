@@ -831,6 +831,49 @@ fn retained_instances_survive_segment_cancellation() {
 }
 
 #[test]
+fn cross_arm_qif_adjoint_and_reversal() {
+    let functions = "action @cross (t:wire mut) (p:wire in) () () ()\n^entry():\nqif p {\nd = qalloc any 1\n} {\nqfree d\n}\nfn r @inner (q:qreg[1], p:qreg[1]) () () () ()\n^entry():\naction_call @cross (q) (p) () ()\nret\nfn cc @main () () () () ()\n^entry():\nq = qreg.new any 1\np = qreg.new any 1\ncall @inner q p\nret";
+    let text = source09::source(functions);
+    let path = temp_object("qif-cross-arm", &text);
+    for t in ["0", "1"] {
+        for p in ["0", "1"] {
+            for adjoint in [false, true] {
+                let mut args = s(&["run-action", &path, "cross", "--mut", t, "--in", p]);
+                if adjoint {
+                    args.push("--adjoint".into());
+                }
+                assert_bytes("complete qif adjoint", &args);
+            }
+        }
+    }
+    for command in ["run-cc", "run-program", "reverse"] {
+        assert_outcome("cross-arm action in R frame", &s(&[command, &path, "main"]));
+    }
+}
+
+#[test]
+fn arm_local_qif_adjoint_preserves_versioned_cli_bytes() {
+    let functions = "action @local (t:wire mut) (p:wire in) () () ()\n^entry():\nqif p {\nd = qalloc any 1\nx t\ns t\nqfree d\n} {\ne = qalloc any 1\ns t\nx t\nqfree e\n}";
+    for version in ["0.8", "0.9"] {
+        let path = temp_object(
+            &format!("qif-local-{version}"),
+            &source09::source_at(version, functions),
+        );
+        for t in ["0", "1"] {
+            for p in ["0", "1"] {
+                for adjoint in [false, true] {
+                    let mut args = s(&["run-action", &path, "local", "--mut", t, "--in", p]);
+                    if adjoint {
+                        args.push("--adjoint".into());
+                    }
+                    assert_bytes("arm-local qif bytes", &args);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn spectator_measurement_preserves_rotation_inverse() {
     let functions = "action @rotate (t:wire mut) () () () ()\n^entry():\nry 0.123 t\nfn cc @main () (r:i1) () () ()\n^entry():\nq = qreg.new any 1\ns = qreg.new any 1\naction_call @rotate (q) () () ()\nr = measure s\nadj action_call @rotate (q) () () ()\nqreg.free q\nret r";
     for version in ["0.8", "0.9"] {

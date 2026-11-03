@@ -235,6 +235,8 @@ pub(super) fn action_body(
             "unavailable.reason: linked oracle construction staged in bennett-vm-47t",
         ));
     }
+    let bound = (object.isa == "0.9").then(|| crate::action::bind_allocations(f));
+    let f = bound.as_ref().unwrap_or(f);
     let registry = env
         .registry
         .as_ref()
@@ -442,11 +444,14 @@ impl Source {
                     .lhs
                     .first()
                     .ok_or_else(|| err("allocation result missing"))?;
-                if self.widths.insert(name.clone(), width).is_some() {
-                    return Err(err("duplicate source allocation result"));
+                if let Some(previous) = self.declarations.iter().find(|(n, ..)| n == name) {
+                    if previous.1 != width || previous.2 != class || previous.3 != state {
+                        return Err(err("loop-carried allocation metadata differs"));
+                    }
+                } else {
+                    self.widths.insert(name.clone(), width);
+                    self.declarations.push((name.clone(), width, class, state.into()));
                 }
-                self.declarations
-                    .push((name.clone(), width, class, state.into()));
             }
             for arm in &i.nested {
                 self.declarations(arm)?;

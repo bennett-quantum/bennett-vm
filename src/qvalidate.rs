@@ -374,19 +374,24 @@ impl<'a> FrameAnalysis<'a> {
                     let n = wires(&self.env, &i.operands[0])?.len();
                     pred.truncate(pred.len() - n);
                 }
-                "qif" => {
+                "qif" | "qif_adj" => {
                     self.flush()?;
                     let p = wires(&self.env, &i.operands[0])?;
                     let mut ctx = pred.clone();
                     ctx.extend(p.clone());
-                    self.sequence(&i.nested[0], &ctx, calls)?;
-                    self.flush()?;
-                    self.flip(vec![], p[0].clone(), i.line);
-                    self.flush()?;
-                    self.sequence(&i.nested[1], &ctx, calls)?;
-                    self.flush()?;
-                    self.flip(vec![], p[0].clone(), i.line);
-                    self.flush()?;
+                    let adjoint = i.op == "qif_adj";
+                    for arm in if adjoint { [1, 0] } else { [0, 1] } {
+                        if adjoint {
+                            self.flip(vec![], p[0].clone(), i.line);
+                            self.flush()?;
+                        }
+                        self.sequence(&i.nested[arm], &ctx, calls)?;
+                        self.flush()?;
+                        if !adjoint {
+                            self.flip(vec![], p[0].clone(), i.line);
+                            self.flush()?;
+                        }
+                    }
                 }
                 "qloop" | "qloop_adj" => {
                     self.flush()?;
@@ -746,6 +751,8 @@ impl<'a> FrameAnalysis<'a> {
             }
             return Ok(());
         };
+        let bound = (self.obj.isa == "0.9").then(|| crate::action::bind_allocations(f));
+        let f = bound.as_ref().unwrap_or(f);
         self.namespace += 1;
         let prefix = format!("$call{}:", self.namespace);
         let mut names = BTreeMap::new();
@@ -786,7 +793,11 @@ impl<'a> FrameAnalysis<'a> {
             .flat_map(|b| b.instrs.clone())
             .collect::<Vec<_>>();
         let body = if adj {
-            crate::action::adjoint_list(&body, &crate::action::bundle_widths(self.obj, f))
+            crate::action::adjoint_list(
+                &body,
+                &crate::action::bundle_widths(self.obj, f),
+                &self.obj.isa,
+            )
         } else {
             body
         };
@@ -890,6 +901,8 @@ pub fn validate(obj: &Object, f: &Function) -> Result<(), String> {
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction) {
         return Ok(());
     }
+    let bound = (obj.isa == "0.9").then(|| crate::action::bind_allocations(f));
+    let f = bound.as_ref().unwrap_or(f);
     let mut env = BTreeMap::new();
     for p in f.lists.iter().flatten() {
         if let Type::Wire(n) = p.ty {

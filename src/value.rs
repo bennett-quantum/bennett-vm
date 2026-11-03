@@ -5,6 +5,13 @@ use crate::bigint::{BigUint, from_signed, to_signed};
 use crate::json::Json;
 use std::cmp::Ordering;
 
+pub(crate) fn fresh_identity() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("host limit: launch resource identities")
+}
+
 pub const FAULT_NONE: u64 = 0;
 pub const FAULT_BUDGET_STEPS: u64 = 1;
 pub const FAULT_BUDGET_HEAP: u64 = 2;

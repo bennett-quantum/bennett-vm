@@ -10,17 +10,14 @@ use crate::{
     cc::{ResourceKey, Resources, RuntimeRun},
     json::Json,
     object::{FnKind, Object, Type},
-    value::{Budget, Value},
+    value::{Budget, Value, fresh_identity as id},
 };
 use std::{
     cell::RefCell,
     collections::BTreeMap,
     ffi::{CStr, CString, c_char},
     ptr,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::Arc,
 };
 const ARG: i32 = 11;
 const INVALID: i32 = 8;
@@ -78,10 +75,6 @@ pub(crate) unsafe fn output<T>(out: *mut *mut T, v: T) -> Fallible<()> {
     *get_mut(out)? = Box::into_raw(Box::new(v));
     Ok(())
 }
-fn id() -> u64 {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_add(1, Ordering::Relaxed)
-}
 macro_rules! free {
     ($name:ident,$t:ty) => {
         #[unsafe(no_mangle)]
@@ -120,7 +113,6 @@ struct Run {
 pub struct bennett_program_t {
     obj: Arc<Object>,
     resources: Resources,
-    tokens: BTreeMap<u64, (String, Budget)>,
     runs: BTreeMap<u64, Run>,
     locks: BTreeMap<u64, u64>,
     memory_locks: Vec<(ResourceKey, u64)>,
@@ -187,6 +179,8 @@ impl bennett_program_t {
             return Err(error(INVALID, "§10: step requires RUNNING"));
         }
         run.runtime.sync(&self.resources);
+        let unavailable = run.runtime.from_id_target().filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
+        run.runtime.unavailable_handle(unavailable);
         let (memory, regs) = self.runs[&r].runtime.touches();
         if memory.iter().any(|key| {
             self.memory_locks
@@ -295,7 +289,6 @@ pub unsafe extern "C" fn bennett_load(
             bennett_program_t {
                 obj: Arc::new(obj),
                 resources,
-                tokens: BTreeMap::new(),
                 runs: BTreeMap::new(),
                 locks: BTreeMap::new(),
                 memory_locks: vec![],
@@ -341,8 +334,7 @@ pub unsafe extern "C" fn bennett_budget(
             depth,
         };
         crate::cliargs::validate_budget(&p.obj, &b).map_err(|s| error(6, s))?;
-        let token = id();
-        p.tokens.insert(token, (name.into(), b));
+        let token = p.resources.mint_token(name.into(), b);
         *out = token;
         Ok(())
     })
@@ -358,7 +350,7 @@ pub unsafe extern "C" fn bennett_qreg_new(
         let p = get_mut(p)?;
         let cls = text(cls)?;
         get_mut(out)?;
-        if n == 0 {
+        if n == 0 && p.obj.isa == "0.8" {
             return Err(error(ARG, "§3.3: empty register"));
         }
         *out = p
@@ -488,10 +480,14 @@ pub unsafe extern "C" fn bennett_run(
                     regs.push(*q);
                     Value::Qreg(*q)
                 }
+                (Type::QregDynamic, Some(Arg::Qreg(q))) if p.obj.isa == "0.9" && p.resources.reg_width(*q).is_some() => {
+                    p.unlocked(*q)?;
+                    regs.push(*q);
+                    Value::Qreg(*q)
+                }
                 (Type::Token, Some(Arg::Token(t))) => Value::TokenId(
                     *t,
-                    p.tokens
-                        .get(t)
+                    p.resources.token(*t)
                         .ok_or_else(|| error(ARG, "§10: token not scoped to this program"))?
                         .1,
                 ),
@@ -545,12 +541,7 @@ impl bennett_result_t {
                     Value::Qreg(q) => (2, 64, q.to_le_bytes().to_vec()),
                     Value::TokenId(t, _) => (3, 64, t.to_le_bytes().to_vec()),
                     Value::Token(b) => {
-                        let t = p
-                            .tokens
-                            .iter()
-                            .find(|(_, (_, v))| v == b)
-                            .map(|(k, _)| *k)
-                            .unwrap_or_else(id);
+                        let t = p.resources.token_for_budget(b).unwrap_or_else(|| p.resources.mint_token(String::new(), *b));
                         (3, 64, t.to_le_bytes().to_vec())
                     }
                 };
@@ -701,7 +692,9 @@ pub unsafe extern "C" fn bennett_run_close(p: *mut bennett_program_t, r: u64) ->
             ));
         }
         run.state = State::Closed;
+        let tokens = run.runtime.minted_tokens();
         p.runs.remove(&r);
+        p.resources.revoke_tokens(&tokens);
         p.locks.retain(|_, owner| *owner != r);
         p.memory_locks.retain(|(_, owner)| *owner != r);
         Ok(())
@@ -871,9 +864,7 @@ pub unsafe extern "C" fn bennett_estimate_run(
             .function(name)
             .filter(|f| matches!(f.kind, FnKind::Oracle | FnKind::Action | FnKind::PermAction))
             .ok_or_else(|| error(ARG, "§10: E_ARG: unknown/non-region estimate subject"))?;
-        let (token_region, _budget) = p
-            .tokens
-            .get(&token)
+        let (token_region, _budget) = p.resources.token(token)
             .ok_or_else(|| error(ARG, "§10: E_ARG: unknown program-scoped token"))?;
         if token_region != name {
             return Err(error(

@@ -181,7 +181,7 @@ impl bennett_program_t {
         run.runtime.sync(&self.resources);
         let unavailable = run
             .runtime
-            .from_id_target()
+            .pending_register_lookup()
             .filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
         run.runtime.unavailable_handle(unavailable);
         let (memory, regs) = self.runs[&r].runtime.touches();

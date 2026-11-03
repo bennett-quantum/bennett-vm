@@ -171,6 +171,71 @@ fn minted_tokens_revoke_on_reverse_and_close_but_host_tokens_remain_program_scop
 }
 
 #[test]
+fn nominal_class_allocations_accept_literal_and_runtime_widths_on_an_installed_target() {
+    use bennett_vm::json::{self, Json};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json");
+    let mut target = json::parse(std::fs::read_to_string(path).unwrap().trim_end()).unwrap();
+    let Json::Obj(fields) = &mut target else {
+        panic!("target object");
+    };
+    fields.insert(
+        "classes".into(),
+        json::parse(r#"{"data":{"capacity":2,"dirty_rate":1,"qubit_second":1},"fast":{"capacity":2,"dirty_rate":1,"qubit_second":1}}"#).unwrap(),
+    );
+    let target = target.to_jcs();
+    unsafe {
+        for width in [0, 1, 2, 3] {
+            for operand in [width.to_string(), "n".into()] {
+                let source = support::source(&format!(
+                    "fn cc @main (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new data {operand}\nw = qreg.width q\nqreg.free q\nret w"
+                ));
+                let mut program = ptr::null_mut();
+                let status = bennett_load(
+                    source.as_ptr(),
+                    source.len(),
+                    target.as_ptr(),
+                    target.len(),
+                    &mut program,
+                );
+                // §3.3 admits zero only through an unsigned i64 value.
+                if width == 0 && operand == "0" {
+                    assert_eq!(status, 11);
+                    assert!(program.is_null());
+                    assert!(
+                        std::ffi::CStr::from_ptr(bennett_last_error())
+                            .to_string_lossy()
+                            .contains("literal qreg length must be positive")
+                    );
+                    continue;
+                }
+                assert_eq!(
+                    status,
+                    0,
+                    "width {width}/{operand}: {}",
+                    std::ffi::CStr::from_ptr(bennett_last_error()).to_string_lossy()
+                );
+                let run = start(program, "main", &[Arg::Int(width)]).unwrap();
+                assert_eq!(
+                    wait(program, run),
+                    if width <= 2 {
+                        (vec![(0, width)], vec![])
+                    } else {
+                        (vec![], vec![2])
+                    }
+                );
+                assert_eq!(bennett_reverse(program, run), 0);
+                assert_eq!(bennett_run_close(program, run), 0);
+                let mut full = 0;
+                assert_eq!(bennett_qreg_new(program, c"data".as_ptr(), 2, &mut full), 0);
+                assert_eq!(bennett_qreg_free(program, full), 0);
+                assert_eq!(bennett_unload(program), 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn failed_register_capacity_is_a_terminal_record_without_allocation_or_ownership() {
     use bennett_vm::json::{self, Json};
     unsafe {

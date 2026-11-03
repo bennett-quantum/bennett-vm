@@ -1648,7 +1648,15 @@ fn region_call_overlaps_trap_before_any_effect() {
         // A 0.9 layout defeats the reference's identity check (b-isa-spec-7fd):
         // those shapes are judged by the §3.3 text alone.
         for command in ["run-cc", "reverse", "run-program"] {
-            let mut args = s(&[command, &path, "main", "--arg", "token:64"]);
+            let mut args = s(&[
+                command,
+                &path,
+                "main",
+                "--arg",
+                "token:64",
+                "--token-aliases",
+                "[0]",
+            ]);
             if command == "run-program" {
                 args.push("--reverse".into());
             }
@@ -1656,7 +1664,15 @@ fn region_call_overlaps_trap_before_any_effect() {
                 assert_outcome(&format!("3tx {name} {command}"), &args);
             }
         }
-        let args = s(&["run-cc", &path, "main", "--arg", "token:64"]);
+        let args = s(&[
+            "run-cc",
+            &path,
+            "main",
+            "--arg",
+            "token:64",
+            "--token-aliases",
+            "[0]",
+        ]);
         for engine in ENGINES {
             let json = vm_json(engine, &args);
             assert_eq!(

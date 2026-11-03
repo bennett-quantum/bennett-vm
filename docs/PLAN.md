@@ -308,3 +308,27 @@ results. It does not compare a whole native process against one device root.
 Implementation and executable evidence remain dependent on the published F04,
 F08, F15 and F16 contracts. This proposal makes the required backend boundary and
 acceptance domain reviewable while preserving the existing by-value ABI.
+
+### Freestanding launch backend dependency (bennett-vm-0rd)
+
+The current Rust launch static library is a real hosted backend. A strict import audit
+on LLVM 18 and 23 at O0/O2, using `-nostdlib -nostdinc -static -no-pie`, calls
+`bennett_load` on the unchanged published `inc8.bisa`, then real register
+allocation/free and unload. All four links fail with 172 unresolved symbols,
+including unwinding, TLS/thread, allocator, filesystem and math interfaces.
+The audited object SHA-256 is `8093da48bad04d6564325faf01ea1304a84b5ac5a120e685eee9951f5daec5d9`; library SHA-256 is
+`c08db06f097c2359ad4cec4d040e4d18e2d9251014cd064b69bd7946b7d66b22`. The job artifact
+`.tmp/sol-vm-queue/tmp/native-backend-audit/report.json` records exact arguments,
+complete unresolved names, input hashes and raw linker diagnostics. This is an
+import audit; it does not execute the driver's materialised workload or establish
+freestanding acceptance.
+
+Closing 0rd requires a published runtime closure for the actual launch backend,
+or the explicitly permitted contract decision for a separate backend boundary.
+The runtime must supply real implementations and a compatible startup/TLS/allocator
+profile; adding names as stubs or quietly linking host libc/libm cannot satisfy it.
+After that publication, use the actual selected device object and emitted
+`binding_symbol`, retain its owned program through component completion, and
+repeat the driver's unchanged workload at both optimisation levels/LLVM majors.
+The component may sit beside native main and unrelated host modules. The loaded
+marked-device program owns its resources; it does not own the whole binary.

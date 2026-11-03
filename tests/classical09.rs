@@ -7,7 +7,14 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-fn run(binary: &std::path::Path, engine: &str, functions: &str, command: &str, args: &[&str]) -> std::process::Output {
+fn run(
+    binary: &std::path::Path,
+    engine: &str,
+    functions: &str,
+    command: &str,
+    args: &[&str],
+    aliases: Option<&str>,
+) -> std::process::Output {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
         "classical09-{engine}-{}-{}.bisa",
@@ -23,19 +30,28 @@ fn run(binary: &std::path::Path, engine: &str, functions: &str, command: &str, a
     for arg in args {
         run.args(["--arg", arg]);
     }
+    if let Some(aliases) = aliases {
+        run.args(["--token-aliases", aliases]);
+    }
     let output = run.output().unwrap();
     std::fs::remove_file(path).unwrap();
     output
 }
 fn execute(engine: &str, functions: &str, command: &str, args: &[&str]) -> Json {
-    let output = run(std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")), engine, functions, command, args);
+    let output = run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
+        engine,
+        functions,
+        command,
+        args,
+        None,
+    );
     assert!(
         output.status.success(),
         "{engine}, {command}, {args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let result = json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
-    result
+    json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap()
 }
 fn completed(result: &Json, expected: &[&str]) {
     assert_eq!(result.get("fault"), Some(&Json::Null));
@@ -88,7 +104,14 @@ fn dynamic_register_rows_jit() {
 fn unallocatable_dynamic_register_is_a_host_limit_diagnostic() {
     let functions = "fn cc @main (n:i64) () () () ()\n^entry():\nq = qreg.new any n\nret";
     for engine in ["interpreter", "jit"] {
-        let output = run(std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")), engine, functions, "run-program", &["18446744073709551615"]);
+        let output = run(
+            std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
+            engine,
+            functions,
+            "run-program",
+            &["18446744073709551615"],
+            None,
+        );
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         let error = String::from_utf8_lossy(&output.stderr);
@@ -248,16 +271,120 @@ fn minted_budget_rows_jit() {
 fn incoming_tokens_with_equal_tuples_keep_distinct_identities() {
     let distinct = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token, b:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (b) (r)\nret";
     let same = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (a) (r)\nret";
-    let reference = std::env::var_os("BENNETT_ISA_REF").map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref"));
-    for (functions, args, fault) in [(distinct, vec!["token:32", "token:32"], true), (same, vec!["token:32"], false)] {
-        let output = run(&reference, "interpreter", functions, "run-program", &args);
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let result = json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
-        if fault { failed(&result, 4); } else { completed(&result, &[]); }
+    let distinct = format!("{ORACLE}{distinct}");
+    let same = format!("{ORACLE}{same}");
+    let reference = std::env::var_os("BENNETT_ISA_REF")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref")
+        });
+    for binary in [
+        reference.as_path(),
+        std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
+    ] {
+        for engine in ["interpreter", "jit"] {
+            for (functions, args, aliases, fault) in [
+                (
+                    distinct.as_str(),
+                    vec!["token:32", "token:32"],
+                    "[0,1]",
+                    true,
+                ),
+                (
+                    distinct.as_str(),
+                    vec!["token:32", "token:32"],
+                    "[0,0]",
+                    false,
+                ),
+                (same.as_str(), vec!["token:32"], "[0]", false),
+            ] {
+                let output = run(
+                    binary,
+                    engine,
+                    functions,
+                    "run-program",
+                    &args,
+                    Some(aliases),
+                );
+                assert!(
+                    output.status.success(),
+                    "{} {engine}: {}",
+                    binary.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let result = json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+                if fault {
+                    failed(&result, 4);
+                } else {
+                    completed(&result, &[]);
+                }
+            }
+        }
     }
+}
+
+#[test]
+fn incoming_token_partitions_are_validated_before_execution() {
+    let functions =
+        format!("{ORACLE}fn cc @main (a:token, b:token) () () () ()\n^entry():\nfault 42");
     for engine in ["interpreter", "jit"] {
-        failed(&execute(engine, distinct, "run-program", &["token:32", "token:32"]), 4);
-        completed(&execute(engine, same, "run-program", &["token:32"]), &[]);
+        for aliases in [
+            None,
+            Some("[]"),
+            Some("[0]"),
+            Some("[0,1,2]"),
+            Some("[1,1]"),
+            Some("[0,2]"),
+            Some("[0,-1]"),
+            Some("[0,0.5]"),
+            Some("[0,\"1\"]"),
+            Some("{}"),
+            Some("invalid"),
+        ] {
+            let output = run(
+                std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
+                engine,
+                &functions,
+                "run-program",
+                &["token:32", "token:32"],
+                aliases,
+            );
+            assert!(!output.status.success(), "{engine}/{aliases:?}");
+            assert!(output.stdout.is_empty());
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("E_ARG"),
+                "{output:?}"
+            );
+        }
+        for (args, aliases, valid) in [
+            (["token:32", "token:33"], "[0,0]", false),
+            (["token:32", "token:33"], "[0,1]", true),
+            (["token:32", "token:32"], "[0,0]", true),
+            (["token:32", "token:32"], "[0,1]", true),
+        ] {
+            let output = run(
+                std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
+                engine,
+                &functions,
+                "run-program",
+                &args,
+                Some(aliases),
+            );
+            assert_eq!(
+                output.status.success(),
+                valid,
+                "{engine}/{args:?}/{aliases}: {output:?}"
+            );
+            if valid {
+                failed(
+                    &json::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap(),
+                    42,
+                );
+            } else {
+                assert!(output.stdout.is_empty());
+                assert!(String::from_utf8_lossy(&output.stderr).contains("E_ARG"));
+            }
+        }
     }
 }

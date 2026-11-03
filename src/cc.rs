@@ -447,7 +447,7 @@ impl Machine {
     }
     fn token_budget(&self, token: &Value) -> Result<value::Budget, u64> {
         match token {
-            Value::Token(budget) => Ok(*budget),
+            Value::Token(budget) if self.obj.isa == "0.8" => Ok(*budget),
             Value::TokenId(id, budget)
                 if self.data.tokens.get(id).is_some_and(|(_, b)| b == budget) =>
             {
@@ -1530,6 +1530,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             "replies",
             "draws",
             "budget",
+            "token-aliases",
             "mem",
             "steps",
             "target",
@@ -1544,6 +1545,9 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let tape_out = opts.one("tape-out")?;
     let effects = EffectJournal::read(opts.one("replay-tape")?)?;
     let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
+    if obj.isa != "0.9" && opts.one("token-aliases")?.is_some() {
+        return Err("unknown option --token-aliases".into());
+    }
     if obj.has_schedule && mode == Mode::Program {
         let doc = crate::sched::object_schedule(&obj)?.unwrap();
         let ids = crate::identity::compute(&obj)?;
@@ -1619,6 +1623,26 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     }
     let mut values = Vec::new();
     let mut budgets = Vec::new();
+    let token_count = f.lists[0].iter().filter(|p| p.ty == Type::Token).count();
+    let aliases = if obj.isa == "0.9" {
+        cliargs::parse_token_aliases(opts.one("token-aliases")?, token_count)?
+    } else {
+        vec![]
+    };
+    let token_region = if obj.isa == "0.9" && token_count != 0 {
+        Some(
+            obj.functions
+                .iter()
+                .find(|f| f.kind == FnKind::Oracle)
+                .ok_or("§10: E_ARG: tuple-only token requires a program oracle")?
+                .name
+                .clone(),
+        )
+    } else {
+        None
+    };
+    let mut tokens = std::collections::BTreeMap::new();
+    let mut token_index = 0;
     for (raw, p) in raw.iter().zip(&f.lists[0]) {
         let r = cliargs::parse_raw_arg(raw, &budget)?;
         let v = match (&p.ty, r) {
@@ -1632,9 +1656,27 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             (Type::Token, cliargs::RawArg::Token(b)) => {
                 cliargs::validate_budget(&obj, &b)?;
                 budgets.push(b.to_json());
-                Value::Token(b)
+                if let Some(region) = &token_region {
+                    let label = aliases[token_index];
+                    token_index += 1;
+                    let id = if let Some((budget, id)) = tokens.get(&label) {
+                        if *budget != b {
+                            return Err("§10: E_ARG: token_aliases equates unequal tuples".into());
+                        }
+                        *id
+                    } else {
+                        let id = data.mint_token(region.clone(), b);
+                        tokens.insert(label, (b, id));
+                        id
+                    };
+                    Value::TokenId(id, b)
+                } else {
+                    Value::Token(b)
+                }
             }
-            (ty @ (Type::Qreg(_) | Type::QregDynamic), cliargs::RawArg::QregBits(bits)) => {
+            (ty @ (Type::Qreg(_) | Type::QregDynamic), cliargs::RawArg::QregBits(bits))
+                if obj.isa == "0.9" || matches!(ty, Type::Qreg(_)) =>
+            {
                 if matches!(ty, Type::Qreg(n) if bits.len() != *n)
                     || !bits.bytes().all(|b| b == b'0' || b == b'1')
                 {
@@ -2215,7 +2257,7 @@ impl RuntimeRun {
     pub(crate) fn unavailable_handle(&mut self, id: Option<u64>) {
         self.machine.unavailable_handle = id;
     }
-    pub(crate) fn from_id_target(&self) -> Option<u64> {
+    pub(crate) fn pending_register_lookup(&self) -> Option<u64> {
         let m = &self.machine;
         let a = m.stack.last()?;
         let instruction = &m.obj.function(&a.function)?.blocks[a.block].instrs[a.index];
@@ -2294,13 +2336,12 @@ impl RuntimeRun {
             _ => {}
         }
         let mut regs = vec![];
-        if i.op == "qreg.from_id" {
-            if let Ok(id) = m.number(&i.operands[0])
-                && m.unavailable_handle != Some(id)
-                && m.data.handle(id).is_ok_and(|h| h.parent.is_none())
-            {
-                regs.push(id);
-            }
+        if i.op == "qreg.from_id"
+            && let Ok(id) = m.number(&i.operands[0])
+            && m.unavailable_handle != Some(id)
+            && m.data.handle(id).is_ok_and(|h| h.parent.is_none())
+        {
+            regs.push(id);
         }
         for text in &i.operands {
             for name in

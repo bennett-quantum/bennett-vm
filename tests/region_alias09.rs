@@ -96,7 +96,7 @@ fn oracle_slots_trap_all_dynamic_alias_pairs_on_both_engines() {
                 Path::new(env!("CARGO_BIN_EXE_bennett-vm")),
                 &path,
                 engine,
-                &["--arg", "token:3"],
+                &["--arg", "token:3", "--token-aliases", "[0]"],
             );
             assert_eq!(
                 result.get("fault").and_then(Json::as_u64),

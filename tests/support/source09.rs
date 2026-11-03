@@ -1,7 +1,10 @@
 use bennett_vm::{json::Json, object, validate};
 pub fn source(functions: &str) -> String {
+    source_at("0.9", functions)
+}
+pub fn source_at(v: &str, functions: &str) -> String {
     let text = format!(
-        "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n"
+        "bennett-object isa={v} object={v} launch={v} sched={v} cert={v} coverage={v} target={v} ptr_width=32\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n"
     );
     let mut obj = object::parse(&text).unwrap();
     for (index, f) in obj.functions.iter().enumerate() {

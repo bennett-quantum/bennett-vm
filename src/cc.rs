@@ -208,6 +208,11 @@ fn nan_keys(env: &Map<Key, Seq<Value>>) -> Map<Key, ()> {
         .map(|(k, _)| (k.clone(), ()))
         .collect()
 }
+/// `measure` and its `measure.iN` form (§3.3): every test of "is this a
+/// measure frame" goes through the base opcode.
+fn is_measure(op: &str) -> bool {
+    op.split('.').next() == Some("measure")
+}
 fn pure(op: &str) -> bool {
     matches!(
         op.split('.').next().unwrap(),
@@ -320,10 +325,15 @@ impl Data {
                     .allocation_at_or_before(&p.sub(&u(1)))
                     .is_some_and(|e| e.live && *p <= e.base.add(&e.size)))
     }
-    fn read(&self, p: &BigUint, n: usize) -> Vec<u8> {
-        (0..n)
-            .map(|i| *self.memory.get(&p.add(&u(i as u64))).unwrap_or(&0))
-            .collect()
+    /// The transfer buffer is host memory: a length no host can allocate is
+    /// a host-limit diagnostic, never a panic.
+    fn read(&self, p: &BigUint, n: usize) -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(n)
+            .map_err(|e| format!("host limit: §7.1 transfer of {n} bytes: {e}"))?;
+        bytes.extend((0..n).map(|i| *self.memory.get(&p.add(&u(i as u64))).unwrap_or(&0)));
+        Ok(bytes)
     }
     fn write(&mut self, p: &BigUint, bytes: &[u8]) {
         for (i, b) in bytes.iter().enumerate() {
@@ -678,7 +688,7 @@ impl Machine {
             pure: pure(&ins.op) && fault.is_none(),
             reversed: false,
             marker: ins.op == "uncall" && fault.is_none(),
-            measured: ins.op.split('.').next() == Some("measure") && fault.is_none(),
+            measured: is_measure(&ins.op) && fault.is_none(),
         });
         self.steps += 1;
         Ok(())
@@ -762,7 +772,7 @@ impl Machine {
                 }
                 if base == "load" {
                     let mut v = BigUint::zero();
-                    for (i, b) in self.data.read(&p, w / 8).iter().enumerate() {
+                    for (i, b) in self.data.read(&p, w / 8)?.iter().enumerate() {
                         v = v.bitor(&u(*b as u64).shl(i * 8));
                     }
                     result = Some(Value::int(w, v));
@@ -912,7 +922,7 @@ impl Machine {
                     return Ok(Some(7));
                 }
                 let size = usize::try_from(n).map_err(|_| "host limit: request size")?;
-                let payload = self.data.read(&p, size);
+                let payload = self.data.read(&p, size)?;
                 let reply = self
                     .replies
                     .get(self.reply_pos)
@@ -1060,7 +1070,7 @@ impl Machine {
         // Form and validate the event from entry state before any device or
         // memory mutation. Entropy comes from the supplied entropy, never the tape.
         let bytes = match (dev, op) {
-            ("console", "write") | ("block", "write") => self.data.read(&u(p), n),
+            ("console", "write") | ("block", "write") => self.data.read(&u(p), n)?,
             ("clock", "read") => self.data.clock.to_le_bytes().to_vec(),
             ("entropy", "read") => {
                 self.entropy[self.data.entropy_pos..self.data.entropy_pos + n].to_vec()
@@ -1102,6 +1112,8 @@ impl Machine {
         self.data.tape.push(event);
         Ok(None)
     }
+    /// A region call. `Ok(Some(code))` is the §3.3 CC trap / R fault, taken
+    /// before any effect, including any view consumption.
     fn region(&mut self, ins: &Instr) -> Result<Option<u64>, String> {
         macro_rules! binding {
             ($value:expr) => {
@@ -1157,9 +1169,9 @@ impl Machine {
             if !action::action_binding_valid(&sig, &muts, &inputs, &regions, &controls) {
                 return Ok(Some(4));
             }
-            let args = self
-                .operands(&list(&xs[4])?)
-                .map_err(|_| err("invalid action argument"))?;
+            // 0.9 E17.7, and the reference at 0.8: a classical operand without a
+            // current instance traps.
+            let args = binding!(self.operands(&list(&xs[4])?));
             Invocation::Action {
                 name,
                 muts,
@@ -1195,13 +1207,11 @@ impl Machine {
             }
             used.extend([xs[3].clone(), xs[4].clone()]);
             used.extend(mem_names);
-            let budget = match self.read(&xs[1]).map_err(|_| err("missing oracle token"))? {
+            let budget = match binding!(self.read(&xs[1])) {
                 Value::Token(b) | Value::TokenId(_, b) => b,
                 _ => return Err(err("oracle call requires token")),
             };
-            let args = self
-                .operands(&list(&xs[6])?)
-                .map_err(|_| err("invalid oracle argument"))?;
+            let args = binding!(self.operands(&list(&xs[6])?));
             Invocation::Oracle {
                 name,
                 inputs,
@@ -1593,7 +1603,8 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     ];
     let reversing = mode == Mode::Reverse || opts.flags.contains("reverse");
     if reversing {
-        if mode == Mode::Program && m.fault.is_some() {
+        // 0.9 §10 K6: FAILED -> REVERSED. 0.8's eligibility is COMPLETED only.
+        if mode == Mode::Program && m.fault.is_some() && obj.isa == "0.8" {
             return Err("§10: E_INVALID_STATE: cannot reverse a FAILED run".into());
         }
         if m.history.iter().any(|f| f.measured) {
@@ -2115,9 +2126,10 @@ impl RuntimeRun {
         if !m.data.valid(&p, &u(n)) {
             return None;
         }
+        // An unallocatable payload is not a request: executing the row reports it.
         Some((
             i.operands[0].clone(),
-            m.data.read(&p, usize::try_from(n).ok()?),
+            m.data.read(&p, usize::try_from(n).ok()?).ok()?,
         ))
     }
     pub(crate) fn reply(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -2132,11 +2144,7 @@ impl RuntimeRun {
     pub(crate) fn step(&mut self) -> Result<(), String> {
         let m = &mut self.machine;
         if let Some(a) = m.stack.last()
-            && m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index]
-                .op
-                .split('.')
-                .next()
-                == Some("measure")
+            && is_measure(&m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op)
         {
             use std::io::Read;
             let mut bs = [0u8; 8];
@@ -2461,6 +2469,18 @@ mod scaling_tests {
         let obj = std::sync::Arc::new(crate::object::parse(&source).unwrap());
         let resources = Resources::new(&obj).unwrap();
         RuntimeRun::new(obj, &resources, "main", vec![], vec![]).unwrap()
+    }
+
+    #[test]
+    fn launch_measure_with_width_suffix_draws_like_measure() {
+        // bennett-vm-4ke: Runtime::step supplies the draw for both spellings.
+        for op in ["measure", "measure.i1"] {
+            let mut run = run_for(&format!("q = qreg.new any 1\nr = {op} q\nret r"));
+            run.step().unwrap();
+            run.step().unwrap();
+            assert_eq!(run.machine.draws.len(), 1, "{op}");
+            assert!(run.measured(), "{op}");
+        }
     }
 
     #[test]

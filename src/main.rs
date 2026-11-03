@@ -49,6 +49,7 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             let text = read_object(path)?;
             let (obj, ids) = bennett_vm::load(&text, cmd == "hash")?;
+            bennett_vm::check_oracle_pairs(&obj)?;
             println!("{}", bennett_vm::identity::check_json(&obj, &ids).to_jcs());
             Ok(())
         }

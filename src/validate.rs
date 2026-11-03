@@ -32,11 +32,13 @@ pub fn validate(obj: &Object) -> Result<(), String> {
         if obj.isa == "0.9" {
             crate::coherent_typing::function(obj, f)?;
         }
-        if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
+        if matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
             crate::lifted_typing::function(obj, f)?;
-        } else {
+        }
+        if obj.isa != "0.9" || !matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
             crate::qvalidate::validate(obj, f)?;
         }
+        crate::cleanup_discipline::function(obj, f)?;
     }
     if obj.isa == "0.9" {
         crate::lifted_typing::closures(obj)?;
@@ -1125,6 +1127,24 @@ const LIFTED_TERMINATORS: [&str; 6] = [
 ];
 
 fn validate_terminators(obj: &Object, f: &Function) -> Result<(), String> {
+    if matches!(f.kind, FnKind::Cc | FnKind::R) {
+        // §3.4: br, ret, trap and fault end a block; nothing follows them.
+        for b in &f.blocks {
+            let rows = &b.instrs[..b.instrs.len().saturating_sub(1)];
+            if rows
+                .iter()
+                .any(|i| matches!(i.op.as_str(), "br" | "ret" | "trap" | "fault"))
+            {
+                return Err(err(
+                    "3.4",
+                    format!(
+                        "a terminator is not the last row of ^{} in @{}",
+                        b.name, f.name
+                    ),
+                ));
+            }
+        }
+    }
     match f.kind {
         FnKind::Oracle | FnKind::Lproc => {
             for b in &f.blocks {
@@ -2077,6 +2097,12 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
                 ));
             }
             lhs_n(f, ins, 0)?;
+            if !crate::object::valid_name(&ins.operands[0]) {
+                return Err(err(
+                    "4.8",
+                    format!("qregion in @{} needs a region name", f.name),
+                ));
+            }
             if ins.operands.len() == 4 {
                 let name = at_name(&ins.operands[3]).ok_or_else(|| {
                     err(

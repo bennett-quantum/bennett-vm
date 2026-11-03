@@ -3,7 +3,7 @@ use crate::object::{FnKind, Function, Instr, Object, Type};
 use crate::validate::{err, list_operand};
 use std::collections::{BTreeMap, BTreeSet};
 type Wire = (String, usize);
-fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
+pub(crate) fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
     let (name, index) = if let Some((n, i)) = s.split_once('[') {
         (
             n,
@@ -28,7 +28,10 @@ fn wires(env: &BTreeMap<String, usize>, s: &str) -> Result<Vec<Wire>, String> {
         Ok((0..n).map(|i| (name.into(), i)).collect())
     }
 }
-fn flip(ins: &Instr, env: &BTreeMap<String, usize>) -> Result<(Vec<Wire>, Wire), String> {
+pub(crate) fn flip(
+    ins: &Instr,
+    env: &BTreeMap<String, usize>,
+) -> Result<(Vec<Wire>, Wire), String> {
     let xs = &ins.operands;
     let (controls, target) = match ins.op.as_str() {
         "x" => (vec![], &xs[0]),
@@ -952,12 +955,22 @@ pub fn validate(obj: &Object, f: &Function) -> Result<(), String> {
             if matches!(op, "qif" | "qloop") {
                 let mut p = pred.clone();
                 if op == "qif" {
-                    p.extend(wires(env, &i.operands[0])?);
+                    // §4.6: the arms flip the selector, which §3.3 forbids for a
+                    // wire of the effective control context (`qpred p; x p`).
+                    let selector = wires(env, &i.operands[0])?;
+                    if selector.iter().any(|w| pred.contains(w)) {
+                        return Err(err("3.3", "qif selector is in its effective control"));
+                    }
+                    p.extend(selector);
                 } else if i.operands.len() == 3 {
                     p.extend(wires(env, &i.operands[2])?);
                 }
                 for body in &i.nested {
-                    walk(body, env, inputs, &mut p.clone())?;
+                    let mut arm = p.clone();
+                    walk(body, env, inputs, &mut arm)?;
+                    if arm != p {
+                        return Err(err("3.5", "structured body altered the predicate stack"));
+                    }
                 }
                 continue;
             }
@@ -1013,7 +1026,14 @@ pub fn validate(obj: &Object, f: &Function) -> Result<(), String> {
         .iter()
         .flat_map(|b| b.instrs.clone())
         .collect::<Vec<_>>();
-    walk(&body, &env, &inputs, &mut vec![])?;
+    let mut pred = vec![];
+    walk(&body, &env, &inputs, &mut pred)?;
+    if !pred.is_empty() {
+        return Err(err(
+            "3.5",
+            format!("unclosed predicate stack in @{}", f.name),
+        ));
+    }
     if !borrowed.is_empty() {
         let mut analysis = FrameAnalysis::new(obj, f, env)?;
         analysis.sequence(&body, &[], &mut vec![f.name.clone()])?;

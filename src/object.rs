@@ -1090,6 +1090,10 @@ fn parse_regs_line(line: &str) -> Result<(Vec<Param>, Vec<usize>), String> {
         let (name, ty) = item
             .split_once(':')
             .ok_or_else(|| err("16.2", format!("malformed regs entry {item:?}")))?;
+        // §16.2: a regs entry is NAME ":" type; it has no role suffix.
+        if !valid_name(name) {
+            return Err(err("16.2", format!("invalid regs entry {item:?}")));
+        }
         regs.push(Param {
             name: name.to_string(),
             ty: Type::parse(ty).map_err(|e| err("16.2", e))?,
@@ -1229,6 +1233,10 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
                 arm.push(parse_instr(cur)?);
             }
             let (_, closer) = cur.next().unwrap();
+            // §16.2: a structured body is instr+.
+            if arm.is_empty() {
+                return Err(err("16.2", format!("empty structured body after {line:?}")));
+            }
             nested.push(arm);
             if closer == "}" {
                 break;

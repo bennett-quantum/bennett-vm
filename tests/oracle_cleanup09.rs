@@ -146,7 +146,14 @@ fn source_constructor_rejects_bad_pairs_and_invalid_context_before_selection() {
             "lift.oracle_uncall @id tk (x) r fr () ()\nlift.retval r",
             "lift.oracle_call @id tk (x) r fr () ()\nlift.oracle_uncall @id tk (x) s fr () ()\nlift.retval r",
         ] {
-            let (obj, ids) = bennett_vm::load(&support::source(&format!("oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x")), false).unwrap();
+            // Parsed only: the constructor must refuse these on its own; load does too.
+            let text = support::source(&format!(
+                "oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs {{ r:reg[1], s:reg[1], fr:reg[4] }}\n^entry():\n{rows}\noracle @id (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+            ));
+            let refused = bennett_vm::load(&text, false).err().unwrap();
+            assert!(refused.contains("§5.5"), "{refused}");
+            let obj = bennett_vm::object::parse(&text).unwrap();
+            let ids = bennett_vm::identity::compute(&obj).unwrap();
             let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"*","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
             let error = catalog
                 .lower_oracle_with_cleanup(

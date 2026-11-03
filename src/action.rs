@@ -216,31 +216,43 @@ impl QuantumState {
         self.exact = next;
         self.refresh();
     }
-    /// Measure `wires` (wire 0 first in `bits`); `draw` in [0,1) picks
-    /// the outcome in ascending value order by cumulative probability.
-    /// Returns (value, bits). The measured bits are reset to zero in
-    /// the remaining state (the handle is consumed; the post-state
-    /// factorises onto the outcome).
+    /// Measure `wires` (wire 0 first in `bits`). §4.1 (K17): outcomes are
+    /// enumerated lexicographically by `bits`, and `draw` selects the first
+    /// whose cumulative Born weight is strictly greater than draw x total,
+    /// so an exact CDF tie selects the next outcome. The measured bits are
+    /// reset to zero in the remaining state (the handle is consumed; the
+    /// post-state factorises onto the outcome).
     pub fn measure(&mut self, wires: &[usize], draw: f64) -> (BigUint, String) {
         let mut probs: BTreeMap<BigUint, f64> = BTreeMap::new();
         for (k, a) in &self.amps {
             *probs.entry(Self::extract(k, wires)).or_insert(0.0) += a.0 * a.0 + a.1 * a.1;
         }
-        let mut cumulative = 0.0;
-        let mut chosen: Option<BigUint> = None;
+        let total: f64 = probs.values().sum();
         let mut ordered = probs.iter().collect::<Vec<_>>();
-        // CLI draws enumerate outcomes lexically in wire order (wire 0 first).
         ordered.sort_by_key(|(v, _)| (0..wires.len()).map(|i| v.bit(i)).collect::<Vec<_>>());
-        for (v, p) in ordered {
-            cumulative += p;
-            if draw < cumulative {
-                chosen = Some(v.clone());
+        let threshold = draw * total;
+        let mut cumulative = 0.0;
+        let mut chosen = None;
+        for (index, (v, p)) in ordered.iter().enumerate() {
+            cumulative += **p;
+            // Binary64 settles every comparison away from a tie; the exact
+            // weights settle the rest.
+            let difference = cumulative - threshold;
+            let above = if difference.abs() > TIE_BAND * total {
+                difference > 0.0
+            } else {
+                let outcomes = &ordered[..=index];
+                self.exact_weight_above_draw(wires, outcomes.iter().map(|(v, _)| *v), draw)
+            };
+            if above {
+                chosen = Some((*v).clone());
                 break;
             }
         }
+        // The last cumulative weight is the total, and draw < 1.
         let value = chosen
-            .or_else(|| probs.keys().last().cloned())
-            .unwrap_or_else(BigUint::zero);
+            .or_else(|| ordered.last().map(|(v, _)| (*v).clone()))
+            .expect("§4.1: a quantum state has at least one outcome");
         let p = probs.get(&value).copied().unwrap_or(1.0);
         let norm = if p > 0.0 { 1.0 / p.sqrt() } else { 1.0 };
         self.amps = std::mem::take(&mut self.amps)
@@ -263,6 +275,36 @@ impl QuantumState {
             bits.push(if value.bit(i) { '1' } else { '0' });
         }
         (value, bits)
+    }
+}
+
+/// How far from a tie, relative to the total weight, binary64 Born weights
+/// decide a draw. Far above their rounding error, far below any exact gap the
+/// cost of the exact comparison matters for.
+const TIE_BAND: f64 = 1e-9;
+
+impl QuantumState {
+    /// Is the exact Born weight of `outcomes` strictly greater than draw x total?
+    fn exact_weight_above_draw<'a>(
+        &self,
+        wires: &[usize],
+        outcomes: impl Iterator<Item = &'a BigUint>,
+        draw: f64,
+    ) -> bool {
+        let selected = outcomes.collect::<BTreeSet<_>>();
+        let mut below = Exact::zero();
+        let mut total = Exact::zero();
+        for (k, a) in &self.exact {
+            let weight = a.mul(&a.conj());
+            if selected.contains(&Self::extract(k, wires)) {
+                below = below.add(&weight);
+            }
+            total = total.add(&weight);
+        }
+        below
+            .add(&total.mul(&Exact::pair(draw, 0.)).neg())
+            .real_sign()
+            > 0
     }
 }
 

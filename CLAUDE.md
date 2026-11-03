@@ -25,7 +25,7 @@ until bennett-isa-spec is published.
    outside their owned paths. A session that changes nothing writes nothing.
 1. FAIL FAST, FAIL LOUD. Assertions and explicit errors, not silent returns or defaults.
    Unsupported input crashes with context.
-2. ONE IMPLEMENTER PER CHANGE. Review is batched over accumulated diffs, not per change.
+2. ONE IMPLEMENTER PER CHANGE. Review is batched over accumulated diffs, not per change. Review policy: bennett/docs/decisions/2026-11-02-code-quality-policy.md (in force 2026-11-03).
 3. RED-GREEN TDD. Write the test first, watch it fail, write the minimum to pass, refactor.
    Every change has tests; "runs without errors" is not a pass.
 4. EXHAUSTIVE VERIFICATION against bennett-isa-spec's conformance suites for the versions

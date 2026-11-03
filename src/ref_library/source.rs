@@ -1547,8 +1547,11 @@ impl Source {
                 if cleanup.contains(&n) {
                     continue;
                 }
+                // A disjoint structured row keeps its own source traversal,
+                // predicate scopes and nested cleanup carriers. It is outside
+                // this lifetime's inverse chain, just like a disjoint gate.
                 if !(crate::action::is_gate_name(&row.op)
-                    || matches!(row.op.as_str(), "qxor" | "qexch"))
+                    || matches!(row.op.as_str(), "qxor" | "qexch" | "qif" | "qloop"))
                     || !self.read_locations(row)?.is_disjoint(&touched)
                 {
                     safe = false;

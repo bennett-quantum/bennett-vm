@@ -13,8 +13,14 @@ fn expand(
     adjoint: bool,
     choices: &[(&str, CleanupRealisation)],
 ) -> Result<ActionExpansion, String> {
+    let bounds = body
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("qloop "))
+        .map(|row| row.split_whitespace().next().unwrap())
+        .collect::<Vec<_>>()
+        .join(",");
     let functions = format!(
-        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\nx a\ncx a b"
+        "action @root (x:wire[2] mut, z:wire mut) () () () ()\nregs {{}} bounds {{{bounds}}}\n^entry():\n{body}\nperm_action @mix (a:wire[2] mut) () () () ()\n^entry():\ncx a[0] a[1]\nperm_action @pair (a:wire mut, b:wire mut) () () () ()\n^entry():\nx a\ncx a b"
     );
     let (object, ids) = bennett_vm::load(&support::source(&functions), false)?;
     let entries = choices.iter().map(|(point, realisation)| {
@@ -183,13 +189,16 @@ fn restored_memory_values_do_not_restore_produced_cell_versions() {
 #[test]
 fn release_coalescing_requires_the_original_readonly_input_versions() {
     let body = "d = qalloc any 1\ncx x[0] d\nx x[0]\ncx x[0] d\nqfree d";
+    let text = support::source(&format!("action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}"));
+    // This program leaves d=1 for every input. Admission now rejects it
+    // before a partial source trace can be formed; the Rust API must enforce
+    // the same boundary when handed a parsed, unvalidated object.
+    assert!(bennett_vm::load(&text, false).unwrap_err().contains("§6.2"));
+    let object = bennett_vm::object::parse(&text).unwrap();
+    let catalog = Catalog::published().unwrap();
     for adjoint in [false, true] {
-        let e = expand(body, adjoint, &[]).unwrap();
-        assert!(!e.cleanup_pairing_complete);
-        assert!(
-            e.cleanups.is_empty(),
-            "a dirty lifetime is not a proved terminal inverse chain"
-        );
+        let error = catalog.lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[]).unwrap_err();
+        assert!(error.contains("§6.2"), "adjoint={adjoint}: {error}");
     }
 }
 
@@ -226,6 +235,151 @@ fn disjoint_rows_interleave_with_a_terminal_inverse_without_changing_ownership()
                 );
             }
             assert_identity(&e);
+        }
+    }
+}
+
+#[test]
+fn disjoint_structured_rows_retain_source_coordinates_across_cleanup_choices() {
+    let conditional = "qif x[1] {\nx z\nx z\n} {\nx z\nx z\n}";
+    let mut cases = vec![(
+        conditional.to_string(),
+        13,
+        6,
+        7,
+        (1..=5).chain(8..=12).collect::<BTreeSet<_>>(),
+    )];
+    for count in [0, 1, 2, 4] {
+        cases.push((
+            format!("qloop {count} {{\nx z\nx z\n}}"),
+            9,
+            4,
+            5,
+            (1..=3).chain(6..=8).collect(),
+        ));
+    }
+    for (outside, release, first, second, points) in cases {
+        let body = format!("d = qalloc any 1\n{outside}\ncx x[0] d\ncx x[0] d\n{outside}\nqfree d");
+        for adjoint in [false, true] {
+            let carrier = format!("entry:{}", if adjoint { 0 } else { release });
+            let reverse = expand(
+                &body,
+                adjoint,
+                &[(carrier.as_str(), CleanupRealisation::Reverse)],
+            )
+            .unwrap();
+            let fresh = expand(
+                &body,
+                adjoint,
+                &[(carrier.as_str(), CleanupRealisation::Recompute)],
+            )
+            .unwrap();
+            for e in [&reverse, &fresh] {
+                assert!(e.cleanup_pairing_complete, "{outside}, adjoint={adjoint}");
+                assert_eq!(e.cleanups.len(), 1, "{outside}, adjoint={adjoint}");
+                assert_eq!(e.cleanups[0].address.path[0].point, carrier);
+                assert_identity(e);
+            }
+            assert_eq!(fresh.cleanups[0].realisation, CleanupRealisation::Recompute);
+            let outside_trace = |e: &ActionExpansion| {
+                e.leaves
+                    .iter()
+                    .filter_map(|leaf| {
+                        let address = leaf.address.as_ref().unwrap();
+                        let point: usize = address.path[0]
+                            .point
+                            .strip_prefix("entry:")
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        points.contains(&point).then(|| {
+                            (
+                                leaf.operation.clone(),
+                                address.clone(),
+                                leaf.wires.clone(),
+                                leaf.controls.clone(),
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                outside_trace(&reverse),
+                outside_trace(&fresh),
+                "{outside}, adjoint={adjoint}"
+            );
+            let replaced = format!("entry:{}", if adjoint { first } else { second });
+            assert_eq!(
+                reverse
+                    .leaves
+                    .iter()
+                    .filter(|l| l.address.as_ref().unwrap().path[0].point == replaced)
+                    .count(),
+                1
+            );
+            assert!(
+                fresh
+                    .leaves
+                    .iter()
+                    .all(|l| l.address.as_ref().unwrap().path[0].point != replaced)
+            );
+        }
+    }
+}
+
+#[test]
+fn disjoint_loop_cleanups_keep_their_own_carriers_and_choices() {
+    for count in [0, 1, 2] {
+        let body = format!(
+            "d = qalloc any 1\nqloop {count} {{\na = qcopy z\nquncopy z a\n}}\ncx x[0] d\ncx x[0] d\nqloop {count} {{\nb = qcopy z\nquncopy z b\n}}\nqfree d"
+        );
+        for adjoint in [false, true] {
+            let (outer, nested) = if adjoint {
+                ("entry:0", ["entry:2", "entry:7"])
+            } else {
+                ("entry:9", ["entry:3", "entry:8"])
+            };
+            for outer_choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+                for nested_choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
+                    let e = expand(
+                        &body,
+                        adjoint,
+                        &[
+                            (outer, outer_choice),
+                            (nested[0], nested_choice),
+                            (nested[1], nested_choice),
+                        ],
+                    )
+                    .unwrap();
+                    assert!(
+                        e.cleanup_pairing_complete,
+                        "count={count}, adjoint={adjoint}"
+                    );
+                    assert_eq!(e.cleanups.len(), 1 + 2 * count);
+                    for carrier in &e.cleanups {
+                        let point = &carrier.address.path[0];
+                        if point.point == outer {
+                            assert!(point.iteration.is_empty());
+                            assert_eq!(carrier.realisation, outer_choice);
+                        } else {
+                            assert!(nested.contains(&point.point.as_str()));
+                            assert_eq!(point.iteration.len(), 1);
+                            assert!(point.iteration[0] < count);
+                            assert_eq!(carrier.realisation, nested_choice);
+                        }
+                    }
+                    for point in nested {
+                        assert_eq!(
+                            e.cleanups
+                                .iter()
+                                .filter(|c| c.address.path[0].point == point)
+                                .count(),
+                            count
+                        );
+                    }
+                    assert_identity(&e);
+                }
+            }
         }
     }
 }

@@ -125,7 +125,10 @@ fn lifted_constant_spelling() {
     }
     let functions = "oracle @o (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { a:reg[2], b:reg[1] }\n^entry():\nb = lift.const.i1 1\na = lift.const.i2 -2\na = lift.const.i2 3\nlift.retval x";
     for version in VERSIONS {
-        success(&argv(&["check", &object("const-edges", version, functions)]), "interpreter");
+        success(
+            &argv(&["check", &object("const-edges", version, functions)]),
+            "interpreter",
+        );
     }
 }
 
@@ -165,7 +168,11 @@ fn region_call_classical_operand_without_an_instance() {
         let path = object("arg-instance", version, functions);
         for engine in ENGINES {
             let json = success(&argv(&["run-cc", &path, "main", "--arg", "0"]), engine);
-            assert_eq!(json.get("fault").unwrap().as_u64(), Some(4), "{version} {engine}");
+            assert_eq!(
+                json.get("fault").unwrap().as_u64(),
+                Some(4),
+                "{version} {engine}"
+            );
         }
     }
 }

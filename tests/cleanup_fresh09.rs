@@ -735,33 +735,16 @@ fn earlier_conditional_iterations_are_replayed_without_new_cleanup_carriers() {
 #[test]
 fn else_history_does_not_substitute_the_temporarily_inverted_predicate() {
     let functions = "action @root (x:wire mut) (p:wire in) () () ()\nregs {  } bounds {0}\n^entry():\nd = qcopy p\nqif p {\nqloop 0 {\nx x\n}\n} {\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\n}\nquncopy p d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
+    let (object, _) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let selector=json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:5","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
-        let error = Catalog::published()
-            .unwrap()
-            .lower_action_with_cleanup(
-                &object,
-                "root",
-                &Json::Arr(vec![]),
-                adjoint,
-                0,
-                &[CleanupEntry {
-                    selector: Selector::parse(&selector).unwrap(),
-                    realisation: CleanupRealisation::Recompute,
-                }],
-            )
-            .unwrap_err();
-        assert!(
-            error.contains("exact clean-input computing sequence"),
-            "{error}"
-        );
+        let selected = recompute(functions, if adjoint { "entry:4" } else { "entry:5" }, adjoint);
         let normal = Catalog::published()
             .unwrap()
             .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
             .unwrap();
         for bits in 0..4 {
             replay_identity(&normal, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
+            replay_identity(&selected, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
         }
     }
 }
@@ -821,11 +804,11 @@ fn bounded_while_histories_reconstruct_each_executed_prefix() {
 
 #[test]
 fn completed_conditional_inputs_use_their_earlier_predicate_version() {
-    let functions = "action @root (p:wire mut) () () () ()\n^entry():\nd = qalloc any 1\nqif p {\nx d\n} {\n}\nx p\ng = qalloc any 1\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqfree g\nx p\nqif p {\nx d\n} {\n}\nqfree d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
+    let functions = "action @root (p:wire mut) () () () ()\nregs {} bounds {0,0}\n^entry():\nd = qalloc any 1\nqif p {\nx d\n} {\nqloop 0 {\nx d\n}\n}\nx p\ng = qalloc any 1\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqfree g\nx p\nqif p {\nx d\n} {\nqloop 0 {\nx d\n}\n}\nqfree d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
     for adjoint in [false, true] {
         let e = recompute(
             functions,
-            if adjoint { "entry:4" } else { "entry:7" },
+            if adjoint { "entry:6" } else { "entry:9" },
             adjoint,
         );
         for p in [false, true] {
@@ -855,7 +838,10 @@ fn mutable_enclosing_predicates_reconstruct_prior_iteration_arms() {
 #[test]
 fn nonpermutation_external_history_is_never_replayed_as_a_basis_snapshot() {
     let functions = "action @root (x:wire mut) () () () ()\n^entry():\nd = qcopy x\nh x\ng = qalloc any 1\naction_call @mix (d, g) () () ()\nadj action_call @mix (d, g) () () ()\nqfree g\nh x\nquncopy x d\nperm_action @mix (a:wire mut, b:wire mut) () () () ()\n^entry():\ncx a b";
-    let (object, ids) = bennett_vm::load(&support::source(functions), false).unwrap();
+    let text = support::source(functions);
+    assert!(bennett_vm::load(&text, false).unwrap_err().contains("§6.2"));
+    let object = bennett_vm::object::parse(&text).unwrap();
+    let ids = bennett_vm::identity::compute(&object).unwrap();
     let catalog = Catalog::published().unwrap();
     for adjoint in [false, true] {
         let point = if adjoint { "entry:2" } else { "entry:5" };
@@ -872,12 +858,12 @@ fn nonpermutation_external_history_is_never_replayed_as_a_basis_snapshot() {
             }],
         );
         assert!(
-            matches!(result, Err(ref error) if error.contains("exact clean-input computing sequence"))
+            matches!(result, Err(ref error) if error.contains("§6.2"))
         );
         assert!(
             catalog
                 .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
-                .is_ok()
+                .unwrap_err().contains("§6.2")
         );
     }
 }

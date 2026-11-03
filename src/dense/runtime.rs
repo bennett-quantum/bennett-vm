@@ -643,7 +643,7 @@ impl Runtime {
     /// certificates leave undecided are settled by the exact replay when
     /// possible; the replayed value re-anchors the history certificate.
     /// Wires that stay undecided remain materialized (never guessed).
-    pub fn release(&mut self, wires: &[usize]) {
+    pub fn release(&mut self, wires: &[usize]) -> Result<(), String> {
         let mut undecided = vec![];
         for &wire in wires {
             if self.position(wire).is_none() {
@@ -656,13 +656,13 @@ impl Runtime {
             }
         }
         if undecided.is_empty() {
-            return;
+            return Ok(());
         }
         let Some(exact) = self.replay() else {
-            return;
+            return Ok(());
         };
         for wire in undecided {
-            if let Some(v) = exact.constant_value(&[wire]) {
+            if let Some(v) = exact.constant_value(&[wire])? {
                 let value = v.bit(0);
                 self.log.set_anchor(wire, value);
                 assert!(
@@ -672,31 +672,31 @@ impl Runtime {
                 self.remove_constant(wire, value);
             }
         }
+        Ok(())
     }
 
     /// Exact constant value, `None` when some wire certainly varies.
     ///
-    /// # Panics
-    /// When the certificates cannot settle the question (fail loud: a
-    /// numerical engine never guesses a §5.6 cleanliness answer).
-    pub fn constant_value(&self, wires: &[usize]) -> Option<BigUint> {
+    /// Returns a device diagnostic when the certificates cannot settle the
+    /// question; a numerical engine never guesses a §5.6 cleanliness answer.
+    pub fn constant_value(&self, wires: &[usize]) -> Result<Option<BigUint>, String> {
         let mut result = BigUint::zero();
         let mut undecidable = None;
         for (b, &wire) in wires.iter().enumerate() {
             match self.decide(wire) {
                 Decision::Constant(v) => result.set_bit(b, v),
-                Decision::Varies => return None,
+                Decision::Varies => return Ok(None),
                 Decision::Undecidable(why) => {
                     undecidable.get_or_insert(why);
                 }
             }
         }
         let Some(why) = undecidable else {
-            return Some(result);
+            return Ok(Some(result));
         };
         // Exact fallback: the interpreter's own answer on the replayed history.
         if let Some(exact) = self.replay() {
-            let answer = exact.constant_value(wires);
+            let answer = exact.constant_value(wires)?;
             if let Some(v) = &answer {
                 for (b, &wire) in wires.iter().enumerate() {
                     if let Decision::Constant(c) = self.decide(wire) {
@@ -709,14 +709,15 @@ impl Runtime {
                     }
                 }
             }
-            return answer;
+            return Ok(answer);
         }
-        panic!(
-            "dense runtime: cleanliness/constant value is undecidable within the \
+        Err(format!(
+            "§5.6: dense runtime: cleanliness/constant value is undecidable within the \
              numerical error bound ({why}) and the history is not exactly replayable; \
-             the dense engine does not guess exact ISA decisions: rerun with the exact \
-             engine (BENNETT_VM_ENGINE unset)"
-        );
+             exact-operand follow-up: bennett-vm-k8w (exact gate/rotation operands \
+             and replayable map_basis history). Use the exact interpreter \
+             (BENNETT_VM_ENGINE unset)"
+        ))
     }
 
     /// Exact fallback: replay the live operation history through the exact
@@ -742,7 +743,11 @@ impl Runtime {
                 } if op.exact => q.apply1(*target, controls, m.map(|r| r.map(amp))),
                 OpKind::Flip { target, controls } => q.flip(*target, controls),
                 OpKind::Phase { wires, phase } => q.phase_if_all(wires, amp(*phase)),
-                OpKind::Prepare { wires, value } => q.prepare(wires, value),
+                // This is an exact interpreter state, so preparation cannot
+                // encounter a dense undecidable decision.
+                OpKind::Prepare { wires, value } => q
+                    .prepare(wires, value)
+                    .expect("exact replay preparation must be decidable"),
                 OpKind::Measure { wires, draw, value } => {
                     if q.measure(wires, *draw).0 != *value {
                         return None;
@@ -768,12 +773,11 @@ impl Runtime {
         Some(q)
     }
 
-    pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
-        assert!(
-            self.constant_value(wires).is_some_and(|v| v.is_zero()),
-            "dense runtime: preparation requires clean wires"
-        );
-        self.release(wires);
+    pub fn prepare(&mut self, wires: &[usize], value: &BigUint) -> Result<(), String> {
+        if !self.constant_value(wires)?.is_some_and(|v| v.is_zero()) {
+            return Err("§5.6: dense runtime: preparation requires clean wires".into());
+        }
+        self.release(wires)?;
         let ws = sorted(wires);
         self.log.record(
             OpKind::Prepare {
@@ -788,6 +792,7 @@ impl Runtime {
             self.basis.set_bit(w, value.bit(b));
             self.log.set_anchor(w, value.bit(b));
         }
+        Ok(())
     }
 
     pub fn set_state(&mut self, input: BTreeMap<BigUint, (f64, f64)>) {
@@ -1228,14 +1233,10 @@ impl Runtime {
     /// when a distance, rounded down, exceeds the error bounds in total or
     /// on some wire branch.
     ///
-    /// # Panics
-    /// When neither can be established (fail loud, never guess).
-    // Consumed by QuantumState::numerically_equals once bennett-vm-5vj lands
-    // (src/action.rs is outside this change); unit-tested below.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn equals(&self, other: &Self) -> bool {
+    /// Returns a device diagnostic when neither can be established.
+    pub fn equals(&self, other: &Self) -> Result<bool, String> {
         if !self.log.merged && !other.log.merged && self.log.live_seqs() == other.log.live_seqs() {
-            return true;
+            return Ok(true);
         }
         let a = self.snapshot();
         let b = other.snapshot();
@@ -1265,7 +1266,7 @@ impl Runtime {
         let ba = self.state.bound;
         let bb = other.state.bound;
         if lower(total) > ((ba + bb) * (1.0 + 4.0 * U)).next_up() {
-            return false;
+            return Ok(false);
         }
         for (&(w, v), &d) in &per {
             let bound = |r: &Self| match r.position(w) {
@@ -1274,21 +1275,22 @@ impl Runtime {
                 None => 0.0,
             };
             if lower(d) > ((bound(self) + bound(other)) * (1.0 + 4.0 * U)).next_up() {
-                return false;
+                return Ok(false);
             }
         }
         if total == 0.0 && ba == 0.0 && bb == 0.0 {
-            return true;
+            return Ok(true);
         }
         if let (Some(x), Some(y)) = (self.replay(), other.replay()) {
-            return x.exact_equals(&y);
+            return Ok(x.exact_equals(&y));
         }
-        panic!(
-            "dense runtime: exact state equality is undecidable within the numerical \
+        Err(format!(
+            "§7.4: dense runtime: exact state equality is undecidable within the numerical \
              error bound (distance {total:e}, bounds {ba:e} + {bb:e}) and a history is \
-             not exactly replayable; the dense engine does not guess exact ISA \
-             decisions: rerun with the exact engine"
-        );
+             not exactly replayable; exact-operand follow-up: bennett-vm-k8w \
+             (exact gate/rotation operands and replayable map_basis history). \
+             Use the exact interpreter (BENNETT_VM_ENGINE unset)"
+        ))
     }
 
     pub fn snapshot(&self) -> BTreeMap<BigUint, (f64, f64)> {
@@ -1300,6 +1302,7 @@ impl Runtime {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn bound(&self) -> f64 {
         self.state.bound
     }
@@ -1352,8 +1355,8 @@ mod tests {
         let entry = r.clone();
         r.apply1(1, &[], ry(2e-12), true);
         assert!(r.bound() > 1e-12, "the global bound alone cannot refute");
-        assert!(!r.equals(&entry));
-        assert!(!entry.equals(&r));
+        assert!(!r.equals(&entry).unwrap());
+        assert!(!entry.equals(&r).unwrap());
     }
 
     /// An actual inverse of exact-operand gates cancels in the history
@@ -1374,20 +1377,21 @@ mod tests {
         r.apply1(1, &[0], h(), true);
         r.apply1(0, &[], h(), true);
         assert!(r.bound() > 0.0);
-        assert!(r.equals(&entry));
-        assert!(entry.equals(&r));
+        assert!(r.equals(&entry).unwrap());
+        assert!(entry.equals(&r).unwrap());
     }
 
     /// Without a certificate and within the bound: fail loudly.
     #[test]
-    #[should_panic(expected = "undecidable")]
     fn equals_faults_when_undecidable() {
         let mut r = Runtime::new();
         r.apply1(1, &[], h(), true);
         let entry = r.clone();
         r.apply1(0, &[], ry(0.3), true);
         r.apply1(0, &[], ry(-0.3), true);
-        let _ = r.equals(&entry);
+        let error = r.equals(&entry).unwrap_err();
+        assert!(error.contains("undecidable"), "{error}");
+        assert!(error.contains("bennett-vm-k8w"), "{error}");
     }
 
     /// Independent runtimes with identical error-free vectors are equal;
@@ -1398,9 +1402,9 @@ mod tests {
         let mut b = Runtime::new();
         a.flip(4, &[]);
         b.flip(4, &[]);
-        assert!(a.equals(&b));
+        assert!(a.equals(&b).unwrap());
         b.flip(5, &[]);
-        assert!(!a.equals(&b));
+        assert!(!a.equals(&b).unwrap());
     }
 
     /// Branch bounds stay sound: per-wire branch error against an exact

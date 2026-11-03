@@ -322,7 +322,7 @@ fn dense_runtime_virtualizes_wide_constant_registers_and_cleans_inverse() {
     let mut dense = QuantumState::new_dense();
     let wires = dense.alloc_wires(192);
     let value = bennett_vm::bigint::BigUint::from_u64(1).shl(180);
-    dense.prepare(&wires, &value);
+    dense.prepare(&wires, &value).unwrap();
     dense.apply1(129, &[], h_amp());
     dense.flip(2, &[129]);
     let snapshot = dense.amplitudes();
@@ -338,8 +338,8 @@ fn dense_runtime_virtualizes_wide_constant_registers_and_cleans_inverse() {
     );
     dense.flip(2, &[129]);
     dense.apply1(129, &[], h_amp());
-    assert!(dense.is_clean(&[2, 129]));
-    assert_eq!(dense.constant_value(&wires), Some(value));
+    assert!(dense.is_clean(&[2, 129]).unwrap());
+    assert_eq!(dense.constant_value(&wires).unwrap(), Some(value));
     let evidence = dense.simulation_evidence().unwrap();
     assert_eq!(
         evidence.get("kind").and_then(|v| v.as_str()),
@@ -370,7 +370,7 @@ fn dense_runtime_oracle_map_then_gate_and_measurement_reset() {
         let mut d = dense.clone();
         let mut e = exact.clone();
         assert_eq!(d.measure(&[70, 0], draw), e.measure(&[70, 0], draw));
-        assert!(d.is_clean(&[0, 70]));
+        assert!(d.is_clean(&[0, 70]).unwrap());
         let ds = d.amplitudes();
         assert_eq!(ds.len(), 1);
         assert!((ds.values().next().unwrap().0 - 1.0).abs() < 1e-13);
@@ -386,7 +386,7 @@ fn dense_runtime_does_not_erase_underflow_scale_input_support() {
         (bennett_vm::bigint::BigUint::from_u64(1), (1e-200, 0.0)),
     ]));
     assert!(
-        !state.is_clean(&[0]),
+        !state.is_clean(&[0]).unwrap(),
         "squared-probability underflow is not exact zero support"
     );
 }
@@ -446,7 +446,7 @@ fn dense_numerical_equality_does_not_underflow_a_nonzero_distance() {
         (bennett_vm::bigint::BigUint::zero(), (1.0, 0.0)),
         (bennett_vm::bigint::BigUint::from_u64(1), (1e-200, 0.0)),
     ]));
-    assert!(!a.numerically_equals(&b));
+    assert!(!a.numerically_equals(&b).unwrap());
 }
 
 #[test]
@@ -455,7 +455,7 @@ fn dense_measurement_after_actual_inverse_does_not_sample_roundoff_at_draw_zero(
     for basis in 0..4 {
         let mut dense = QuantumState::new_dense();
         dense.alloc_wires(2);
-        dense.prepare(&[0, 1], &BigUint::from_u64(basis));
+        dense.prepare(&[0, 1], &BigUint::from_u64(basis)).unwrap();
         dense.apply1(0, &[], h_amp());
         dense.flip(1, &[0]);
         dense.flip(1, &[0]);

@@ -72,7 +72,7 @@ fn structured_bundle_and_branch_gates_are_native_events() {
         let mut s = QuantumState::new();
         s.set_target(target.clone()).unwrap();
         let ws = s.target_alloc(2, "any").unwrap();
-        s.prepare(&ws, &BigUint::from_u64(bits));
+        s.prepare(&ws, &BigUint::from_u64(bits)).unwrap();
         action::execute_action_inner(
             &obj,
             &mut s,
@@ -85,7 +85,10 @@ fn structured_bundle_and_branch_gates_are_native_events() {
             &[],
         )
         .unwrap();
-        assert_eq!(s.constant_value(&ws), Some(BigUint::from_u64(bits ^ 2)));
+        assert_eq!(
+            s.constant_value(&ws).unwrap(),
+            Some(BigUint::from_u64(bits ^ 2))
+        );
         assert_eq!(s.emitted.len(), 16); // 8 CX, 2 swap, 4 branch X, 2 loop X
         assert!(
             s.emitted
@@ -155,7 +158,7 @@ fn requested_accuracy_executes_selected_native_leaf_and_charges_achieved_error()
     let w = s.target_alloc(1, "any").unwrap()[0];
     s.emit_target_gate_with(x(w), &r("0.01"), None, &[])
         .unwrap();
-    assert_eq!(s.constant_value(&[w]), Some(BigUint::from_u64(1)));
+    assert_eq!(s.constant_value(&[w]).unwrap(), Some(BigUint::from_u64(1)));
     assert_eq!(s.emitted[0].epsilon, r("0.001"));
     assert_eq!(s.target_error(), r("0.001"));
     assert_eq!(
@@ -184,7 +187,7 @@ fn while_flags_follow_listed_order_and_release_capacity() {
         let mut s = QuantumState::new();
         s.set_target(target("[]")).unwrap();
         let ws = s.target_alloc(4, "any").unwrap();
-        s.prepare(&ws[1..], &BigUint::from_u64(bits));
+        s.prepare(&ws[1..], &BigUint::from_u64(bits)).unwrap();
         let before = s.clone();
         action::execute_action_inner(
             &obj,
@@ -200,7 +203,7 @@ fn while_flags_follow_listed_order_and_release_capacity() {
         .unwrap();
         let iterations = (0..3).take_while(|i| bits & (1 << i) != 0).count();
         assert_eq!(
-            s.constant_value(&[ws[0]]),
+            s.constant_value(&[ws[0]]).unwrap(),
             Some(BigUint::from_u64((iterations % 2) as u64))
         );
         assert_eq!(
@@ -334,7 +337,7 @@ fn native_qram_accounts_coherent_memory_without_a_private_comparator_library() {
         let mut s = QuantumState::new();
         s.set_target(t.clone()).unwrap();
         let w = s.target_alloc(9, "any").unwrap();
-        s.prepare(&[w[8]], &BigUint::from_u64(address));
+        s.prepare(&[w[8]], &BigUint::from_u64(address)).unwrap();
         action::execute_action_inner(
             &obj,
             &mut s,
@@ -348,7 +351,7 @@ fn native_qram_accounts_coherent_memory_without_a_private_comparator_library() {
         )
         .unwrap();
         assert_eq!(
-            s.constant_value(&w[..8]),
+            s.constant_value(&w[..8]).unwrap(),
             Some(BigUint::from_u64(if address == 0 { 0xde } else { 0xad }))
         );
         let a = s.target_accounting().unwrap();
@@ -532,7 +535,7 @@ fn action_accuracy_requests_are_consumed_in_generated_order_and_permutations_sta
         &requests,
     )
     .unwrap();
-    assert_eq!(s.constant_value(&w), Some(BigUint::from_u64(3)));
+    assert_eq!(s.constant_value(&w).unwrap(), Some(BigUint::from_u64(3)));
     assert_eq!(s.target_error(), r("0.001"));
     assert_eq!(
         s.target_accounting().unwrap().get("time"),
@@ -659,7 +662,7 @@ fn native_qram_store_exchange_and_load_obey_address_and_inherited_control() {
                         s.set_target(t.clone()).unwrap();
                         let w = s.target_alloc(8, "any").unwrap();
                         let initial = input | (address << 2) | (memory << 3) | (pred << 7);
-                        s.prepare(&w, &BigUint::from_u64(initial));
+                        s.prepare(&w, &BigUint::from_u64(initial)).unwrap();
                         let region = action::RegionWires {
                             a: 1,
                             w: 2,
@@ -691,7 +694,7 @@ fn native_qram_store_exchange_and_load_obey_address_and_inherited_control() {
                             }
                         };
                         assert_eq!(
-                            s.constant_value(&w),
+                            s.constant_value(&w).unwrap(),
                             Some(BigUint::from_u64(
                                 output | (address << 2) | (mem << 3) | (pred << 7)
                             ))

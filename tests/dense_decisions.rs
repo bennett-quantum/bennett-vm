@@ -35,6 +35,273 @@ fn engines() -> [QuantumState; 2] {
     [QuantumState::new(), QuantumState::new_dense()]
 }
 
+fn assert_undecidable(error: &str) {
+    assert!(error.contains("undecidable"), "{error}");
+    assert!(error.contains("bennett-vm-k8w"), "{error}");
+    assert!(error.contains("exact interpreter"), "{error}");
+}
+
+#[test]
+fn equality_certifies_actual_inverse_with_nonzero_bound() {
+    for mut s in engines() {
+        let w = s.alloc_wires(3);
+        s.apply1(w[2], &[], h());
+        let entry = s.clone();
+        s.apply1(w[0], &[], h());
+        s.apply1(w[1], &[w[0]], h());
+        s.apply1(w[0], &[], t_gate());
+        s.apply1(w[0], &[], tdg_gate());
+        s.apply1(w[1], &[w[0]], h());
+        s.apply1(w[0], &[], h());
+        if s.simulation_evidence().is_some() {
+            assert!(bound(&s) > 0.0);
+        }
+        assert_eq!(s.numerically_equals(&entry), Ok(true));
+        assert_eq!(entry.numerically_equals(&s), Ok(true));
+    }
+}
+
+#[test]
+fn symbolic_rotation_reversal_keeps_the_exact_interpreter_capability() {
+    for mut s in engines() {
+        let w = s.alloc_wires(2);
+        s.apply1(w[1], &[], h());
+        let entry = s.clone();
+        for theta in [0.3, -0.3] {
+            s.apply_exact(w[0], &[], bennett_vm::exact::Exact::rotation("ry", theta));
+        }
+        if s.simulation_evidence().is_some() {
+            assert_undecidable(&s.numerically_equals(&entry).unwrap_err());
+            assert_undecidable(&entry.numerically_equals(&s).unwrap_err());
+        } else {
+            assert_eq!(s.numerically_equals(&entry), Ok(true));
+            assert!(s.is_clean(&[w[0]]).unwrap());
+        }
+        // A clone still has an exact shared-history equality certificate,
+        // even when the history contains operands that cannot be replayed.
+        assert_eq!(s.numerically_equals(&s.clone()), Ok(true));
+    }
+}
+
+#[test]
+fn unrecorded_remap_reversal_keeps_the_exact_interpreter_capability() {
+    for mut s in engines() {
+        // GHZ has two exact amplitudes but thirteen packed coordinates,
+        // exceeding the dense remap recording limit (4096 keys).
+        let w = s.alloc_wires(13);
+        s.apply1(w[0], &[], h());
+        for &target in &w[1..] {
+            s.flip(target, &[w[0]]);
+        }
+        let entry = s.clone();
+        for _ in 0..2 {
+            s.map_basis(|key| {
+                let mut out = key.clone();
+                out.set_bit(w[12], !key.bit(w[12]));
+                out
+            });
+        }
+        if s.simulation_evidence().is_some() {
+            assert_undecidable(&s.numerically_equals(&entry).unwrap_err());
+            assert_undecidable(&entry.numerically_equals(&s).unwrap_err());
+        } else {
+            assert_eq!(s.numerically_equals(&entry), Ok(true));
+        }
+    }
+}
+
+#[test]
+fn mixed_dense_exact_equality_returns_a_diagnostic_in_both_directions() {
+    let mut exact = QuantumState::new();
+    let mut dense = QuantumState::new_dense();
+    exact.alloc_wires(1);
+    dense.alloc_wires(1);
+    exact.apply1(0, &[], h());
+    // The same diagnostic snapshot does not make the exact algebraic
+    // amplitude sqrt(1/2) equal to its binary64 projection.
+    dense.set_state(exact.amplitudes());
+    for error in [
+        exact.numerically_equals(&dense).unwrap_err(),
+        dense.numerically_equals(&exact).unwrap_err(),
+    ] {
+        assert_undecidable(&error);
+        assert!(error.contains("mixed dense/exact"), "{error}");
+    }
+}
+
+fn decision_object() -> String {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let raw = std::fs::read_to_string(fixture).unwrap();
+    assert!(raw.contains("h t[0]\ncx t[0] t[1]"));
+    rehash_object(raw.replace("h t[0]\ncx t[0] t[1]", "ry 0.3 t[0]\nry -0.3 t[0]"))
+}
+
+fn rehash_object(mut raw: String) -> String {
+    let object = bennett_vm::object::parse(&raw).unwrap();
+    let ids = bennett_vm::identity::compute(&object).unwrap();
+    for symbol in object.symbols.values() {
+        raw = raw.replace(&symbol.stored_hash, &ids.interface[&symbol.name]);
+    }
+    raw
+}
+
+#[test]
+fn cli_reports_undecidable_decisions_and_interpreter_still_reverses() {
+    let path = std::env::temp_dir().join(format!("dense-decisions-{}.bisa", std::process::id()));
+    std::fs::write(&path, decision_object()).unwrap();
+    for reverse in [false, true] {
+        let run = |dense: bool| {
+            let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"));
+            command.args([
+                if reverse { "reverse" } else { "run-action" },
+                path.to_str().unwrap(),
+                "bell",
+                "--mut",
+                "0",
+            ]);
+            if dense {
+                command.env("BENNETT_VM_ENGINE", "dense");
+            } else {
+                command.env_remove("BENNETT_VM_ENGINE");
+            }
+            command.output().unwrap()
+        };
+        let exact = run(false);
+        assert!(
+            exact.status.success(),
+            "{}",
+            String::from_utf8_lossy(&exact.stderr)
+        );
+        let report = bennett_vm::json::parse(std::str::from_utf8(&exact.stdout).unwrap()).unwrap();
+        if reverse {
+            assert_eq!(report.get("equals_entry"), Some(&Json::Bool(true)));
+        } else {
+            assert_eq!(
+                report.get("mut").unwrap().as_arr().unwrap(),
+                &[Json::u64(0)]
+            );
+        }
+        let dense = run(true);
+        assert_eq!(
+            dense.status.code(),
+            Some(1),
+            "device errors must exit normally"
+        );
+        let error = std::str::from_utf8(&dense.stderr).unwrap();
+        assert_undecidable(error);
+        assert!(
+            error.contains(if reverse { "§7.4" } else { "§5.6" }),
+            "{error}"
+        );
+        assert!(!error.contains("panicked"), "{error}");
+        assert!(
+            dense.stdout.is_empty(),
+            "a fault must not emit a success report"
+        );
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+/// Use a separate process to select the dense engine without racing other
+/// tests that create launch resources. The host survives and receives the
+/// decision diagnostic through bennett_last_error, not panic containment.
+#[test]
+fn launch_abi_reports_undecidable_cleanliness_to_the_host() {
+    const CHILD: &str = "BENNETT_DENSE_DECISION_ABI_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "launch_abi_reports_undecidable_cleanliness_to_the_host",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("BENNETT_VM_ENGINE", "dense")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+        return;
+    }
+    use bennett_vm::launch::*;
+    use std::{ffi::CStr, ptr};
+    let raw = rehash_object(decision_object().replace(
+        "a = qreg.new any 1\nb = qreg.new any 1\nq = qreg.concat a b\nqreg.free q\nret",
+        "a = qreg.new any 2\naction_call @bell (a) () () ()\nret",
+    ));
+    unsafe {
+        let mut program = ptr::null_mut();
+        assert_eq!(
+            bennett_load(raw.as_ptr(), raw.len(), ptr::null(), 0, &mut program),
+            0
+        );
+        let mut args = ptr::null_mut();
+        assert_eq!(bennett_args_new(0, &mut args), 0);
+        let mut run = 0;
+        assert_eq!(
+            bennett_run(
+                program,
+                c"allocation".as_ptr(),
+                args,
+                ptr::null(),
+                0,
+                &mut run
+            ),
+            0
+        );
+        bennett_args_free(args);
+        let mut result = ptr::null_mut();
+        let mut request = ptr::null_mut();
+        assert_eq!(bennett_wait(program, run, &mut result, &mut request), 0);
+        assert!(!result.is_null() && request.is_null());
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(bennett_run_snapshot(program, run, &mut snapshot), 0);
+        let mut len = 0;
+        let bytes = bennett_snapshot_jcs(snapshot, &mut len);
+        let json = bennett_vm::json::parse(
+            std::str::from_utf8(std::slice::from_raw_parts(bytes, len)).unwrap(),
+        )
+        .unwrap();
+        let register = json
+            .get("instances")
+            .unwrap()
+            .as_arr()
+            .unwrap()
+            .iter()
+            .find(|value| value.get("name").and_then(Json::as_str) == Some("a"))
+            .unwrap()
+            .get("values")
+            .unwrap()
+            .as_arr()
+            .unwrap()[0]
+            .get("value")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+        bennett_snapshot_free(snapshot);
+        bennett_result_free(result);
+        assert_eq!(bennett_run_close(program, run), 0);
+        for prepare in [true, false] {
+            let status = if prepare {
+                bennett_qreg_prepare(program, register, [0u8, 0].as_ptr(), 2)
+            } else {
+                bennett_qreg_free(program, register)
+            };
+            assert_eq!(status, 7, "undecidable cleanliness is a register fault");
+            let error = CStr::from_ptr(bennett_last_error()).to_str().unwrap();
+            assert_undecidable(error);
+            assert!(!error.contains("internal panic"), "{error}");
+        }
+        assert_eq!(bennett_unload(program), 0);
+    }
+}
+
 /// 2000 H on wire 0 (identity overall), then ry(2e-12) on a fresh wire 1:
 /// wire 1 has amplitude ~1e-12 on |1>, so it is NOT clean (§5.6 qfree must fault).
 fn dirty(mut s: QuantumState) -> (QuantumState, Vec<usize>) {
@@ -51,16 +318,19 @@ fn d1_dirty_wire_is_not_clean_in_dense() {
     let (e, w) = dirty(QuantumState::new());
     let (d, _) = dirty(QuantumState::new_dense());
     assert!(
-        !e.is_clean(&[w[1]]),
+        !e.is_clean(&[w[1]]).unwrap(),
         "control: exact interpreter sees the residue"
     );
     assert_eq!(
-        d.is_clean(&[w[1]]),
-        e.is_clean(&[w[1]]),
+        d.is_clean(&[w[1]]).unwrap(),
+        e.is_clean(&[w[1]]).unwrap(),
         "dense declares a dirty wire clean (B={:e})",
         bound(&d)
     );
-    assert_eq!(d.constant_value(&[w[1]]), e.constant_value(&[w[1]]));
+    assert_eq!(
+        d.constant_value(&[w[1]]).unwrap(),
+        e.constant_value(&[w[1]]).unwrap()
+    );
 }
 
 #[test]
@@ -68,16 +338,12 @@ fn d1_control_dense_sees_residue_with_small_bound() {
     let mut d = QuantumState::new_dense();
     let w = d.alloc_wires(1);
     d.apply1(w[0], &[], ry(2e-12));
-    assert!(!d.is_clean(&w), "B={:e}", bound(&d));
+    assert!(!d.is_clean(&w).unwrap(), "B={:e}", bound(&d));
 }
 
-/// Reversal equality (`run-action --reverse` equals_entry) is decided in
-/// src/action.rs `QuantumState::numerically_equals`, outside the dense
-/// module; the dense-side exact decision is `dense::Runtime::equals`
-/// (unit-tested in src/dense/runtime.rs). Open until action.rs delegates
-/// to it (bennett-vm-5vj).
+/// Reversal equality (CLI `reverse` equals_entry) delegates to the
+/// dense exact decision rather than accepting a distance inside the bound.
 #[test]
-#[ignore = "bennett-vm-5vj: action.rs numerically_equals must delegate to dense::Runtime::equals (action.rs not owned by bjm-fix)"]
 fn d1b_non_identity_reversal_equals_entry_in_dense() {
     for mut s in engines() {
         let w = s.alloc_wires(2);
@@ -87,7 +353,7 @@ fn d1b_non_identity_reversal_equals_entry_in_dense() {
         let entry = s.clone();
         s.apply1(w[1], &[], ry(2e-12));
         assert!(
-            !s.numerically_equals(&entry),
+            !s.numerically_equals(&entry).unwrap(),
             "state differing by ry(2e-12) reported equal to entry"
         );
     }
@@ -106,7 +372,7 @@ fn d2_amplified_bound_factors_real_superposition() {
         let (v, _) = s.measure(&[w[0]], 0.0);
         assert!(v.is_zero(), "draw 0 selects the unlikely outcome 0");
         s.apply1(w[1], &[], ry(2e-4));
-        s.is_clean(&[w[1]])
+        s.is_clean(&[w[1]]).unwrap()
     });
     assert!(!e);
     assert_eq!(d, e, "dense declares a wire with P(1)=1e-8 clean");
@@ -202,8 +468,8 @@ fn inverse_gate_pair_is_exactly_clean() {
         s.apply1(w[0], &[], t_gate());
         s.apply1(w[0], &[], tdg_gate());
         s.apply1(w[0], &[], h());
-        assert!(s.is_clean(&[w[0]]));
-        assert_eq!(s.constant_value(&[w[0]]), Some(BigUint::zero()));
+        assert!(s.is_clean(&[w[0]]).unwrap());
+        assert_eq!(s.constant_value(&[w[0]]).unwrap(), Some(BigUint::zero()));
     }
 }
 
@@ -221,9 +487,9 @@ fn compute_phase_uncompute_ancilla_is_exactly_clean() {
         s.apply1(w[3], &[w[2]], h());
         s.apply1(w[3], &[w[2]], h());
         s.flip(w[2], &[w[0], w[1]]);
-        assert!(s.is_clean(&[w[2]]), "ancilla after uncompute");
-        assert_eq!(s.constant_value(&[w[2]]), Some(BigUint::zero()));
-        assert!(!s.is_clean(&[w[0]]));
+        assert!(s.is_clean(&[w[2]]).unwrap(), "ancilla after uncompute");
+        assert_eq!(s.constant_value(&[w[2]]).unwrap(), Some(BigUint::zero()));
+        assert!(!s.is_clean(&[w[0]]).unwrap());
     }
 }
 
@@ -231,7 +497,6 @@ fn compute_phase_uncompute_ancilla_is_exactly_clean() {
 /// cancellation through gates whose exact entries the engine never sees)
 /// must fault loudly, not guess either way.
 #[test]
-#[should_panic(expected = "undecidable")]
 fn undecidable_cleanliness_faults_loudly_in_dense() {
     let mut s = QuantumState::new_dense();
     let w = s.alloc_wires(2);
@@ -240,7 +505,27 @@ fn undecidable_cleanliness_faults_loudly_in_dense() {
     s.apply1(w[0], &[w[1]], h());
     s.apply1(w[0], &[w[1]], h());
     s.apply1(w[0], &[], ry(-0.3));
-    let _ = s.is_clean(&[w[0]]);
+    let outcome = std::panic::catch_unwind(|| s.is_clean(&[w[0]]));
+    assert!(
+        outcome.is_ok(),
+        "an undecidable device decision must not panic"
+    );
+    assert_undecidable(&outcome.unwrap().unwrap_err());
+    assert_undecidable(&s.constant_value(&[w[0]]).unwrap_err());
+    let before = s.amplitudes();
+    assert_undecidable(&s.prepare(&[w[0]], &BigUint::zero()).unwrap_err());
+    assert_eq!(
+        s.amplitudes(),
+        before,
+        "failed decisions must preserve state"
+    );
+    // Put the undecidable wire at the allocation suffix; including the
+    // certainly varying control would instead prove the suffix unclean.
+    s.swap(w[0], w[1]);
+    let before = s.amplitudes();
+    assert_undecidable(&s.rewind_clean_wires(w[1]).unwrap_err());
+    assert_eq!(s.amplitudes(), before, "failed rewind must preserve state");
+    assert_eq!(s.wire_count(), 2, "failed rewind must preserve allocation");
 }
 
 /// The same program decided by the exact interpreter (oracle for the case
@@ -255,7 +540,7 @@ fn undecidable_case_has_an_exact_answer_in_the_interpreter() {
     s.apply1(w[0], &[w[1]], h());
     s.apply1(w[0], &[], ry(-0.3));
     assert!(
-        s.is_clean(&[w[0]]),
+        s.is_clean(&[w[0]]).unwrap(),
         "exact dyadic entries cancel: c*s - s*c = 0"
     );
 }
@@ -297,8 +582,6 @@ fn compaction_keeps_small_real_branch_after_unlikely_outcome() {
 fn random_circuits_dense_decisions_match_interpreter_or_fault() {
     let n = 5;
     let (mut agreed, mut undecided) = (0u64, 0u64);
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
     for seed in 0..120u64 {
         let mut x = seed.wrapping_mul(0x9e3779b97f4a7c15) | 1;
         let mut next = move || {
@@ -351,25 +634,21 @@ fn random_circuits_dense_decisions_match_interpreter_or_fault() {
                 break; // sampled outcome differs at a draw boundary (documented caveat)
             }
             for &wire in &w {
-                let exact = e.constant_value(&[wire]);
-                let dense = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    d.constant_value(&[wire])
-                }));
+                let exact = e.constant_value(&[wire]).unwrap();
+                let dense = d.constant_value(&[wire]);
                 match dense {
                     Ok(v) => {
                         assert_eq!(v, exact, "seed {seed}: wire {wire} dense answer differs");
                         agreed += 1;
                     }
-                    Err(p) => {
-                        let msg = p.downcast_ref::<String>().cloned().unwrap_or_default();
-                        assert!(msg.contains("undecidable"), "seed {seed}: {msg}");
+                    Err(msg) => {
+                        assert_undecidable(&msg);
                         undecided += 1;
                     }
                 }
             }
         }
     }
-    std::panic::set_hook(previous);
     eprintln!("dense decisions: {agreed} agreed, {undecided} undecidable");
     assert!(
         agreed > 10 * undecided,
@@ -390,7 +669,7 @@ fn s_gate() -> [[Amp; 2]; 2] {
 fn algebraic_interference_is_decided_by_exact_replay() {
     for mut s in engines() {
         let w = s.alloc_wires(2);
-        s.prepare(&w, &BigUint::zero());
+        s.prepare(&w, &BigUint::zero()).unwrap();
         let (c, t) = (w[0], w[1]);
         s.apply1(c, &[], h());
         s.flip(t, &[c]);
@@ -400,7 +679,7 @@ fn algebraic_interference_is_decided_by_exact_replay() {
         s.apply1(t, &[c], s_gate());
         s.apply1(t, &[c], s_gate());
         s.apply1(c, &[], h());
-        assert_eq!(s.constant_value(&w), Some(BigUint::from_u64(1)));
+        assert_eq!(s.constant_value(&w).unwrap(), Some(BigUint::from_u64(1)));
     }
 }
 
@@ -415,7 +694,7 @@ fn bell_adjoint_reverse_cleanliness_is_decided_exactly() {
         s.apply1(w[0], &[], h());
         s.apply1(w[0], &[], h());
         s.flip(w[1], &[w[0]]);
-        assert!(s.is_clean(&w));
+        assert!(s.is_clean(&w).unwrap());
     }
 }
 
@@ -433,7 +712,7 @@ fn exact_replay_through_a_measurement() {
         s.apply1(w[1], &[w[0]], s_gate());
         s.apply1(w[1], &[w[0]], s_gate());
         s.flip(w[1], &[w[0]]);
-        assert!(s.is_clean(&[w[1]]));
+        assert!(s.is_clean(&[w[1]]).unwrap());
     }
 }
 
@@ -454,9 +733,9 @@ fn remap_compute_uncompute_between_inverse_gates_is_exactly_clean() {
             });
         }
         s.apply1(c, &[], h());
-        assert!(s.is_clean(&w[3..]));
-        assert!(s.is_clean(&[d]));
-        assert!(s.is_clean(&[c]));
+        assert!(s.is_clean(&w[3..]).unwrap());
+        assert!(s.is_clean(&[d]).unwrap());
+        assert!(s.is_clean(&[c]).unwrap());
     }
 }
 
@@ -488,7 +767,7 @@ fn support_restricted_remaps_compose_and_release_factors_exactly() {
         });
         s.map_basis(xor);
         s.apply1(c, &[], h());
-        assert!(s.is_clean(&[c, k]));
+        assert!(s.is_clean(&[c, k]).unwrap());
         s.rewind_clean_wires(c).expect("released wires are clean");
         let snap = s.amplitudes();
         assert_eq!(snap.len(), 1, "released wires keep no residue: {snap:?}");

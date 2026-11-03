@@ -8,7 +8,7 @@ fn hadamard_round_trip_has_exact_support() {
     for _ in 0..2 {
         s.apply1(w, &[], [[(h, 0.), (h, 0.)], [(h, 0.), (-h, 0.)]]);
     }
-    assert!(s.is_clean(&[w]));
+    assert!(s.is_clean(&[w]).unwrap());
     assert_eq!(s.amps.get(&BigUint::zero()), Some(&(1., 0.)));
 }
 #[test]
@@ -86,7 +86,7 @@ fn rotation_inverse_clears_workspace_exactly() {
         s.apply_exact(w, &[], Exact::rotation(axis, 0.123));
         s.apply_exact(w, &[], Exact::rotation(axis, -0.123));
     }
-    assert!(s.is_clean(&[w]));
+    assert!(s.is_clean(&[w]).unwrap());
     assert_eq!(s.amps.get(&BigUint::zero()), Some(&(1., 0.)));
 }
 #[test]

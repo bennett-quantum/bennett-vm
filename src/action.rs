@@ -91,29 +91,20 @@ impl QuantumState {
     pub fn simulation_evidence(&self) -> Option<crate::json::Json> {
         self.dense.as_ref().map(|d| d.evidence(self.next_wire))
     }
-    pub fn numerically_equals(&self, other: &Self) -> bool {
-        if self.dense.is_none() && other.dense.is_none() {
-            return self.exact_equals(other);
+    /// Exact decision for execution, including numerical backends. An error
+    /// means the available certificates cannot decide; it is never equality.
+    pub fn numerically_equals(&self, other: &Self) -> Result<bool, String> {
+        match (&self.dense, &other.dense) {
+            (Some(a), Some(b)) => a.equals(b),
+            (None, None) => Ok(self.exact_equals(other)),
+            _ => Err(
+                "§7.4: mixed dense/exact equality is undecidable without an exact \
+                comparison certificate; a binary64 snapshot of an exact state is not \
+                a zero-error exact operand. Exact-operand follow-up: bennett-vm-k8w; \
+                use the exact interpreter (BENNETT_VM_ENGINE unset)"
+                    .into(),
+            ),
         }
-        let mut a = self.amplitudes();
-        let b = other.amplitudes();
-        let mut distance: f64 = 0.0;
-        let terms = a.len() + b.len();
-        for (k, (br, bi)) in b {
-            let (ar, ai) = a.remove(&k).unwrap_or((0.0, 0.0));
-            distance = distance.hypot(ar - br).hypot(ai - bi);
-        }
-        for (r, i) in a.values() {
-            distance = distance.hypot(*r).hypot(*i);
-        }
-        let bound = self.dense.as_ref().map_or(0.0, |d| d.bound())
-            + other.dense.as_ref().map_or(0.0, |d| d.bound());
-        let upper = if distance == 0.0 {
-            0.0
-        } else {
-            (distance * (1.0 + 8.0 * terms as f64 * f64::EPSILON)).next_up()
-        };
-        upper <= bound
     }
     pub fn wire_count(&self) -> usize {
         self.next_wire
@@ -123,14 +114,14 @@ impl QuantumState {
     pub fn rewind_clean_wires(&mut self, boundary: usize) -> Result<(), String> {
         if self.dense.is_some() {
             if boundary > self.next_wire
-                || !self.is_clean(&(boundary..self.next_wire).collect::<Vec<_>>())
+                || !self.is_clean(&(boundary..self.next_wire).collect::<Vec<_>>())?
             {
                 return Err("§7.4: inverse left a released wire unclean".into());
             }
             self.dense
                 .as_mut()
                 .unwrap()
-                .release(&(boundary..self.next_wire).collect::<Vec<_>>());
+                .release(&(boundary..self.next_wire).collect::<Vec<_>>())?;
             self.next_wire = boundary;
             return Ok(());
         }
@@ -176,10 +167,9 @@ impl QuantumState {
         self.dense.is_none() && other.dense.is_none() && self.exact == other.exact
     }
     /// Set basis bits on wires that start at zero in every component.
-    pub fn prepare(&mut self, wires: &[usize], value: &BigUint) {
+    pub fn prepare(&mut self, wires: &[usize], value: &BigUint) -> Result<(), String> {
         if let Some(dense) = &mut self.dense {
-            dense.prepare(wires, value);
-            return;
+            return dense.prepare(wires, value);
         }
         self.exact = std::mem::take(&mut self.exact)
             .into_iter()
@@ -193,6 +183,7 @@ impl QuantumState {
             })
             .collect();
         self.refresh();
+        Ok(())
     }
     pub fn extract(key: &BigUint, wires: &[usize]) -> BigUint {
         let mut v = BigUint::zero();
@@ -203,7 +194,7 @@ impl QuantumState {
         }
         v
     }
-    pub fn constant_value(&self, wires: &[usize]) -> Option<BigUint> {
+    pub fn constant_value(&self, wires: &[usize]) -> Result<Option<BigUint>, String> {
         if let Some(dense) = &self.dense {
             return dense.constant_value(wires);
         }
@@ -213,13 +204,13 @@ impl QuantumState {
             match &seen {
                 None => seen = Some(v),
                 Some(prev) if *prev == v => {}
-                _ => return None,
+                _ => return Ok(None),
             }
         }
-        seen
+        Ok(seen)
     }
-    pub fn is_clean(&self, wires: &[usize]) -> bool {
-        self.constant_value(wires) == Some(BigUint::zero())
+    pub fn is_clean(&self, wires: &[usize]) -> Result<bool, String> {
+        Ok(self.constant_value(wires)? == Some(BigUint::zero()))
     }
     /// Controlled single-qubit matrix `[[a,b],[c,d]]`.
     pub fn apply1(&mut self, target: usize, controls: &[usize], m: [[Amp; 2]; 2]) {
@@ -986,7 +977,7 @@ impl<'o> Exec<'o> {
             let image = self.local_images.get(&name).cloned().unwrap_or_default();
             for (i, cell) in region.cells.iter().enumerate().rev() {
                 let want = &image[i];
-                let got = self.state.constant_value(cell);
+                let got = self.state.constant_value(cell)?;
                 if got.as_ref() != Some(want) {
                     return Err(diag(
                         "5.6",
@@ -1003,7 +994,7 @@ impl<'o> Exec<'o> {
                 }
             }
             for cell in &region.cells {
-                self.state.target_release(cell);
+                self.state.target_release(cell)?;
             }
             self.regions.remove(&name);
         }
@@ -1069,7 +1060,7 @@ impl<'o> Exec<'o> {
             "qfree" | "qreturn" => {
                 let name = base_name(&ins.operands[0]);
                 let wires = self.bundle(&name)?;
-                if op == "qfree" && !self.state.is_clean(&wires) {
+                if op == "qfree" && !self.state.is_clean(&wires)? {
                     let rule = "5.6";
                     return Err(diag(
                         rule,
@@ -1080,7 +1071,7 @@ impl<'o> Exec<'o> {
                     ));
                 }
                 if op == "qfree" {
-                    self.state.target_release(&wires);
+                    self.state.target_release(&wires)?;
                 }
                 if op == "qreturn" {
                     for w in &wires {
@@ -1102,7 +1093,7 @@ impl<'o> Exec<'o> {
                 let dst_name = base_name(&ins.operands[1]);
                 let dst = self.bundle(&dst_name)?;
                 self.xor_bundle(&src, &dst)?;
-                if !self.state.is_clean(&dst) {
+                if !self.state.is_clean(&dst)? {
                     return Err(diag(
                         "5.6",
                         format!(
@@ -1111,7 +1102,7 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
-                self.state.target_release(&dst);
+                self.state.target_release(&dst)?;
                 self.bundles.remove(&dst_name);
                 Ok(())
             }
@@ -1150,7 +1141,7 @@ impl<'o> Exec<'o> {
                 let dname = base_name(&ins.operands[2]);
                 let dst = self.bundle(&dname)?;
                 self.region_dispatch(&region, &addr, &dst, "load")?;
-                if !self.state.is_clean(&dst) {
+                if !self.state.is_clean(&dst)? {
                     return Err(diag(
                         "5.6",
                         format!(
@@ -1159,7 +1150,7 @@ impl<'o> Exec<'o> {
                         ),
                     ));
                 }
-                self.state.target_release(&dst);
+                self.state.target_release(&dst)?;
                 self.bundles.remove(&dname);
                 Ok(())
             }
@@ -1278,7 +1269,7 @@ impl<'o> Exec<'o> {
         if n > 0 {
             self.implicit_gate("cx", &[cond[0]], &[flags[0]], &pred)?;
         }
-        if !self.state.is_clean(&flags) {
+        if !self.state.is_clean(&flags)? {
             return Err(diag(
                 "4.6",
                 format!(
@@ -1287,7 +1278,7 @@ impl<'o> Exec<'o> {
                 ),
             ));
         }
-        self.state.target_release(&flags);
+        self.state.target_release(&flags)?;
         Ok(())
     }
 }
@@ -1521,7 +1512,7 @@ impl<'o> Exec<'o> {
                 nk
             });
             call(self, &ginv)?;
-            if !self.state.is_clean(&t) || !self.state.is_clean(&f) {
+            if !self.state.is_clean(&t)? || !self.state.is_clean(&f)? {
                 return Err(diag(
                     "4.5",
                     format!(
@@ -2049,10 +2040,10 @@ pub fn execute_perm_basis(
     let mut_bundles: Vec<Vec<usize>> = sig.muts.iter().map(|w| state.alloc_wires(*w)).collect();
     let in_bundles: Vec<Vec<usize>> = sig.ins.iter().map(|w| state.alloc_wires(*w)).collect();
     for (b, v) in mut_bundles.iter().zip(muts.iter()) {
-        state.prepare(b, v);
+        state.prepare(b, v)?;
     }
     for (b, v) in in_bundles.iter().zip(ins_v.iter()) {
-        state.prepare(b, v);
+        state.prepare(b, v)?;
     }
     let mut regions = Vec::new();
     for (ri, (a, w, _role)) in sig.mem.iter().enumerate() {
@@ -2062,7 +2053,7 @@ pub fn execute_perm_basis(
             if let Some(v) = mems.get(ri).and_then(|m| m.get(ci))
                 && !v.is_zero()
             {
-                state.prepare(&wires, v);
+                state.prepare(&wires, v)?;
             }
             cells.push(wires);
         }
@@ -2136,13 +2127,14 @@ impl QuantumState {
         }
         Ok(wires)
     }
-    pub(crate) fn target_release(&mut self, wires: &[usize]) {
+    pub(crate) fn target_release(&mut self, wires: &[usize]) -> Result<(), String> {
         if let Some(dense) = &mut self.dense {
-            dense.release(wires);
+            dense.release(wires)?;
         }
         for w in wires {
             self.wire_classes.remove(w);
         }
+        Ok(())
     }
     /// Install a target before allocating any live simulator wires.
     pub fn set_target(&mut self, target: crate::target::Target) -> Result<(), String> {
@@ -2316,10 +2308,10 @@ impl QuantumState {
             self.emitted.push(leaf);
         }
         if !lowered.dirty {
-            if !self.is_clean(&anc) {
+            if !self.is_clean(&anc)? {
                 return Err("§8.3: target scheme left clean ancillae nonzero".into());
             }
-            self.target_release(&anc);
+            self.target_release(&anc)?;
         }
         Ok(())
     }

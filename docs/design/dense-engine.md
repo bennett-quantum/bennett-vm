@@ -240,10 +240,11 @@ undecided questions. `release` uses the same replay for released wires the
 certificates leave undecided, and re-anchors their history certificate.
 This keeps a residue that is exactly zero from staying materialized on a
 released wire, where a projected report would otherwise show it. Every
-other case is undecidable: `constant_value`,
-and so `is_clean`, `qfree`, region release and rewind, panics with
-"undecidable" and asks for the exact engine. Compaction before
-measurement and remaps, and release, factor only certified constants, so
+other case is undecidable: `constant_value` returns an
+"undecidable" error naming the exact-operand follow-up, bennett-vm-k8w,
+and the exact interpreter. `is_clean`, `qfree`, region cleanup and rewind
+propagate that error. Compaction before measurement and remaps, and
+release, factor only certified constants, so
 they never delete amplitude the exact state has. Dropping the computed
 residue of a certified constant is a contraction (the exact state has no
 mass there) and is not charged to B; `numerical_projections` counts such
@@ -262,10 +263,15 @@ actual inverse of exact operands certifies equality although B > 0) or by
 two error-free equal vectors. It is false when the distance, rounded
 down, exceeds the total or a per-wire-branch error bound. Otherwise it
 compares the two exact replays when both histories are replayable, and
-fails with a loud "undecidable" panic when they are not. `QuantumState::numerically_equals` in `action.rs`
-still compares against B_a + B_b and must delegate to it (bennett-vm-5vj,
-test `d1b` ignored on that bead). Snapshot/transaction cloning at VM API
-boundaries retains its existing semantics and can copy a state; the
+returns a loud "undecidable" error when they are not.
+`QuantumState::numerically_equals` delegates dense/dense comparisons to
+this exact decision (bennett-vm-5vj); test `d1b` runs unignored and agrees
+with the interpreter that the tiny nonzero rotation changes the state.
+Exact/exact comparisons retain symbolic equality. Mixed dense/exact
+comparisons return an explicit diagnostic in either direction: a binary64
+snapshot of an exact algebraic state cannot serve as a zero-error operand
+without an exact comparison certificate. Snapshot/transaction cloning at
+VM API boundaries retains its existing semantics and can copy a state; the
 one-vector memory statement applies to an individual state and its kernels
 (plus the 1/128-size support bitmap), not arbitrary caller-requested
 snapshots or VM transactions.
@@ -285,16 +291,31 @@ certificate needs shared ancestry inside one process; a state serialized
 across a host/device boundary has no history and falls back to numerical
 refutation or a loud fault, never a guess.
 
-One decision here would need a change for a mixed fat object: an
-undecidable cleanliness or equality answer is currently a Rust panic,
-because `QuantumState::constant_value`/`is_clean`/`numerically_equals`
-(src/action.rs) return `Option`/`bool`. Inside a native host binary that
-panic would abort the host process. The exact change is to return a
-`Result` from those `QuantumState` methods, so the launch ABI reports a
-device fault (a §5.6 undecidable diagnostic) to the host. That belongs
-with the action.rs plumbing in bennett-vm-5vj and bennett-vm-k8w. Engine
-selection through the process-wide `BENNETT_VM_ENGINE` predates this fix.
-A fat object would need a per-launch selection in the launch ABI.
+`QuantumState::constant_value`/`is_clean`/`numerically_equals` now return
+`Result`, preserving the undecidable diagnostic through action execution,
+CC, rewind, reports and the launch ABI. Preparation and release propagate
+the same decision errors. At `bennett_qreg_prepare`/`bennett_qreg_free`, an
+undecidable cleanliness answer returns `E_QREG_NOT_CLEAN` with its detailed
+diagnostic in `bennett_last_error`; it does not invoke the ABI's internal
+panic containment. A standalone CLI fault exits normally with the
+diagnostic and emits no success report. This keeps a native host binary
+alive while the marked device invocation reports its fault. Tests in
+`tests/dense_decisions.rs` exercise these boundaries and the unignored
+reversal probe.
+
+The mixed fat object remains an ordinary native host binary with ISA
+objects only for marked device modules and their linked closures (North
+Star §§2, 3.3, 4.4); these decisions require no whole-host lowering.
+Rotation reversals and remaps beyond the recorded domain remain exact
+interpreter capabilities. The tests
+`symbolic_rotation_reversal_keeps_the_exact_interpreter_capability` and
+`unrecorded_remap_reversal_keeps_the_exact_interpreter_capability` assert
+the interpreter's exact equality and the dense engine's explicit error.
+Passing exact gate/rotation operands and preserving replayable remap
+history is the existing open obligation bennett-vm-k8w, not a restriction
+of the machine's scope. Engine selection through the process-wide
+`BENNETT_VM_ENGINE` predates this fix. A fat object would need a per-launch
+selection in the launch ABI.
 
 ## Floating-point bounds
 

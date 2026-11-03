@@ -96,12 +96,12 @@ fn state_json(s: &QuantumState, n: usize) -> Json {
             .collect(),
     )
 }
-fn values(s: &QuantumState, bs: &[Vec<usize>]) -> Json {
-    Json::Arr(
+fn values(s: &QuantumState, bs: &[Vec<usize>]) -> Result<Json, String> {
+    Ok(Json::Arr(
         bs.iter()
-            .map(|b| s.constant_value(b).map_or(Json::Null, |v| Json::u(&v)))
-            .collect(),
-    )
+            .map(|b| Ok(s.constant_value(b)?.map_or(Json::Null, |v| Json::u(&v))))
+            .collect::<Result<_, String>>()?,
+    ))
 }
 fn parse_bits(s: &str, n: usize) -> Result<BigUint, String> {
     if s.len() != n || !s.bytes().all(|c| c == b'0' || c == b'1') {
@@ -148,7 +148,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
         return Err("§14.2: supply exactly one of --mut, --basis, --state".into());
     }
     if let Some(bs) = o.one("basis")? {
-        s.prepare(&(0..n).collect::<Vec<_>>(), &parse_bits(bs, n)?);
+        s.prepare(&(0..n).collect::<Vec<_>>(), &parse_bits(bs, n)?)?;
     } else if let Some(st) = o.one("state")? {
         let mut amps = BTreeMap::new();
         for term in st.split(';') {
@@ -187,7 +187,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
                 }
                 for (v, b) in vs.iter().zip(bundles) {
                     let v = cliargs::bind_int(v, b.len(), "wire bundle")?;
-                    s.prepare(b, &v);
+                    s.prepare(b, &v)?;
                 }
             }
         }
@@ -209,7 +209,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
                     v = v.add(&BigUint::from_u64(*b as u64).shl(i * 8));
                 }
                 for (i, c) in r.cells.iter().enumerate() {
-                    s.prepare(c, &v.shr(i * r.w.div_ceil(8) * 8).mask(r.w));
+                    s.prepare(c, &v.shr(i * r.w.div_ceil(8) * 8).mask(r.w))?;
                 }
             }
         }
@@ -253,7 +253,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
         &[],
         &pool,
     )?;
-    if !s.is_clean(&pool) {
+    if !s.is_clean(&pool)? {
         return Err("§5.6: borrowed pool was not returned to its entry state".into());
     }
     let forward = state_json(&s, n);
@@ -275,7 +275,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
             &[],
             &pool,
         )?;
-        let eq = s.numerically_equals(&entry);
+        let eq = s.numerically_equals(&entry)?;
         fields.extend([
             ("equals_entry", Json::Bool(eq)),
             (
@@ -295,8 +295,8 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     }
     fields.extend([
         ("state", state_json(&s, n)),
-        ("mut", values(&s, &muts)),
-        ("in", values(&s, &ins)),
+        ("mut", values(&s, &muts)?),
+        ("in", values(&s, &ins)?),
     ]);
     if !reverse {
         fields.push((
@@ -305,8 +305,8 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
                 f.lists[2]
                     .iter()
                     .zip(&regions)
-                    .map(|(p, r)| (p.name.clone(), values(&s, &r.cells)))
-                    .collect(),
+                    .map(|(p, r)| Ok((p.name.clone(), values(&s, &r.cells)?)))
+                    .collect::<Result<_, String>>()?,
             ),
         ));
     }

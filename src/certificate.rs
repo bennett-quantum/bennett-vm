@@ -301,7 +301,7 @@ fn execute(
     let mut s = QuantumState::new();
     let ws: Vec<_> = d.widths.iter().map(|n| s.alloc_wires(*n)).collect();
     for (w, v) in ws.iter().zip(vals) {
-        s.prepare(w, v);
+        s.prepare(w, v)?;
     }
     let regs: Vec<_> = d
         .regions
@@ -334,7 +334,7 @@ fn execute(
     let out: Vec<_> = ws
         .iter()
         .map(|w| {
-            s.constant_value(w)
+            s.constant_value(w)?
                 .ok_or_else(|| err("full tuple is not basis definite"))
         })
         .collect::<Result<_, _>>()?;
@@ -348,7 +348,7 @@ fn execute(
             key.set_bit(*w, v.bit(i));
         }
     }
-    expected.prepare(&all, &key);
+    expected.prepare(&all, &key)?;
     if !s.exact_equals(&expected) {
         return Err(err(
             "full tuple has phase or residual workspace/entanglement; not T3",

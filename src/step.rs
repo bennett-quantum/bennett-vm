@@ -737,14 +737,14 @@ impl<'a> Machine<'a> {
             let mb: Vec<_> = sig.muts.iter().map(|w| s.alloc_wires(*w)).collect();
             let ib: Vec<_> = sig.ins.iter().map(|w| s.alloc_wires(*w)).collect();
             for (b, v) in mb.iter().zip(&muts).chain(ib.iter().zip(&inputs)) {
-                s.prepare(b, v);
+                s.prepare(b, v)?;
             }
             let mut rs = vec![];
             for ((a, w, _), vs) in sig.mem.iter().zip(&regions) {
                 let mut cells = vec![];
                 for v in vs {
                     let b = s.alloc_wires(*w);
-                    s.prepare(&b, v);
+                    s.prepare(&b, v)?;
                     cells.push(b);
                 }
                 rs.push(crate::action::RegionWires {
@@ -769,13 +769,13 @@ impl<'a> Machine<'a> {
             for (n, b) in names.iter().zip(&mb) {
                 self.state.set(
                     Self::loc(f, n),
-                    s.constant_value(b)
+                    s.constant_value(b)?
                         .ok_or("§5.3: permutation produced superposition")?,
                 );
             }
             for ((base, w), r) in bases.iter().zip(&rs) {
                 for (j, b) in r.cells.iter().enumerate() {
-                    let v = s.constant_value(b).ok_or("§5.3: non-basis region")?;
+                    let v = s.constant_value(b)?.ok_or("§5.3: non-basis region")?;
                     for z in 0..w / 8 {
                         self.state
                             .set(Key::Mem(base.add(&u(j * w / 8 + z))), v.shr(z * 8).mask(8));

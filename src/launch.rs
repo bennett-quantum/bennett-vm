@@ -382,10 +382,10 @@ pub unsafe extern "C" fn bennett_qreg_prepare(
         if p.resources.reg_width(q) != Some(nbits) || bs.iter().any(|b| *b > 1) {
             return Err(error(ARG, "§10: register width/bits mismatch"));
         }
-        if !p.resources.clean(q) {
+        if !p.resources.clean(q).map_err(|e| error(7, e))? {
             return Err(error(7, "§10: E_QREG_NOT_CLEAN"));
         }
-        p.resources.prepare(q, bs);
+        p.resources.prepare(q, bs).map_err(|e| error(7, e))?;
         Ok(())
     })
 }
@@ -397,10 +397,10 @@ pub unsafe extern "C" fn bennett_qreg_free(p: *mut bennett_program_t, q: u64) ->
         if p.resources.reg_width(q).is_none() {
             return Err(error(ARG, "§10: invalid register"));
         }
-        if !p.resources.clean(q) {
+        if !p.resources.clean(q).map_err(|e| error(7, e))? {
             return Err(error(7, "§10: E_QREG_NOT_CLEAN"));
         }
-        p.resources.free(q);
+        p.resources.free(q).map_err(|e| error(7, e))?;
         Ok(())
     })
 }

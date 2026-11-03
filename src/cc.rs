@@ -952,10 +952,10 @@ impl Machine {
                 "qreg.free" => {
                     let id = get!(self.id(&xs[0]));
                     let h = self.data.handle(id).unwrap();
-                    if h.parent.is_some() || !self.quantum.is_clean(&h.wires) {
+                    if h.parent.is_some() || !self.quantum.is_clean(&h.wires)? {
                         return Ok(Some(4));
                     }
-                    self.quantum.target_release(&h.wires.clone());
+                    self.quantum.target_release(&h.wires.clone())?;
                     self.data.handles.get_mut(&id).unwrap().live = false;
                 }
                 "qreg.slice" => {
@@ -998,7 +998,7 @@ impl Machine {
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
                 let (v, bits) = self.quantum.measure(&ws, draw);
-                self.quantum.target_release(&ws);
+                self.quantum.target_release(&ws)?;
                 self.data.handles.get_mut(&id).unwrap().live = false;
                 self.data.measurements.push(Json::obj(vec![
                     ("bits", Json::Str(bits)),
@@ -1434,7 +1434,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                 for (i, b) in bits.bytes().enumerate() {
                     v.set_bit(i, b == b'1');
                 }
-                quantum.prepare(&ws, &v);
+                quantum.prepare(&ws, &v)?;
                 let id = data.new_handle(ws, None);
                 Value::Qreg(id)
             }
@@ -1813,21 +1813,24 @@ impl Resources {
     pub(crate) fn reg_width(&self, id: u64) -> Option<usize> {
         self.data.handle(id).ok().map(|h| h.wires.len())
     }
-    pub(crate) fn clean(&self, id: u64) -> bool {
-        self.data
+    pub(crate) fn clean(&self, id: u64) -> Result<bool, String> {
+        let h = self
+            .data
             .handle(id)
-            .is_ok_and(|h| self.quantum.is_clean(&h.wires))
+            .map_err(|code| format!("§10: invalid register (fault {code})"))?;
+        self.quantum.is_clean(&h.wires)
     }
-    pub(crate) fn prepare(&mut self, id: u64, bits: &[u8]) {
+    pub(crate) fn prepare(&mut self, id: u64, bits: &[u8]) -> Result<(), String> {
         let mut v = BigUint::zero();
         for (i, b) in bits.iter().enumerate() {
             v.set_bit(i, *b != 0);
         }
-        self.quantum.prepare(&self.data.handles[&id].wires, &v);
+        self.quantum.prepare(&self.data.handles[&id].wires, &v)
     }
-    pub(crate) fn free(&mut self, id: u64) {
-        self.quantum.target_release(&self.data.handles[&id].wires);
+    pub(crate) fn free(&mut self, id: u64) -> Result<(), String> {
+        self.quantum.target_release(&self.data.handles[&id].wires)?;
         self.data.handles.get_mut(&id).unwrap().live = false;
+        Ok(())
     }
 }
 #[derive(Clone)]

@@ -189,7 +189,9 @@ fn restored_memory_values_do_not_restore_produced_cell_versions() {
 #[test]
 fn release_coalescing_requires_the_original_readonly_input_versions() {
     let body = "d = qalloc any 1\ncx x[0] d\nx x[0]\ncx x[0] d\nqfree d";
-    let text = support::source(&format!("action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}"));
+    let text = support::source(&format!(
+        "action @root (x:wire[2] mut, z:wire mut) () () () ()\n^entry():\n{body}"
+    ));
     // This program leaves d=1 for every input. Admission now rejects it
     // before a partial source trace can be formed; the Rust API must enforce
     // the same boundary when handed a parsed, unvalidated object.
@@ -197,7 +199,9 @@ fn release_coalescing_requires_the_original_readonly_input_versions() {
     let object = bennett_vm::object::parse(&text).unwrap();
     let catalog = Catalog::published().unwrap();
     for adjoint in [false, true] {
-        let error = catalog.lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[]).unwrap_err();
+        let error = catalog
+            .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
+            .unwrap_err();
         assert!(error.contains("§6.2"), "adjoint={adjoint}: {error}");
     }
 }

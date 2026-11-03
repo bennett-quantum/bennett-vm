@@ -737,14 +737,17 @@ fn else_history_does_not_substitute_the_temporarily_inverted_predicate() {
     let functions = "action @root (x:wire mut) (p:wire in) () () ()\nregs {  } bounds {0}\n^entry():\nd = qcopy p\nqif p {\nqloop 0 {\nx x\n}\n} {\naction_call @mix (d) (x) () ()\nadj action_call @mix (d) (x) () ()\n}\nquncopy p d\nperm_action @mix (a:wire mut) (b:wire in) () () ()\n^entry():\ncx b a";
     let (object, _) = bennett_vm::load(&support::source(functions), false).unwrap();
     for adjoint in [false, true] {
-        let selected = recompute(functions, if adjoint { "entry:4" } else { "entry:5" }, adjoint);
+        let selected = recompute(functions, "entry:5", adjoint);
         let normal = Catalog::published()
             .unwrap()
             .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
             .unwrap();
         for bits in 0..4 {
             replay_identity(&normal, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
-            replay_identity(&selected, &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)]);
+            replay_identity(
+                &selected,
+                &[("x[0]", bits & 1 != 0), ("p[0]", bits & 2 != 0)],
+            );
         }
     }
 }
@@ -857,13 +860,12 @@ fn nonpermutation_external_history_is_never_replayed_as_a_basis_snapshot() {
                 realisation: CleanupRealisation::Recompute,
             }],
         );
-        assert!(
-            matches!(result, Err(ref error) if error.contains("§6.2"))
-        );
+        assert!(matches!(result, Err(ref error) if error.contains("§6.2")));
         assert!(
             catalog
                 .lower_action_with_cleanup(&object, "root", &Json::Arr(vec![]), adjoint, 0, &[])
-                .unwrap_err().contains("§6.2")
+                .unwrap_err()
+                .contains("§6.2")
         );
     }
 }

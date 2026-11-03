@@ -13,6 +13,10 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 
 type Key = (u64, String);
+// Entry arguments use row zero. Executed definitions use their retained
+// history row and position within that row, independent of later cancellation.
+type InstanceId = (usize, usize);
+type Environment = Map<Key, Map<InstanceId, Value>>;
 #[derive(Clone, Debug, PartialEq)]
 struct Allocation {
     base: BigUint,
@@ -62,7 +66,7 @@ struct Frame {
     classes_after: Map<usize, String>,
     wire_boundary: usize,
     region: Option<Invocation>,
-    definitions: Vec<(Key, usize)>,
+    definitions: Vec<(Key, InstanceId)>,
     next_activation: u64,
     memory_keys: BTreeSet<BigUint>,
     data: Option<Data>,
@@ -89,7 +93,7 @@ struct Machine {
     pending_region: Option<Invocation>,
     obj: std::sync::Arc<Object>,
     data: Data,
-    env: Map<Key, Seq<Value>>,
+    env: Environment,
     stack: Seq<Activation>,
     history: Seq<Frame>,
     segments: Seq<Segment>,
@@ -104,7 +108,7 @@ struct Machine {
     draw_pos: usize,
     replies: Seq<Json>,
     reply_pos: usize,
-    definitions: Vec<(Key, usize)>,
+    definitions: Vec<(Key, InstanceId)>,
     stateful: bool,
     register_changes: BTreeMap<Key, Option<Value>>,
     nan_registers: Map<Key, ()>,
@@ -194,17 +198,19 @@ fn strs(xs: &[String]) -> Json {
 fn vals(xs: &[Value]) -> Json {
     Json::Arr(xs.iter().map(Value::to_json).collect())
 }
-fn current(env: &Map<Key, Seq<Value>>, k: &Key) -> Option<Value> {
+fn current(env: &Environment, k: &Key) -> Option<Value> {
     #[cfg(test)]
     REGISTER_READS.with(|n| n.set(n.get() + 1));
-    env.get(k).and_then(|v| v.last()).cloned()
+    env.get(k)
+        .and_then(|v| v.last_key_value())
+        .map(|(_, v)| v.clone())
 }
 fn is_nan(v: &Value) -> bool {
     matches!(v, Value::F64(f) if f.is_nan())
 }
-fn nan_keys(env: &Map<Key, Seq<Value>>) -> Map<Key, ()> {
+fn nan_keys(env: &Environment) -> Map<Key, ()> {
     env.iter()
-        .filter(|(_, vs)| vs.last().is_some_and(is_nan))
+        .filter(|(_, vs)| vs.last_key_value().is_some_and(|(_, v)| is_nan(v)))
         .map(|(k, _)| (k.clone(), ()))
         .collect()
 }
@@ -426,11 +432,12 @@ impl Machine {
         }
         self.note_register(&key);
         if !self.env.contains_key(&key) {
-            self.env.insert(key.clone(), Seq::new());
+            self.env.insert(key.clone(), Map::new());
         }
+        let instance = (self.history.len() + 1, self.definitions.len());
         let vs = self.env.get_mut(&key).unwrap();
-        self.definitions.push((key, vs.len()));
-        vs.push(v);
+        self.definitions.push((key, instance));
+        vs.insert(instance, v);
     }
     fn define(&mut self, name: &str, v: Value) {
         self.define_at(self.stack.last().unwrap().id, name, v);
@@ -477,19 +484,25 @@ impl Machine {
         if !frame.pure && !self.stateful {
             self.quantum.rewind_clean_wires(frame.wire_boundary)?;
         }
-        for (key, len) in frame.definitions.iter().rev() {
-            if let Some(vs) = self.env.get_mut(key) {
-                vs.truncate(*len);
-                if vs.is_empty() {
-                    self.env.remove(key);
-                }
+        for (key, instance) in frame.definitions.iter().rev() {
+            let vs = self
+                .env
+                .get_mut(key)
+                .expect("active defining frame has a register");
+            assert!(
+                vs.contains_key(instance),
+                "active defining frame owns its instance"
+            );
+            vs.remove(instance);
+            if vs.is_empty() {
+                self.env.remove(key);
             }
         }
         for (key, _) in &frame.definitions {
             if self
                 .env
                 .get(key)
-                .and_then(|vs| vs.last())
+                .and_then(|vs| vs.last_key_value().map(|(_, v)| v))
                 .is_some_and(is_nan)
             {
                 self.nan_registers.insert(key.clone(), ());
@@ -1521,7 +1534,12 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let env: Map<_, _> = f.lists[0]
         .iter()
         .zip(&values)
-        .map(|(p, v)| ((0, p.name.clone()), std::iter::once(v.clone()).collect()))
+        .map(|(p, v)| {
+            (
+                (0, p.name.clone()),
+                std::iter::once(((0, 0), v.clone())).collect(),
+            )
+        })
         .collect();
     let entry_data = data.clone();
     let entry_env = env.clone();
@@ -1707,8 +1725,8 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
 }
 #[allow(clippy::too_many_arguments)]
 fn first_difference(
-    a: &Map<Key, Seq<Value>>,
-    b: &Map<Key, Seq<Value>>,
+    a: &Environment,
+    b: &Environment,
     da: &Data,
     db: &Data,
     entry_stack: &Seq<Activation>,
@@ -1900,7 +1918,12 @@ impl RuntimeRun {
         let env = f.lists[0]
             .iter()
             .zip(&args)
-            .map(|(p, v)| ((0, p.name.clone()), std::iter::once(v.clone()).collect()))
+            .map(|(p, v)| {
+                (
+                    (0, p.name.clone()),
+                    std::iter::once(((0, 0), v.clone())).collect(),
+                )
+            })
             .collect();
         Ok(Self {
             machine: Machine {
@@ -2207,7 +2230,10 @@ impl RuntimeRun {
                             Json::obj(vec![
                                 ("activation", Json::u64(*id)),
                                 ("name", Json::Str(name.clone())),
-                                ("values", vals(&values.to_vec())),
+                                (
+                                    "values",
+                                    Json::Arr(values.iter().map(|(_, v)| v.to_json()).collect()),
+                                ),
                             ])
                         })
                         .collect(),
@@ -2665,6 +2691,76 @@ mod scaling_tests {
         };
         assert_eq!(entries.len(), 1, "{registers:?}");
         assert_eq!(entries[0].get("name").unwrap().as_str(), Some("q"));
+    }
+
+    #[test]
+    fn segment_cancellation_removes_only_its_owned_definitions() {
+        for version in ["0.8", "0.9"] {
+            let mut run = run_for_version(
+                "x = const.i8 1\nx = call @value\nsaved = const.i8 2\nx = const.i8 9\nuncall @value () (saved)\nx = add.i8 x saved\nret x\nfn r @value () (r:i8) () () ()\n^entry():\nr = const.i8 2\nret r",
+                version,
+            );
+            while !run.terminal() {
+                run.step().unwrap();
+            }
+            assert_eq!(run.values(), &[Value::int(8, u(11))], "ISA {version}");
+            let snapshot = run.snapshot("COMPLETED").unwrap();
+            let instances = snapshot.get("instances").unwrap().as_arr().unwrap();
+            let x = instances
+                .iter()
+                .find(|v| v.get("name").and_then(Json::as_str) == Some("x"))
+                .unwrap();
+            assert_eq!(
+                x.get("values"),
+                Some(&vals(&[
+                    Value::int(8, u(1)),
+                    Value::int(8, u(9)),
+                    Value::int(8, u(11))
+                ]))
+            );
+            assert!(
+                instances
+                    .iter()
+                    .all(|v| v.get("activation").and_then(Json::as_u64) == Some(0))
+            );
+            run.reverse_to(0).unwrap();
+            assert!(run.machine.env.is_empty());
+            assert_eq!(run.machine.stack.last().unwrap().index, 0);
+            assert_eq!(run.machine.next_activation, 1);
+        }
+    }
+
+    #[test]
+    fn nested_segment_cancellation_preserves_all_later_versions() {
+        let mut run = run_for_version(
+            "x = const.i8 1\nx = call @outer\nsaved = const.i8 3\nx = const.i8 9\nx = const.i8 10\nuncall @outer () (saved)\nret x\nfn r @outer () (r:i8) () () ()\n^entry():\nr = const.i8 2\nr = call @inner\nret r\nfn r @inner () (r:i8) () () ()\n^entry():\nr = const.i8 1\nr = const.i8 3\nret r",
+            "0.9",
+        );
+        while !run.terminal() {
+            run.step().unwrap();
+        }
+        assert_eq!(run.values(), &[Value::int(8, u(10))]);
+        let snapshot = run.snapshot("COMPLETED").unwrap();
+        let instances = snapshot.get("instances").unwrap().as_arr().unwrap();
+        let x = instances
+            .iter()
+            .find(|v| v.get("name").and_then(Json::as_str) == Some("x"))
+            .unwrap();
+        assert_eq!(
+            x.get("values"),
+            Some(&vals(&[
+                Value::int(8, u(1)),
+                Value::int(8, u(9)),
+                Value::int(8, u(10))
+            ]))
+        );
+        assert!(
+            instances
+                .iter()
+                .all(|v| v.get("activation").and_then(Json::as_u64) == Some(0))
+        );
+        run.reverse_to(0).unwrap();
+        assert!(run.machine.env.is_empty());
     }
 
     #[test]

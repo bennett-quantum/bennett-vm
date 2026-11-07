@@ -34,8 +34,9 @@ passed in **51.54 s** (warm test build, line tables only). All sibling fixtures,
 specs and binaries resolve through `tests/support/pins.rs` to the full SHA in
 `gate.toml`; a wrong checkout is an explicit failure reporting both heads.
 The pin was materialised with the pinned gate tool's `verify` command against
-the main checkout. At materialisation it was not reachable from origin/main; the pin is unchanged and
-publication remains orchestrator work.
+the main checkout. That original measurement used fd626d3, which was not
+reachable from origin/main at materialisation. The current published pin is
+recorded in the verification below.
 
 Coverage (default suite, before the structural refactors):
 `timeout 600s cargo llvm-cov --offline -j3 --lcov --output-path .tmp/quality-vm/coverage.lcov -- --test-threads=4`
@@ -150,7 +151,7 @@ Repository HANDOFF.md is retired; README points to the workspace handoff.
 The red presence/pointer check now passes. Dated review and quality evidence
 remain available; transient job progress stays outside tracked files.
 
-Final verification at the completed branch:
+Verification before the ISA pin update (8bc9d78):
 
 - Headless job-local environment; ISA fixture root set to the verified cache checkout for fd626d37aba1f719c3b7b2059be46cbfaf462886.
 - /usr/bin/time -p timeout 180s cargo test --offline -j3 -- --test-threads=4: **46 unit + 313 integration passed**, 72 mandatory gate cases ignored, **52.72 s** (warm build).
@@ -165,7 +166,31 @@ Current function distribution is 1,124 functions: 792 at most 25 lines,
 254 at 26–100, 73 at 101–300, five over 300 with owners listed above.
 The round's explicit follow-ups are bennett-vm-bsj, bennett-vm-68j,
 bennett-vm-bai and bennett-vm-dhx. Internal process labels in source remain
-zero. No full-gate, fresh review, merge or upstream pin publication is claimed.
+zero. These measurements do not claim a full gate, fresh review or merge.
+
+Published ISA pin verification:
+
+- `gate.toml` and all ISA commit fields in `SPEC_VERSIONS.toml` now name
+  `3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1`. The ISA 0.8 spec,
+  ISA 0.9 spec, frame-domain erratum and catalog were checked with
+  `git show 3b10907:<path>`. The catalog envelope digest remains
+  `5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197`.
+- The pinned gate tool's `verify --repo <main-checkout> --sha 58080e3`
+  materialised and built both published binaries and reported `pushed=True`.
+- Each focused invocation of `cargo test --offline -j3 --test suite <test>
+  -- --ignored --exact --test-threads=4` passed for
+  `classical09::incoming_tokens_with_equal_tuples_keep_distinct_identities`,
+  `differential::region_call_overlaps_trap_before_any_effect` and
+  `differential::admitted_classical09_rows_differential`.
+  The last witness uses `qreg[*]`, explicitly allowed by ISA 0.9 §16.2;
+  no VM parser change or expectation adjustment was necessary.
+- `python3 scripts/quality.py` passed all five parser/mutation tests and
+  reported no baseline regression.
+- `cargo fmt --all -- --check` failed on inherited formatting in source and
+  tests. Those files were unchanged by the pin update. The default suite,
+  full ignored suite and Clippy have not been rerun at this pin: verification
+  stopped at the inherited failure, whose repair is outside the pin update's
+  allowed source edits. No complete green gate is claimed.
 
 <!-- quality-baseline -->
 ```json

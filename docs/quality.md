@@ -162,13 +162,13 @@ Verification before the ISA pin update (8bc9d78):
 - python3 scripts/quality.py: **five parser/mutation tests passed**, no baseline regression. A quote inside a block comment first reproduced a false function boundary; advancing lexical search past the complete comment fixed it without changing this source baseline.
 - git diff --check: passed. Obsolete fixture-root bindings were deleted after pin conversion.
 
-Current function distribution is 1,124 functions: 792 at most 25 lines,
+Before the contract adoption, the function distribution was 1,124 functions: 792 at most 25 lines,
 254 at 26–100, 73 at 101–300, five over 300 with owners listed above.
 The round's explicit follow-ups are bennett-vm-bsj, bennett-vm-68j,
 bennett-vm-bai and bennett-vm-dhx. Internal process labels in source remain
 zero. These measurements do not claim a full gate, fresh review or merge.
 
-Published ISA pin verification:
+Published ISA pin verification at the pin-only checkpoint (b0a842c):
 
 - `gate.toml` and all ISA commit fields in `SPEC_VERSIONS.toml` now name
   `3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1`. The ISA 0.8 spec,
@@ -187,10 +187,60 @@ Published ISA pin verification:
 - `python3 scripts/quality.py` passed all five parser/mutation tests and
   reported no baseline regression.
 - `cargo fmt --all -- --check` failed on inherited formatting in source and
-  tests. Those files were unchanged by the pin update. The default suite,
-  full ignored suite and Clippy have not been rerun at this pin: verification
-  stopped at the inherited failure, whose repair is outside the pin update's
-  allowed source edits. No complete green gate is claimed.
+  tests. At this initial checkpoint the default suite, full ignored suite
+  and Clippy were not rerun. Formatting is not a `gate.toml` check and remains
+  a separate follow-up; the contract-adoption verification supersedes this
+  initial stop.
+
+K91/K84 contract adoption (source 64415e8):
+
+- K91 tuple-only Q requests validate canonical partition labels, arity and
+  equal-label tuple consistency before execution. Actions have no primary
+  identity slot; oracles prepend theirs. Source value bindings and captured
+  oracle contexts retain identities separately from catalog JSON and tuples.
+  Same-identity oracle calls retain their matched cleanup carrier through
+  forwarding and adjoint traversal; distinct equal-tuple tokens do not match.
+  Schedule consumption compares partitions as well as parameter hashes.
+- K84 load checks reject duplicate resolved domain components and missing
+  expected relations. Certificate object hashes must match the loaded source.
+  Malformed control counts fail explicitly, and failed partition binding
+  leaves its argument identities unchanged.
+- Generated CC wrappers follow the source object's ABI (§9.1), rebind the
+  changed object hash (§9.2/§12.3), and provide explicit tuple partitions
+  (§12.3 K91). The newly published unresolved-import fixture remains in every
+  corpus and must diagnose §9.3 on execution. Published case commands and
+  expectations were not changed or omitted; all 10 D and 16 G CLI cases run.
+- The additive estimate and scheduler symbols validate alias-aware requests.
+  Complete resource-estimate realisation/certificate construction remains at
+  its existing explicit implementation boundary. The loader negotiation
+  explicitly left undefined by the pinned §10.1 is not invented here.
+- `timeout 300s cargo test --offline -j3 -- --test-threads=4`: **46 unit +
+  323 integration passed**, 72 mandatory cases reserved for the ignored run.
+- `timeout 1200s cargo test --offline -j3 -- --ignored --test-threads=4`:
+  **72 passed, zero failed**, 424.54 s test runtime. This is the entire ignored
+  set, including both published conformance checks and every differential and
+  source-expansion test. No published case was re-expected or skipped.
+- `timeout 300s cargo clippy --offline -j3 --all-targets -- -D warnings`:
+  passed. `timeout 60s python3 scripts/quality.py`: five parser/mutation tests
+  passed, no baseline regression. `git diff --check`: passed.
+- The pinned gate tool's `verify --repo <main-checkout> --sha 64415e8`
+  passed and reported `pushed=True`. These individual check invocations do not
+  claim a child-run aggregate `gate_run run`; that remains merge-time work.
+- Ten added contract tests pass. The initial CLI/metadata/checker classes,
+  source carrier, stale source binding, malformed control count and atomic
+  binding checks each reproduced a failure before their corresponding fixes.
+
+The K91/K84 contract adoption intentionally updates the baseline alongside its
+source changes, for review under the baseline policy above. New partition and
+certificate-metadata modules have maximum function lengths of 38 and 64 lines.
+The existing source-lowering module now has seven functions over 100 lines
+(previously eight); its maximum and count over 300 lines are unchanged. Added
+branches implement partition validation, capture and schedule matching,
+alias-aware request validation, stale certificate rejection and complete
+control reversal. The quality script and its five mutation/parser tests are
+unchanged. Source process identifiers remain zero and no litter exception was
+added. This snapshot does not claim the deferred resource-estimation mechanics
+or the loader negotiation that the pinned ISA explicitly leaves undefined.
 
 <!-- quality-baseline -->
 ```json
@@ -229,7 +279,7 @@ Published ISA pin verification:
       "trivial_wrappers": 1
     },
     "src/cc.rs": {
-      "branch_mass": 1342,
+      "branch_mass": 1345,
       "max_lines": 415,
       "over_100": 5,
       "over_25": 25,
@@ -244,6 +294,14 @@ Published ISA pin verification:
       "over_300": 0,
       "trivial_wrappers": 7
     },
+    "src/certificate/metadata.rs": {
+      "branch_mass": 69,
+      "max_lines": 64,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
     "src/cleanup_discipline.rs": {
       "branch_mass": 449,
       "max_lines": 151,
@@ -253,10 +311,10 @@ Published ISA pin verification:
       "trivial_wrappers": 7
     },
     "src/cliargs.rs": {
-      "branch_mass": 157,
+      "branch_mass": 152,
       "max_lines": 33,
       "over_100": 0,
-      "over_25": 5,
+      "over_25": 4,
       "over_300": 0,
       "trivial_wrappers": 4
     },
@@ -341,16 +399,16 @@ Published ISA pin verification:
       "trivial_wrappers": 5
     },
     "src/launch.rs": {
-      "branch_mass": 348,
+      "branch_mass": 368,
       "max_lines": 71,
       "over_100": 0,
-      "over_25": 12,
+      "over_25": 13,
       "over_300": 0,
       "trivial_wrappers": 18
     },
     "src/lib.rs": {
-      "branch_mass": 9,
-      "max_lines": 18,
+      "branch_mass": 12,
+      "max_lines": 21,
       "over_100": 0,
       "over_25": 0,
       "over_300": 0,
@@ -414,7 +472,7 @@ Published ISA pin verification:
     },
     "src/qcli.rs": {
       "branch_mass": 133,
-      "max_lines": 200,
+      "max_lines": 202,
       "over_100": 1,
       "over_25": 4,
       "over_300": 0,
@@ -446,7 +504,7 @@ Published ISA pin verification:
     },
     "src/ref_library.rs": {
       "branch_mass": 1238,
-      "max_lines": 220,
+      "max_lines": 223,
       "over_100": 8,
       "over_25": 15,
       "over_300": 0,
@@ -557,20 +615,20 @@ Published ISA pin verification:
       "trivial_wrappers": 1
     },
     "src/ref_library/oracle_source.rs": {
-      "branch_mass": 337,
+      "branch_mass": 356,
       "max_lines": 273,
       "over_100": 2,
       "over_25": 4,
       "over_300": 0,
-      "trivial_wrappers": 7
+      "trivial_wrappers": 8
     },
     "src/ref_library/source.rs": {
-      "branch_mass": 2012,
+      "branch_mass": 2069,
       "max_lines": 359,
-      "over_100": 8,
-      "over_25": 19,
+      "over_100": 7,
+      "over_25": 20,
       "over_300": 1,
-      "trivial_wrappers": 5
+      "trivial_wrappers": 6
     },
     "src/ref_library/source/partition.rs": {
       "branch_mass": 254,
@@ -581,16 +639,16 @@ Published ISA pin verification:
       "trivial_wrappers": 0
     },
     "src/sched.rs": {
-      "branch_mass": 362,
-      "max_lines": 95,
+      "branch_mass": 381,
+      "max_lines": 97,
       "over_100": 0,
       "over_25": 9,
       "over_300": 0,
       "trivial_wrappers": 1
     },
     "src/sched_abi.rs": {
-      "branch_mass": 38,
-      "max_lines": 62,
+      "branch_mass": 52,
+      "max_lines": 74,
       "over_100": 0,
       "over_25": 1,
       "over_300": 0,
@@ -614,7 +672,7 @@ Published ISA pin verification:
     },
     "src/stepcli.rs": {
       "branch_mass": 70,
-      "max_lines": 129,
+      "max_lines": 130,
       "over_100": 1,
       "over_25": 3,
       "over_300": 0,
@@ -627,6 +685,14 @@ Published ISA pin verification:
       "over_25": 12,
       "over_300": 0,
       "trivial_wrappers": 4
+    },
+    "src/token_aliases.rs": {
+      "branch_mass": 44,
+      "max_lines": 38,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
     },
     "src/typing.rs": {
       "branch_mass": 640,

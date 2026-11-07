@@ -52,8 +52,14 @@ pub struct QuantumState {
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
     pub(crate) wire_classes: crate::persistent::Map<usize, String>,
     pub emitted: Vec<crate::target::Leaf>,
-    events: Vec<crate::target::Event>,
-    live: Vec<crate::target::LiveInterval>,
+    // Append-only target accounting journals, one entry per recorded event
+    // (classical rows included). Persistent sequences, not Vecs:
+    // QuantumState is cloned per cooperative step (resource sync, rollback
+    // checkpoint, export), and a Vec journal would deep-copy the whole
+    // retained history on every clone. Seq clones share the root; a push
+    // copies one balanced path.
+    events: crate::persistent::Seq<crate::target::Event>,
+    live: crate::persistent::Seq<crate::target::LiveInterval>,
     time: crate::target::Rational,
     peak: BTreeMap<String, usize>,
     dirty: BTreeSet<usize>,
@@ -73,8 +79,8 @@ impl QuantumState {
             target: None,
             wire_classes: crate::persistent::Map::new(),
             emitted: vec![],
-            events: vec![],
-            live: vec![],
+            events: crate::persistent::Seq::new(),
+            live: crate::persistent::Seq::new(),
             time: crate::target::Rational::zero(),
             peak: BTreeMap::new(),
             dirty: BTreeSet::new(),
@@ -2345,7 +2351,7 @@ impl QuantumState {
             .target
             .as_ref()
             .ok_or("§8: no target installed")?
-            .account(&self.events, &self.live)?;
+            .account(&self.events.to_vec(), &self.live.to_vec())?;
         // Allocations can have zero duration. Capacity still observes them.
         if let crate::json::Json::Obj(m) = &mut result {
             for (name, resource) in self

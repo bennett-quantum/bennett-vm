@@ -913,24 +913,28 @@ impl Target {
             .map(|(k, _)| (k.clone(), R::zero()))
             .collect();
         let mut end = R::zero();
-        for (i, e) in events.iter().enumerate() {
+        // Prior wire-bearing events with their end times. Only these can
+        // share a wire with a later event, so the dependent-overlap check
+        // below examines exactly the pairs that can fail it, in the same
+        // order; wire-free events (every classical step) never enter it.
+        let mut wire_prior: Vec<(&Event, R)> = vec![];
+        for e in events {
             nonnegative(e.start.clone())?;
             nonnegative(e.duration.clone())?;
-            end = end.max(e.start.add(&e.duration));
+            let e_end = e.start.add(&e.duration);
+            end = end.max(e_end.clone());
             let mut unique = BTreeSet::new();
             for w in &e.wires {
                 if !unique.insert(w) {
                     return Err("§8.2: duplicate event wire".into());
                 }
-                if !live.iter().any(|l| {
-                    l.wire == *w && l.start <= e.start && l.end >= e.start.add(&e.duration)
-                }) {
+                if !live.iter().any(|l| l.wire == *w && l.start <= e.start && l.end >= e_end) {
                     return Err("§8.2: gate outside wire live interval".into());
                 }
             }
-            for other in &events[..i] {
-                if e.start < other.start.add(&other.duration)
-                    && other.start < e.start.add(&e.duration)
+            for (other, other_end) in &wire_prior {
+                if e.start < *other_end
+                    && other.start < e_end
                     && e.wires.iter().any(|w| other.wires.contains(w))
                 {
                     return Err("§11: overlapping dependent wire operations".into());
@@ -954,6 +958,7 @@ impl Target {
                     _ => return Err("§8.2: occupancy and peak are derived from liveness".into()),
                 }
             }
+            wire_prior.extend((!e.wires.is_empty()).then_some((e, e_end)));
         }
         let max_parallel = limit(field(
             field(&self.document, "capabilities")?,

@@ -29,6 +29,7 @@ pub struct Configuration {
 }
 impl Configuration {
     fn get(&self, k: &Key) -> BigUint {
+        // Sparse machine cells are zero when absent (ISA §3 / §5.2).
         self.cells.get(k).cloned().unwrap_or_default()
     }
     fn set(&mut self, k: Key, v: BigUint) {
@@ -355,7 +356,7 @@ impl<'a> Machine<'a> {
         match op {
             "const" => value = Some(crate::oracle::parse_const(&x[0], width()?)?),
             "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr" => {
-                value = Some(binop(op, &read(0)?, &read(1)?, width()?))
+                value = Some(binop(op, &read(0)?, &read(1)?, width()?)?)
             }
             "udiv" | "urem" | "sdiv" | "srem" => {
                 let (a, b, w) = (read(0)?, read(1)?, width()?);

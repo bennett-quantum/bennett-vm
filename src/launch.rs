@@ -184,7 +184,7 @@ impl bennett_program_t {
             .pending_register_lookup()
             .filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
         run.runtime.unavailable_handle(unavailable);
-        let (memory, regs) = self.runs[&r].runtime.touches();
+        let (memory, regs) = self.runs[&r].runtime.touches().map_err(|s| error(INVALID, s))?;
         if memory.iter().any(|key| {
             self.memory_locks
                 .iter()
@@ -225,7 +225,7 @@ impl bennett_program_t {
                 State::Completed
             };
         }
-        for q in run.runtime.created_regs() {
+        for q in run.runtime.created_regs().map_err(|s| error(INVALID, s))? {
             self.locks.insert(q, r);
         }
         // New registers created by a run also remain exclusively owned.

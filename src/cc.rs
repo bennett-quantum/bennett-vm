@@ -813,7 +813,7 @@ impl Machine {
                     }
                     Value::int(w, value::divop(base, bits, &b, w))
                 } else {
-                    Value::int(w, value::binop(base, bits, &b, w))
+                    Value::int(w, value::binop(base, bits, &b, w)?)
                 });
             }
             "select" => {
@@ -2223,20 +2223,22 @@ impl RuntimeRun {
             })
             .collect()
     }
-    pub(crate) fn created_regs(&self) -> Vec<u64> {
-        self.machine
-            .history
-            .last()
-            .and_then(|f| f.data.as_ref().zip(f.after.as_ref()))
-            .map(|(before, after)| {
-                before
-                    .handles
-                    .changed_keys(&after.handles)
-                    .into_iter()
-                    .filter(|q| !before.handles.contains_key(q) && after.handles.contains_key(q))
-                    .collect()
-            })
-            .unwrap_or_default()
+    pub(crate) fn created_regs(&self) -> Result<Vec<u64>, String> {
+        let Some(frame) = self.machine.history.last() else {
+            return Ok(vec![]);
+        };
+        match (&frame.data, &frame.after) {
+            // Pure rows deliberately omit the before snapshot, including
+            // stateful runs that still retain an after snapshot.
+            (None, _) => Ok(vec![]),
+            (Some(before), Some(after)) => Ok(before
+                .handles
+                .changed_keys(&after.handles)
+                .into_iter()
+                .filter(|q| !before.handles.contains_key(q) && after.handles.contains_key(q))
+                .collect()),
+            _ => Err("resource tracking requires both snapshots of the last history frame".into()),
+        }
     }
     pub(crate) fn terminal(&self) -> bool {
         self.machine.fault.is_some() || self.machine.stack.is_empty()
@@ -2279,21 +2281,26 @@ impl RuntimeRun {
     }
     // Locks are acquired before the instruction. Classical memory/devices share
     // an ordering domain; qreg operands lock only their actual handles.
-    pub(crate) fn touches(&self) -> (Vec<ResourceKey>, Vec<u64>) {
+    pub(crate) fn touches(&self) -> Result<(Vec<ResourceKey>, Vec<u64>), String> {
         let m = &self.machine;
         let Some(a) = m.stack.last() else {
-            return (vec![], vec![]);
+            return Ok((vec![], vec![]));
         };
         let i = &m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index];
         let mut memory = vec![];
-        let mut range = |p: &str, n: BigUint| {
-            if let Ok(p) = m.bits(p) {
-                memory.push(ResourceKey::Memory(p.clone(), p.add(&n)));
-            }
+        let bits = |operand: &str| {
+            m.bits(operand).map_err(|code| {
+                format!("resource operand {operand:?} is unreadable (fault {code})")
+            })
+        };
+        let mut range = |p: &str, n: BigUint| -> Result<(), String> {
+            let p = bits(p)?;
+            memory.push(ResourceKey::Memory(p.clone(), p.add(&n)));
+            Ok(())
         };
         match i.op.split('.').next().unwrap() {
             "alloc" => {
-                let n = m.bits(&i.operands[0]).unwrap_or_default();
+                let n = bits(&i.operands[0])?;
                 memory.push(ResourceKey::Allocator);
                 memory.push(ResourceKey::Memory(
                     m.data.bump.clone(),
@@ -2301,12 +2308,12 @@ impl RuntimeRun {
                 ));
             }
             "free" => {
-                if let Ok(p) = m.bits(&i.operands[0])
-                    && let Some(e) = m
-                        .data
-                        .allocation_index
-                        .get(&p)
-                        .and_then(|i| m.data.table.get(i))
+                let p = bits(&i.operands[0])?;
+                if let Some(e) = m
+                    .data
+                    .allocation_index
+                    .get(&p)
+                    .and_then(|i| m.data.table.get(i))
                 {
                     memory.push(ResourceKey::Memory(p.clone(), p.add(&e.size)));
                     memory.push(ResourceKey::Entry(p));
@@ -2314,9 +2321,9 @@ impl RuntimeRun {
             }
             "load" | "store" => {
                 let w: usize = i.op.rsplit_once(".i").unwrap().1.parse().unwrap();
-                range(&i.operands[0], u((w / 8) as u64));
+                range(&i.operands[0], u((w / 8) as u64))?;
             }
-            "hostcall" => range(&i.operands[1], m.bits(&i.operands[2]).unwrap_or_default()),
+            "hostcall" => range(&i.operands[1], bits(&i.operands[2])?)?,
             "effect" => {
                 let (dev, op) = i.operands[0].split_once('.').unwrap();
                 let (p, n) = match (dev, op) {
@@ -2324,13 +2331,14 @@ impl RuntimeRun {
                     ("block", _) => (&i.operands[2], u(512)),
                     _ => (
                         &i.operands[1],
-                        i.operands
-                            .get(2)
-                            .and_then(|n| m.bits(n).ok())
-                            .unwrap_or_default(),
+                        bits(
+                            i.operands
+                                .get(2)
+                                .ok_or("resource transfer is missing its length operand")?,
+                        )?,
                     ),
                 };
-                range(p, n);
+                range(p, n)?;
                 memory.push(ResourceKey::Device(dev.into()));
             }
             _ => {}
@@ -2380,7 +2388,7 @@ impl RuntimeRun {
             })
             .collect::<Vec<_>>();
         memory.extend(entries);
-        (memory, regs)
+        Ok((memory, regs))
     }
     pub(crate) fn request(&self) -> Option<(String, Vec<u8>)> {
         let m = &self.machine;
@@ -3031,8 +3039,36 @@ mod scaling_tests {
             live: true,
             pinned: false,
         });
-        let (keys, _) = run.touches();
+        let (keys, _) = run.touches().unwrap();
         assert!(keys.contains(&ResourceKey::Entry(u(16))), "{keys:?}");
+    }
+
+    #[test]
+    fn scheduler_keys_reject_unreadable_operands() {
+        for row in [
+            "p = alloc absent",
+            "x = load.i8 absent",
+            "free absent",
+            "hostcall service p absent",
+            "effect console.write p absent",
+        ] {
+            let run = run_for(row);
+            let error = run.touches().unwrap_err();
+            assert!(
+                error.contains("resource") && error.contains("absent"),
+                "{row}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn created_register_tracking_rejects_a_partial_snapshot() {
+        let mut run = run_for("q = qreg.new any 1\nret");
+        assert!(run.created_regs().unwrap().is_empty());
+        run.step().unwrap();
+        assert_eq!(run.created_regs().unwrap().len(), 1);
+        run.machine.history.last_mut().unwrap().after = None;
+        assert!(run.created_regs().unwrap_err().contains("both snapshots"));
     }
 
     #[test]

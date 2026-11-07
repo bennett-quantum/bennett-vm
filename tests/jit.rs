@@ -184,3 +184,52 @@ fn unknown_engine_fails_explicitly_before_any_command() {
         "unimplemented: execution engine unknown (milestone 5)"
     );
 }
+
+#[test]
+fn cache_reuses_an_object_but_recompiles_changed_executable_rows() {
+    if std::env::var_os("CACHE_PROBE").is_none() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "jit::cache_reuses_an_object_but_recompiles_changed_executable_rows",
+                "--nocapture",
+            ])
+            .env("CACHE_PROBE", "1")
+            .env("BENNETT_VM_ENGINE", "inline")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        return;
+    }
+    let mut obj = fixture("inc8.bisa");
+    let first = bennett_vm::jit::for_object(&obj).unwrap().unwrap();
+    let same = bennett_vm::jit::for_object(&obj.clone()).unwrap().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &same));
+    let hash = bennett_vm::identity::object_hash(&obj.text);
+    obj.functions[0].blocks[0].instrs[0].operands[0] = "2".into();
+    let changed = bennett_vm::jit::for_object(&obj).unwrap().unwrap();
+    assert_eq!(bennett_vm::identity::object_hash(&obj.text), hash);
+    assert!(!std::sync::Arc::ptr_eq(&first, &changed));
+    let mut value = None;
+    changed
+        .run(changed.row("inc8", 0, 0).unwrap(), |_, i| {
+            value = Some(i.operands[0].clone());
+            Ok(None)
+        })
+        .unwrap();
+    assert_eq!(value.as_deref(), Some("2"));
+}
+
+#[test]
+fn arithmetic_reports_invalid_kernels_as_errors() {
+    use bennett_vm::bigint::BigUint as B;
+    assert!(
+        bennett_vm::value::binop("invalid", &B::zero(), &B::zero(), 8)
+            .unwrap_err()
+            .contains("invalid")
+    );
+}

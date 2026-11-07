@@ -82,3 +82,24 @@ bennett-vm-68j for qvalidate.rs `sequence`, ref_library/source.rs `instruction`
 and typing.rs `classical` (334/359/352). The protected executors retain their
 legacy spelling adapters; changing the parsed opcode's type required only
 small constructor/trace conversions there.
+
+Fail-fast/cache verification: scheduler lock-key reads now return named errors
+for unreadable allocation, load/store, free, hostcall and effect operands;
+launch propagates them. New-register tracking distinguishes deliberately
+absent pure-row snapshots from a missing mutation snapshot. Sparse step cells
+remain zero by the published machine model, an intentional value rather than
+an error fallback. Two impossible action-state defaults are asserted.
+
+Engine configuration (including errors) is read once through OnceLock.
+Arithmetic propagates selection/kernel errors. The bounded thread-local JIT
+cache uses the object hash plus a length-delimited execution SHA-256, since
+oracle expansion and library callers can modify AST rows without changing
+canonical object text. The new regression verifies cache reuse and recompiles
+a changed constant whose object text/hash stays unchanged.
+
+The proposed fallible resource API first failed its regression to compile
+against the old tuple API. After implementation, the full default command
+passed 46 unit + 313 integration tests (72 ignored); it includes absent-operand,
+partial-snapshot, invalid-kernel and cache-mutation cases. Remaining legacy
+opcode spelling adapters in dense-owned executors have owner/bead
+bennett-vm-bai for integration after bjm-dense.

@@ -1104,7 +1104,7 @@ impl<'o> Exec<'o> {
         let locals: Vec<String> = self.local_images.keys().cloned().collect();
         for name in locals {
             let region = self.region(&name)?;
-            let image = self.local_images.get(&name).cloned().unwrap_or_default();
+            let image = self.local_images.get(&name).expect("local image key came from this map").clone();
             for (i, cell) in region.cells.iter().enumerate().rev() {
                 let want = &image[i];
                 let got = self.state.constant_value(cell);
@@ -2266,7 +2266,7 @@ pub fn execute_perm_basis(
             format!("permutation action @{name} produced a superposition under basis execution"),
         ));
     }
-    let key = state.amps.keys().next().cloned().unwrap_or_default();
+    let key = state.amps.keys().next().expect("one-component permutation state").clone();
     let out_muts: Vec<BigUint> = mut_bundles
         .iter()
         .map(|b| QuantumState::extract(&key, b))

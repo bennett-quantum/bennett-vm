@@ -490,7 +490,7 @@ impl<'o> Machine<'o> {
                     format!("{op} destination {dest} width disagrees with its operands"),
                 ));
             }
-            let v = binop(base, &a, &b, width);
+            let v = binop(base, &a, &b, width)?;
             self.write(fname, dest, v)?;
             return Ok(Flow::Next);
         }

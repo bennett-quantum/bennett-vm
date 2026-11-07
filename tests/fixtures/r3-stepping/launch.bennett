@@ -1,0 +1,6767 @@
+bennett-object isa=0.8 object=0.8 launch=0.8 sched=0.8 cert=0.8 coverage=0.8 target=0.8 ptr_width=64
+
+section symbols
+{"0":{"interface_hash":"e5464d0ada4f53f4f62a5dce51871b8e5c65bc2316aebdac9e0b8a0255653544","kind":"data","name":"G1","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"1":{"interface_hash":"9b52b39715f417fb5c3f5ec1d92152f8c4841f351bc53c8fc02489bd4b9f70df","kind":"data","name":"G10","signature":{"abi":"0.8","kind":"data","size":4104,"tier":"-"}},"10":{"interface_hash":"029e4708250316796658db19b5f225aeadb0dc4008e03826d01998d3d7130783","kind":"data","name":"G8","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"11":{"interface_hash":"bd19260aaf22435725e4ea7fc834c0333beba7f7073ccb2a50eeddb1785328fa","kind":"data","name":"G9","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"12":{"interface_hash":"c14e1aef8efd33fa9f4c905aa6d22d2e3db041c8337ab67824293e19284c06f5","kind":"r","name":"R0","signature":{"abi":"0.8","kind":"r","params":[],"results":["i32"],"tier":"r"}},"13":{"interface_hash":"652dd6e1b1badb361bddfa180b27f8540926f15a78a57804e7aec726aa40f408","kind":"r","name":"R1","signature":{"abi":"0.8","kind":"r","params":["i32","ptr"],"results":[],"tier":"r"}},"14":{"interface_hash":"e6274f84986860bebde87da8c4ab5913b473b06f2fd717f9f76f8cae0a9ca8b7","kind":"r","name":"R10","signature":{"abi":"0.8","kind":"r","params":["ptr","i64"],"results":[],"tier":"r"}},"15":{"interface_hash":"df7a184b20db0f8750ec68f127c04d0c8a3f4d82ee109e1be1e732872a0d8aa3","kind":"r","name":"R2","signature":{"abi":"0.8","kind":"r","params":["ptr"],"results":[],"tier":"r"}},"16":{"interface_hash":"0274421387f671c916d39002681cb74374176619891251a5249378cc0173e415","kind":"r","name":"R3","signature":{"abi":"0.8","kind":"r","params":["i32","ptr"],"results":[],"tier":"r"}},"17":{"interface_hash":"79da5ad734fad92424db038470c6c59727bf54044bee2d8692a03e63c97c46d9","kind":"r","name":"R4","signature":{"abi":"0.8","kind":"r","params":["i32","ptr"],"results":[],"tier":"r"}},"18":{"interface_hash":"dca0e96c39ac38568ca6d01a16a9a901128849b54ccb3a1eabd649dc2303f3da","kind":"r","name":"R5","signature":{"abi":"0.8","kind":"r","params":["ptr"],"results":[],"tier":"r"}},"19":{"interface_hash":"3cddcfc2fc924ec9960fc2bce20accd4f756c481e951d5b59428fea86c8211fc","kind":"cc","name":"R6","signature":{"abi":"0.8","kind":"cc","params":["i64"],"results":[],"tier":"cc"}},"2":{"interface_hash":"f7fb5f4a07c2aac88094314085c0164a74084d7c8ced3930ec19e910e46baabb","kind":"data","name":"G11","signature":{"abi":"0.8","kind":"data","size":12312,"tier":"-"}},"20":{"interface_hash":"6970d06b8a450ea73a1c0f5eaa3a8aff4a0c8f37bb38417f2171cf27ed13fa05","kind":"r","name":"R7","signature":{"abi":"0.8","kind":"r","params":["i64","i64","i64"],"results":["ptr"],"tier":"r"}},"21":{"interface_hash":"ed28dc94a3edb431be50a96b57c0126bc2bbaee286226f343f3af41b89f5730b","kind":"r","name":"R8","signature":{"abi":"0.8","kind":"r","params":["i64","i64"],"results":["ptr"],"tier":"r"}},"22":{"interface_hash":"4dacc6c0db5d4f5e817562187bc8ca4a912d337282a42bf938bb844915372776","kind":"r","name":"R9","signature":{"abi":"0.8","kind":"r","params":["ptr"],"results":[],"tier":"r"}},"23":{"interface_hash":"9a593a08a4fb0502a8792774fa1fce299817d09bc62d487500bd366fc6444ebe","kind":"cc","name":"main","signature":{"abi":"0.8","kind":"cc","params":[],"results":["i32"],"tier":"cc"}},"3":{"interface_hash":"e528200c1aab73a0301daff1085dfe2075c185ddc06fb53ba228eff4fab99e2d","kind":"data","name":"G12","signature":{"abi":"0.8","kind":"data","size":20,"tier":"-"}},"4":{"interface_hash":"cab5a5a95658f2fe5e4537a0231876e0b99ddc076ee1516259019dd1d3f438c9","kind":"data","name":"G2","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"5":{"interface_hash":"85b12f29a1e160363c812b4c604669ff1972bd42f52281b264e8e77fef4e6f12","kind":"data","name":"G3","signature":{"abi":"0.8","kind":"data","size":6,"tier":"-"}},"6":{"interface_hash":"3879e146fc0259de6e55b6419ae04d56e91a94d01e7ac18d36b9aee8bf2ecbe5","kind":"data","name":"G4","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"7":{"interface_hash":"ea4323cc75fa2ea4bd3e398b4503f2cb3e579936b75ea6fbc89ea8c3ed0684a8","kind":"data","name":"G5","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"8":{"interface_hash":"17312273548bd6fcdcab3439db9b538f50e3a9c2c80e7c1d6198cfe1bb48d106","kind":"data","name":"G6","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}},"9":{"interface_hash":"acee93d58e3e8ce21d2d7211e8ce322e23421d462be76e5acba045ad7a77e30d","kind":"data","name":"G7","signature":{"abi":"0.8","kind":"data","size":8,"tier":"-"}}}
+
+section functions
+fn cc @main () (status:i32) () () ()
+^entry():
+v1 = const.i64 20592
+v0 = inttoptr v1
+v2 = const.i64 20
+v3 = hostcall bennett.argv v0 v2
+v4 = const.i64 512
+call @R6 v4
+v6 = const.i64 4120
+v5 = inttoptr v6
+v7 = const.i64 1000000
+store.i64 v5 v7
+v8 = call @R0
+ret v8
+fn r @R0 () (result:i32) () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 80
+v8 = const.i64 16
+v9 = call @R8 v7 v8
+v11 = const.i64 4120
+v10 = inttoptr v11
+v12 = load.i64 v10
+v13 = const.i64 0
+v14 = icmp.eq v12 v13
+br v14 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v15 = const.i64 1
+v16 = sub v12 v15
+store.i64 v10 v16
+v17 = ptrtoint.i64 v9
+v18 = inttoptr v17
+v20 = const.i64 4120
+v19 = inttoptr v20
+v21 = load.i64 v19
+v22 = const.i64 0
+v23 = icmp.eq v21 v22
+br v23 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v24 = const.i64 1
+v25 = sub v21 v24
+store.i64 v19 v25
+v26 = const.i32 0
+v28 = const.i64 0
+v27 = inttoptr v28
+call @R1 v26 v27
+v30 = const.i64 4120
+v29 = inttoptr v30
+v31 = load.i64 v29
+v32 = const.i64 0
+v33 = icmp.eq v31 v32
+br v33 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v34 = const.i64 1
+v35 = sub v31 v34
+store.i64 v29 v35
+v37 = const.i64 4096
+v36 = inttoptr v37
+v38 = load.i64 v36
+v39 = inttoptr v38
+v41 = const.i64 4120
+v40 = inttoptr v41
+v42 = load.i64 v40
+v43 = const.i64 0
+v44 = icmp.eq v42 v43
+br v44 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v45 = const.i64 1
+v46 = sub v42 v45
+store.i64 v40 v46
+call @R2 v39
+v48 = const.i64 4120
+v47 = inttoptr v48
+v49 = load.i64 v47
+v50 = const.i64 0
+v51 = icmp.eq v49 v50
+br v51 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v52 = const.i64 1
+v53 = sub v49 v52
+store.i64 v47 v53
+v55 = const.i64 24624
+v54 = inttoptr v55
+v57 = const.i64 4096
+v56 = inttoptr v57
+v58 = ptrtoint.i64 v54
+store.i64 v56 v58
+v60 = const.i64 4120
+v59 = inttoptr v60
+v61 = load.i64 v59
+v62 = const.i64 0
+v63 = icmp.eq v61 v62
+br v63 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v64 = const.i64 1
+v65 = sub v61 v64
+store.i64 v59 v65
+v67 = const.i64 4096
+v66 = inttoptr v67
+v68 = load.i64 v66
+v69 = inttoptr v68
+v71 = const.i64 4120
+v70 = inttoptr v71
+v72 = load.i64 v70
+v73 = const.i64 0
+v74 = icmp.eq v72 v73
+br v74 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v75 = const.i64 1
+v76 = sub v72 v75
+store.i64 v70 v76
+call @R2 v69
+v78 = const.i64 4120
+v77 = inttoptr v78
+v79 = load.i64 v77
+v80 = const.i64 0
+v81 = icmp.eq v79 v80
+br v81 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v82 = const.i64 1
+v83 = sub v79 v82
+store.i64 v77 v83
+v84 = const.i64 4
+call @R10 v18 v84
+v86 = const.i64 4120
+v85 = inttoptr v86
+v87 = load.i64 v85
+v88 = const.i64 0
+v89 = icmp.eq v87 v88
+br v89 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v90 = const.i64 1
+v91 = sub v87 v90
+store.i64 v85 v91
+v92 = const.i32 4294967279
+store.i32 v18 v92
+v94 = const.i64 4120
+v93 = inttoptr v94
+v95 = load.i64 v93
+v96 = const.i64 0
+v97 = icmp.eq v95 v96
+br v97 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v98 = const.i64 1
+v99 = sub v95 v98
+store.i64 v93 v99
+v100 = ptrtoint.i64 v18
+v101 = const.i64 8
+v102 = add v100 v101
+v103 = inttoptr v102
+v105 = const.i64 4120
+v104 = inttoptr v105
+v106 = load.i64 v104
+v107 = const.i64 0
+v108 = icmp.eq v106 v107
+br v108 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v109 = const.i64 1
+v110 = sub v106 v109
+store.i64 v104 v110
+v111 = const.i64 8
+call @R10 v103 v111
+v113 = const.i64 4120
+v112 = inttoptr v113
+v114 = load.i64 v112
+v115 = const.i64 0
+v116 = icmp.eq v114 v115
+br v116 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v117 = const.i64 1
+v118 = sub v114 v117
+store.i64 v112 v118
+v120 = const.i64 4104
+v119 = inttoptr v120
+v121 = ptrtoint.i64 v119
+store.i64 v103 v121
+v123 = const.i64 4120
+v122 = inttoptr v123
+v124 = load.i64 v122
+v125 = const.i64 0
+v126 = icmp.eq v124 v125
+br v126 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v127 = const.i64 1
+v128 = sub v124 v127
+store.i64 v122 v128
+v129 = ptrtoint.i64 v18
+v130 = const.i64 16
+v131 = add v129 v130
+v132 = inttoptr v131
+v134 = const.i64 4120
+v133 = inttoptr v134
+v135 = load.i64 v133
+v136 = const.i64 0
+v137 = icmp.eq v135 v136
+br v137 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v138 = const.i64 1
+v139 = sub v135 v138
+store.i64 v133 v139
+v140 = const.i64 8
+call @R10 v132 v140
+v142 = const.i64 4120
+v141 = inttoptr v142
+v143 = load.i64 v141
+v144 = const.i64 0
+v145 = icmp.eq v143 v144
+br v145 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v146 = const.i64 1
+v147 = sub v143 v146
+store.i64 v141 v147
+v148 = const.i64 18446744061363872715
+store.i64 v132 v148
+v150 = const.i64 4120
+v149 = inttoptr v150
+v151 = load.i64 v149
+v152 = const.i64 0
+v153 = icmp.eq v151 v152
+br v153 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v154 = const.i64 1
+v155 = sub v151 v154
+store.i64 v149 v155
+v156 = ptrtoint.i64 v18
+v157 = const.i64 24
+v158 = add v156 v157
+v159 = inttoptr v158
+v161 = const.i64 4120
+v160 = inttoptr v161
+v162 = load.i64 v160
+v163 = const.i64 0
+v164 = icmp.eq v162 v163
+br v164 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v165 = const.i64 1
+v166 = sub v162 v165
+store.i64 v160 v166
+v167 = const.i64 8
+call @R10 v159 v167
+v169 = const.i64 4120
+v168 = inttoptr v169
+v170 = load.i64 v168
+v171 = const.i64 0
+v172 = icmp.eq v170 v171
+br v172 ^budget18() ^step18()
+^budget18():
+trap
+^step18():
+v173 = const.i64 1
+v174 = sub v170 v173
+store.i64 v168 v174
+v175 = const.i64 81985529216486895
+store.i64 v159 v175
+v177 = const.i64 4120
+v176 = inttoptr v177
+v178 = load.i64 v176
+v179 = const.i64 0
+v180 = icmp.eq v178 v179
+br v180 ^budget19() ^step19()
+^budget19():
+trap
+^step19():
+v181 = const.i64 1
+v182 = sub v178 v181
+store.i64 v176 v182
+v183 = ptrtoint.i64 v18
+v184 = const.i64 32
+v185 = add v183 v184
+v186 = inttoptr v185
+v188 = const.i64 4120
+v187 = inttoptr v188
+v189 = load.i64 v187
+v190 = const.i64 0
+v191 = icmp.eq v189 v190
+br v191 ^budget20() ^step20()
+^budget20():
+trap
+^step20():
+v192 = const.i64 1
+v193 = sub v189 v192
+store.i64 v187 v193
+v194 = const.i64 4
+call @R10 v186 v194
+v196 = const.i64 4120
+v195 = inttoptr v196
+v197 = load.i64 v195
+v198 = const.i64 0
+v199 = icmp.eq v197 v198
+br v199 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v200 = const.i64 1
+v201 = sub v197 v200
+store.i64 v195 v201
+v202 = const.i32 4000000001
+store.i32 v186 v202
+v204 = const.i64 4120
+v203 = inttoptr v204
+v205 = load.i64 v203
+v206 = const.i64 0
+v207 = icmp.eq v205 v206
+br v207 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v208 = const.i64 1
+v209 = sub v205 v208
+store.i64 v203 v209
+v210 = ptrtoint.i64 v18
+v211 = const.i64 40
+v212 = add v210 v211
+v213 = inttoptr v212
+v215 = const.i64 4120
+v214 = inttoptr v215
+v216 = load.i64 v214
+v217 = const.i64 0
+v218 = icmp.eq v216 v217
+br v218 ^budget23() ^step23()
+^budget23():
+trap
+^step23():
+v219 = const.i64 1
+v220 = sub v216 v219
+store.i64 v214 v220
+v221 = const.i64 8
+call @R10 v213 v221
+v223 = const.i64 4120
+v222 = inttoptr v223
+v224 = load.i64 v222
+v225 = const.i64 0
+v226 = icmp.eq v224 v225
+br v226 ^budget24() ^step24()
+^budget24():
+trap
+^step24():
+v227 = const.i64 1
+v228 = sub v224 v227
+store.i64 v222 v228
+v229 = const.i64 4614500768194494464
+store.i64 v213 v229
+v231 = const.i64 4120
+v230 = inttoptr v231
+v232 = load.i64 v230
+v233 = const.i64 0
+v234 = icmp.eq v232 v233
+br v234 ^budget25() ^step25()
+^budget25():
+trap
+^step25():
+v235 = const.i64 1
+v236 = sub v232 v235
+store.i64 v230 v236
+v237 = ptrtoint.i64 v18
+v238 = const.i64 48
+v239 = add v237 v238
+v240 = inttoptr v239
+v242 = const.i64 4120
+v241 = inttoptr v242
+v243 = load.i64 v241
+v244 = const.i64 0
+v245 = icmp.eq v243 v244
+br v245 ^budget26() ^step26()
+^budget26():
+trap
+^step26():
+v246 = const.i64 1
+v247 = sub v243 v246
+store.i64 v241 v247
+v248 = const.i64 10
+call @R10 v240 v248
+v250 = const.i64 4120
+v249 = inttoptr v250
+v251 = load.i64 v249
+v252 = const.i64 0
+v253 = icmp.eq v251 v252
+br v253 ^budget27() ^step27()
+^budget27():
+trap
+^step27():
+v254 = const.i64 1
+v255 = sub v251 v254
+store.i64 v249 v255
+v256 = const.i80 302226843217638866288640
+store.i80 v240 v256
+v258 = const.i64 4120
+v257 = inttoptr v258
+v259 = load.i64 v257
+v260 = const.i64 0
+v261 = icmp.eq v259 v260
+br v261 ^budget28() ^step28()
+^budget28():
+trap
+^step28():
+v262 = const.i64 1
+v263 = sub v259 v262
+store.i64 v257 v263
+v264 = ptrtoint.i64 v18
+v265 = const.i64 64
+v266 = add v264 v265
+v267 = inttoptr v266
+v269 = const.i64 4120
+v268 = inttoptr v269
+v270 = load.i64 v268
+v271 = const.i64 0
+v272 = icmp.eq v270 v271
+br v272 ^budget29() ^step29()
+^budget29():
+trap
+^step29():
+v273 = const.i64 1
+v274 = sub v270 v273
+store.i64 v268 v274
+v275 = const.i64 4
+call @R10 v267 v275
+v277 = const.i64 4120
+v276 = inttoptr v277
+v278 = load.i64 v276
+v279 = const.i64 0
+v280 = icmp.eq v278 v279
+br v280 ^budget30() ^step30()
+^budget30():
+trap
+^step30():
+v281 = const.i64 1
+v282 = sub v278 v281
+store.i64 v276 v282
+v283 = const.i32 91
+store.i32 v267 v283
+v285 = const.i64 4120
+v284 = inttoptr v285
+v286 = load.i64 v284
+v287 = const.i64 0
+v288 = icmp.eq v286 v287
+br v288 ^budget31() ^step31()
+^budget31():
+trap
+^step31():
+v289 = const.i64 1
+v290 = sub v286 v289
+store.i64 v284 v290
+v291 = const.i32 0
+call @R4 v291 v18
+v293 = const.i64 4120
+v292 = inttoptr v293
+v294 = load.i64 v292
+v295 = const.i64 0
+v296 = icmp.eq v294 v295
+br v296 ^budget32() ^step32()
+^budget32():
+trap
+^step32():
+v297 = const.i64 1
+v298 = sub v294 v297
+store.i64 v292 v298
+call @R9 v9
+v300 = const.i64 4120
+v299 = inttoptr v300
+v301 = load.i64 v299
+v302 = const.i64 0
+v303 = icmp.eq v301 v302
+br v303 ^budget33() ^step33()
+^budget33():
+trap
+^step33():
+v304 = const.i64 1
+v305 = sub v301 v304
+store.i64 v299 v305
+v306 = const.i32 0
+ret v306
+fn r @R1 (a0:i32, a1:ptr) () () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 32
+v8 = const.i64 16
+v9 = call @R8 v7 v8
+v11 = const.i64 4120
+v10 = inttoptr v11
+v12 = load.i64 v10
+v13 = const.i64 0
+v14 = icmp.eq v12 v13
+br v14 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v15 = const.i64 1
+v16 = sub v12 v15
+store.i64 v10 v16
+v17 = ptrtoint.i64 v9
+v18 = inttoptr v17
+v20 = const.i64 4120
+v19 = inttoptr v20
+v21 = load.i64 v19
+v22 = const.i64 0
+v23 = icmp.eq v21 v22
+br v23 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v24 = const.i64 1
+v25 = sub v21 v24
+store.i64 v19 v25
+v26 = const.i64 4
+call @R10 v18 v26
+v28 = const.i64 4120
+v27 = inttoptr v28
+v29 = load.i64 v27
+v30 = const.i64 0
+v31 = icmp.eq v29 v30
+br v31 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v32 = const.i64 1
+v33 = sub v29 v32
+store.i64 v27 v33
+v34 = const.i32 48
+store.i32 v18 v34
+v36 = const.i64 4120
+v35 = inttoptr v36
+v37 = load.i64 v35
+v38 = const.i64 0
+v39 = icmp.eq v37 v38
+br v39 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v40 = const.i64 1
+v41 = sub v37 v40
+store.i64 v35 v41
+v42 = ptrtoint.i64 v18
+v43 = const.i64 4
+v44 = add v42 v43
+v45 = inttoptr v44
+v47 = const.i64 4120
+v46 = inttoptr v47
+v48 = load.i64 v46
+v49 = const.i64 0
+v50 = icmp.eq v48 v49
+br v50 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v51 = const.i64 1
+v52 = sub v48 v51
+store.i64 v46 v52
+v53 = const.i64 4
+call @R10 v45 v53
+v55 = const.i64 4120
+v54 = inttoptr v55
+v56 = load.i64 v54
+v57 = const.i64 0
+v58 = icmp.eq v56 v57
+br v58 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v59 = const.i64 1
+v60 = sub v56 v59
+store.i64 v54 v60
+v61 = const.i32 176
+store.i32 v45 v61
+v63 = const.i64 4120
+v62 = inttoptr v63
+v64 = load.i64 v62
+v65 = const.i64 0
+v66 = icmp.eq v64 v65
+br v66 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v67 = const.i64 1
+v68 = sub v64 v67
+store.i64 v62 v68
+v69 = ptrtoint.i64 v18
+v70 = const.i64 8
+v71 = add v69 v70
+v72 = inttoptr v71
+v74 = const.i64 4120
+v73 = inttoptr v74
+v75 = load.i64 v73
+v76 = const.i64 0
+v77 = icmp.eq v75 v76
+br v77 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v78 = const.i64 1
+v79 = sub v75 v78
+store.i64 v73 v79
+v80 = const.i64 8
+call @R10 v72 v80
+v82 = const.i64 4120
+v81 = inttoptr v82
+v83 = load.i64 v81
+v84 = const.i64 0
+v85 = icmp.eq v83 v84
+br v85 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v86 = const.i64 1
+v87 = sub v83 v86
+store.i64 v81 v87
+v88 = ptrtoint.i64 a1
+store.i64 v72 v88
+v90 = const.i64 4120
+v89 = inttoptr v90
+v91 = load.i64 v89
+v92 = const.i64 0
+v93 = icmp.eq v91 v92
+br v93 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v94 = const.i64 1
+v95 = sub v91 v94
+store.i64 v89 v95
+v96 = ptrtoint.i64 v18
+v97 = const.i64 16
+v98 = add v96 v97
+v99 = inttoptr v98
+v101 = const.i64 4120
+v100 = inttoptr v101
+v102 = load.i64 v100
+v103 = const.i64 0
+v104 = icmp.eq v102 v103
+br v104 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v105 = const.i64 1
+v106 = sub v102 v105
+store.i64 v100 v106
+v107 = const.i64 8
+call @R10 v99 v107
+v109 = const.i64 4120
+v108 = inttoptr v109
+v110 = load.i64 v108
+v111 = const.i64 0
+v112 = icmp.eq v110 v111
+br v112 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v113 = const.i64 1
+v114 = sub v110 v113
+store.i64 v108 v114
+v116 = const.i64 0
+v115 = inttoptr v116
+v117 = ptrtoint.i64 v115
+store.i64 v99 v117
+v119 = const.i64 4120
+v118 = inttoptr v119
+v120 = load.i64 v118
+v121 = const.i64 0
+v122 = icmp.eq v120 v121
+br v122 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v123 = const.i64 1
+v124 = sub v120 v123
+store.i64 v118 v124
+v126 = const.i64 4112
+v125 = inttoptr v126
+v127 = const.i64 0
+effect console.write v125 v127
+v129 = const.i64 4120
+v128 = inttoptr v129
+v130 = load.i64 v128
+v131 = const.i64 0
+v132 = icmp.eq v130 v131
+br v132 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v133 = const.i64 1
+v134 = sub v130 v133
+store.i64 v128 v134
+call @R9 v9
+v136 = const.i64 4120
+v135 = inttoptr v136
+v137 = load.i64 v135
+v138 = const.i64 0
+v139 = icmp.eq v137 v138
+br v139 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v140 = const.i64 1
+v141 = sub v137 v140
+store.i64 v135 v141
+ret
+fn r @R10 (a0:ptr, a1:i64) () () () ()
+^b0():
+v2 = const.i64 4120
+v1 = inttoptr v2
+v3 = load.i64 v1
+v4 = const.i64 0
+v5 = icmp.eq v3 v4
+br v5 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v6 = const.i64 1
+v7 = sub v3 v6
+store.i64 v1 v7
+v8 = ptrtoint.i64 a0
+v10 = const.i64 4120
+v9 = inttoptr v10
+v11 = load.i64 v9
+v12 = const.i64 0
+v13 = icmp.eq v11 v12
+br v13 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v14 = const.i64 1
+v15 = sub v11 v14
+store.i64 v9 v15
+v16 = add v8 a1
+v18 = const.i64 4120
+v17 = inttoptr v18
+v19 = load.i64 v17
+v20 = const.i64 0
+v21 = icmp.eq v19 v20
+br v21 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v22 = const.i64 1
+v23 = sub v19 v22
+store.i64 v17 v23
+v24 = icmp.ult v16 v8
+v26 = const.i64 4120
+v25 = inttoptr v26
+v27 = load.i64 v25
+v28 = const.i64 0
+v29 = icmp.eq v27 v28
+br v29 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v30 = const.i64 1
+v31 = sub v27 v30
+store.i64 v25 v31
+br v24 ^b6() ^b1()
+^b1():
+v33 = const.i64 4120
+v32 = inttoptr v33
+v34 = load.i64 v32
+v35 = const.i64 0
+v36 = icmp.eq v34 v35
+br v36 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v37 = const.i64 1
+v38 = sub v34 v37
+store.i64 v32 v38
+v40 = const.i64 4128
+v39 = inttoptr v40
+v41 = load.i64 v39
+v42 = inttoptr v41
+v44 = const.i64 4120
+v43 = inttoptr v44
+v45 = load.i64 v43
+v46 = const.i64 0
+v47 = icmp.eq v45 v46
+br v47 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v48 = const.i64 1
+v49 = sub v45 v48
+store.i64 v43 v49
+v50 = ptrtoint.i64 v42
+v52 = const.i64 4120
+v51 = inttoptr v52
+v53 = load.i64 v51
+v54 = const.i64 0
+v55 = icmp.eq v53 v54
+br v55 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v56 = const.i64 1
+v57 = sub v53 v56
+store.i64 v51 v57
+v59 = const.i64 4136
+v58 = inttoptr v59
+v60 = load.i64 v58
+v62 = const.i64 4120
+v61 = inttoptr v62
+v63 = load.i64 v61
+v64 = const.i64 0
+v65 = icmp.eq v63 v64
+br v65 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v66 = const.i64 1
+v67 = sub v63 v66
+store.i64 v61 v67
+v68 = add v50 v60
+v70 = const.i64 4120
+v69 = inttoptr v70
+v71 = load.i64 v69
+v72 = const.i64 0
+v73 = icmp.eq v71 v72
+br v73 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v74 = const.i64 1
+v75 = sub v71 v74
+store.i64 v69 v75
+v76 = icmp.ule v50 v8
+v78 = const.i64 4120
+v77 = inttoptr v78
+v79 = load.i64 v77
+v80 = const.i64 0
+v81 = icmp.eq v79 v80
+br v81 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v82 = const.i64 1
+v83 = sub v79 v82
+store.i64 v77 v83
+v84 = icmp.ult v8 v68
+v86 = const.i64 4120
+v85 = inttoptr v86
+v87 = load.i64 v85
+v88 = const.i64 0
+v89 = icmp.eq v87 v88
+br v89 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v90 = const.i64 1
+v91 = sub v87 v90
+store.i64 v85 v91
+v92 = and v76 v84
+v94 = const.i64 4120
+v93 = inttoptr v94
+v95 = load.i64 v93
+v96 = const.i64 0
+v97 = icmp.eq v95 v96
+br v97 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v98 = const.i64 1
+v99 = sub v95 v98
+store.i64 v93 v99
+br v92 ^b2() ^b7()
+^b2():
+v101 = const.i64 4120
+v100 = inttoptr v101
+v102 = load.i64 v100
+v103 = const.i64 0
+v104 = icmp.eq v102 v103
+br v104 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v105 = const.i64 1
+v106 = sub v102 v105
+store.i64 v100 v106
+v108 = const.i64 4152
+v107 = inttoptr v108
+v109 = load.i64 v107
+v111 = const.i64 4120
+v110 = inttoptr v111
+v112 = load.i64 v110
+v113 = const.i64 0
+v114 = icmp.eq v112 v113
+br v114 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v115 = const.i64 1
+v116 = sub v112 v115
+store.i64 v110 v116
+v117 = const.i64 0
+br ^b3(v117)
+^b3(v0:i64):
+v119 = const.i64 4120
+v118 = inttoptr v119
+v120 = load.i64 v118
+v121 = const.i64 0
+v122 = icmp.eq v120 v121
+br v122 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v123 = const.i64 1
+v124 = sub v120 v123
+store.i64 v118 v124
+v125 = icmp.eq v0 v109
+v127 = const.i64 4120
+v126 = inttoptr v127
+v128 = load.i64 v126
+v129 = const.i64 0
+v130 = icmp.eq v128 v129
+br v130 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v131 = const.i64 1
+v132 = sub v128 v131
+store.i64 v126 v132
+br v125 ^b6() ^b4()
+^b4():
+v134 = const.i64 4120
+v133 = inttoptr v134
+v135 = load.i64 v133
+v136 = const.i64 0
+v137 = icmp.eq v135 v136
+br v137 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v138 = const.i64 1
+v139 = sub v135 v138
+store.i64 v133 v139
+v142 = const.i64 8272
+v141 = inttoptr v142
+v140 = ptrtoint.i64 v141
+v143 = const.i64 24
+v144 = mul v0 v143
+v145 = add v140 v144
+v146 = inttoptr v145
+v148 = const.i64 4120
+v147 = inttoptr v148
+v149 = load.i64 v147
+v150 = const.i64 0
+v151 = icmp.eq v149 v150
+br v151 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v152 = const.i64 1
+v153 = sub v149 v152
+store.i64 v147 v153
+v154 = load.i64 v146
+v156 = const.i64 4120
+v155 = inttoptr v156
+v157 = load.i64 v155
+v158 = const.i64 0
+v159 = icmp.eq v157 v158
+br v159 ^budget18() ^step18()
+^budget18():
+trap
+^step18():
+v160 = const.i64 1
+v161 = sub v157 v160
+store.i64 v155 v161
+v162 = ptrtoint.i64 v146
+v163 = const.i64 8
+v164 = add v162 v163
+v165 = inttoptr v164
+v167 = const.i64 4120
+v166 = inttoptr v167
+v168 = load.i64 v166
+v169 = const.i64 0
+v170 = icmp.eq v168 v169
+br v170 ^budget19() ^step19()
+^budget19():
+trap
+^step19():
+v171 = const.i64 1
+v172 = sub v168 v171
+store.i64 v166 v172
+v173 = load.i64 v165
+v175 = const.i64 4120
+v174 = inttoptr v175
+v176 = load.i64 v174
+v177 = const.i64 0
+v178 = icmp.eq v176 v177
+br v178 ^budget20() ^step20()
+^budget20():
+trap
+^step20():
+v179 = const.i64 1
+v180 = sub v176 v179
+store.i64 v174 v180
+v181 = add v154 v173
+v183 = const.i64 4120
+v182 = inttoptr v183
+v184 = load.i64 v182
+v185 = const.i64 0
+v186 = icmp.eq v184 v185
+br v186 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v187 = const.i64 1
+v188 = sub v184 v187
+store.i64 v182 v188
+v189 = icmp.ule v154 v8
+v191 = const.i64 4120
+v190 = inttoptr v191
+v192 = load.i64 v190
+v193 = const.i64 0
+v194 = icmp.eq v192 v193
+br v194 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v195 = const.i64 1
+v196 = sub v192 v195
+store.i64 v190 v196
+v197 = icmp.ule v16 v181
+v199 = const.i64 4120
+v198 = inttoptr v199
+v200 = load.i64 v198
+v201 = const.i64 0
+v202 = icmp.eq v200 v201
+br v202 ^budget23() ^step23()
+^budget23():
+trap
+^step23():
+v203 = const.i64 1
+v204 = sub v200 v203
+store.i64 v198 v204
+v205 = and v189 v197
+v207 = const.i64 4120
+v206 = inttoptr v207
+v208 = load.i64 v206
+v209 = const.i64 0
+v210 = icmp.eq v208 v209
+br v210 ^budget24() ^step24()
+^budget24():
+trap
+^step24():
+v211 = const.i64 1
+v212 = sub v208 v211
+store.i64 v206 v212
+br v205 ^b7() ^b5()
+^b5():
+v214 = const.i64 4120
+v213 = inttoptr v214
+v215 = load.i64 v213
+v216 = const.i64 0
+v217 = icmp.eq v215 v216
+br v217 ^budget25() ^step25()
+^budget25():
+trap
+^step25():
+v218 = const.i64 1
+v219 = sub v215 v218
+store.i64 v213 v219
+v220 = const.i64 1
+v221 = add v0 v220
+v223 = const.i64 4120
+v222 = inttoptr v223
+v224 = load.i64 v222
+v225 = const.i64 0
+v226 = icmp.eq v224 v225
+br v226 ^budget26() ^step26()
+^budget26():
+trap
+^step26():
+v227 = const.i64 1
+v228 = sub v224 v227
+store.i64 v222 v228
+br ^b3(v221)
+^b7():
+v230 = const.i64 4120
+v229 = inttoptr v230
+v231 = load.i64 v229
+v232 = const.i64 0
+v233 = icmp.eq v231 v232
+br v233 ^budget27() ^step27()
+^budget27():
+trap
+^step27():
+v234 = const.i64 1
+v235 = sub v231 v234
+store.i64 v229 v235
+ret
+^b6():
+v237 = const.i64 4120
+v236 = inttoptr v237
+v238 = load.i64 v236
+v239 = const.i64 0
+v240 = icmp.eq v238 v239
+br v240 ^budget28() ^step28()
+^budget28():
+trap
+^step28():
+v241 = const.i64 1
+v242 = sub v238 v241
+store.i64 v236 v242
+trap
+fn r @R2 (a0:ptr) () () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 80
+v8 = const.i64 16
+v9 = call @R8 v7 v8
+v11 = const.i64 4120
+v10 = inttoptr v11
+v12 = load.i64 v10
+v13 = const.i64 0
+v14 = icmp.eq v12 v13
+br v14 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v15 = const.i64 1
+v16 = sub v12 v15
+store.i64 v10 v16
+v17 = ptrtoint.i64 v9
+v18 = inttoptr v17
+v20 = const.i64 4120
+v19 = inttoptr v20
+v21 = load.i64 v19
+v22 = const.i64 0
+v23 = icmp.eq v21 v22
+br v23 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v24 = const.i64 1
+v25 = sub v21 v24
+store.i64 v19 v25
+v26 = const.i32 4294967279
+store.i32 v18 v26
+v28 = const.i64 4120
+v27 = inttoptr v28
+v29 = load.i64 v27
+v30 = const.i64 0
+v31 = icmp.eq v29 v30
+br v31 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v32 = const.i64 1
+v33 = sub v29 v32
+store.i64 v27 v33
+v34 = ptrtoint.i64 v18
+v35 = const.i64 8
+v36 = add v34 v35
+v37 = inttoptr v36
+v39 = const.i64 4120
+v38 = inttoptr v39
+v40 = load.i64 v38
+v41 = const.i64 0
+v42 = icmp.eq v40 v41
+br v42 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v43 = const.i64 1
+v44 = sub v40 v43
+store.i64 v38 v44
+v46 = const.i64 4104
+v45 = inttoptr v46
+v47 = ptrtoint.i64 v45
+store.i64 v37 v47
+v49 = const.i64 4120
+v48 = inttoptr v49
+v50 = load.i64 v48
+v51 = const.i64 0
+v52 = icmp.eq v50 v51
+br v52 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v53 = const.i64 1
+v54 = sub v50 v53
+store.i64 v48 v54
+v55 = ptrtoint.i64 v18
+v56 = const.i64 16
+v57 = add v55 v56
+v58 = inttoptr v57
+v60 = const.i64 4120
+v59 = inttoptr v60
+v61 = load.i64 v59
+v62 = const.i64 0
+v63 = icmp.eq v61 v62
+br v63 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v64 = const.i64 1
+v65 = sub v61 v64
+store.i64 v59 v65
+v66 = const.i64 18446744061363872715
+store.i64 v58 v66
+v68 = const.i64 4120
+v67 = inttoptr v68
+v69 = load.i64 v67
+v70 = const.i64 0
+v71 = icmp.eq v69 v70
+br v71 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v72 = const.i64 1
+v73 = sub v69 v72
+store.i64 v67 v73
+v74 = ptrtoint.i64 v18
+v75 = const.i64 24
+v76 = add v74 v75
+v77 = inttoptr v76
+v79 = const.i64 4120
+v78 = inttoptr v79
+v80 = load.i64 v78
+v81 = const.i64 0
+v82 = icmp.eq v80 v81
+br v82 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v83 = const.i64 1
+v84 = sub v80 v83
+store.i64 v78 v84
+v85 = const.i64 81985529216486895
+store.i64 v77 v85
+v87 = const.i64 4120
+v86 = inttoptr v87
+v88 = load.i64 v86
+v89 = const.i64 0
+v90 = icmp.eq v88 v89
+br v90 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v91 = const.i64 1
+v92 = sub v88 v91
+store.i64 v86 v92
+v93 = ptrtoint.i64 v18
+v94 = const.i64 32
+v95 = add v93 v94
+v96 = inttoptr v95
+v98 = const.i64 4120
+v97 = inttoptr v98
+v99 = load.i64 v97
+v100 = const.i64 0
+v101 = icmp.eq v99 v100
+br v101 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v102 = const.i64 1
+v103 = sub v99 v102
+store.i64 v97 v103
+v104 = const.i32 4000000001
+store.i32 v96 v104
+v106 = const.i64 4120
+v105 = inttoptr v106
+v107 = load.i64 v105
+v108 = const.i64 0
+v109 = icmp.eq v107 v108
+br v109 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v110 = const.i64 1
+v111 = sub v107 v110
+store.i64 v105 v111
+v112 = ptrtoint.i64 v18
+v113 = const.i64 40
+v114 = add v112 v113
+v115 = inttoptr v114
+v117 = const.i64 4120
+v116 = inttoptr v117
+v118 = load.i64 v116
+v119 = const.i64 0
+v120 = icmp.eq v118 v119
+br v120 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v121 = const.i64 1
+v122 = sub v118 v121
+store.i64 v116 v122
+v123 = const.i64 4614500768194494464
+store.i64 v115 v123
+v125 = const.i64 4120
+v124 = inttoptr v125
+v126 = load.i64 v124
+v127 = const.i64 0
+v128 = icmp.eq v126 v127
+br v128 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v129 = const.i64 1
+v130 = sub v126 v129
+store.i64 v124 v130
+v131 = ptrtoint.i64 v18
+v132 = const.i64 48
+v133 = add v131 v132
+v134 = inttoptr v133
+v136 = const.i64 4120
+v135 = inttoptr v136
+v137 = load.i64 v135
+v138 = const.i64 0
+v139 = icmp.eq v137 v138
+br v139 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v140 = const.i64 1
+v141 = sub v137 v140
+store.i64 v135 v141
+v142 = const.i80 302226843217638866288640
+store.i80 v134 v142
+v144 = const.i64 4120
+v143 = inttoptr v144
+v145 = load.i64 v143
+v146 = const.i64 0
+v147 = icmp.eq v145 v146
+br v147 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v148 = const.i64 1
+v149 = sub v145 v148
+store.i64 v143 v149
+v150 = ptrtoint.i64 v18
+v151 = const.i64 64
+v152 = add v150 v151
+v153 = inttoptr v152
+v155 = const.i64 4120
+v154 = inttoptr v155
+v156 = load.i64 v154
+v157 = const.i64 0
+v158 = icmp.eq v156 v157
+br v158 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v159 = const.i64 1
+v160 = sub v156 v159
+store.i64 v154 v160
+v161 = const.i32 91
+store.i32 v153 v161
+v163 = const.i64 4120
+v162 = inttoptr v163
+v164 = load.i64 v162
+v165 = const.i64 0
+v166 = icmp.eq v164 v165
+br v166 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v167 = const.i64 1
+v168 = sub v164 v167
+store.i64 v162 v168
+v169 = ptrtoint.i64 a0
+v170 = const.i32 0
+v171 = const.i64 24640
+v172 = icmp.eq v169 v171
+br v172 ^dispatch19() ^dispatch19rest()
+^dispatch19():
+call @R4 v170 v18
+br ^call18done()
+^dispatch19rest():
+v173 = icmp.ult v169 v171
+br v173 ^dispatch19restleft() ^dispatch19restright()
+^dispatch19restleft():
+v174 = const.i64 24624
+v175 = icmp.eq v169 v174
+br v175 ^dispatch20() ^dispatch20rest()
+^dispatch20():
+call @R3 v170 v18
+br ^call18done()
+^dispatch20rest():
+br ^call18bad()
+^dispatch19restright():
+br ^call18bad()
+^call18bad():
+trap
+^call18done():
+v177 = const.i64 4120
+v176 = inttoptr v177
+v178 = load.i64 v176
+v179 = const.i64 0
+v180 = icmp.eq v178 v179
+br v180 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v181 = const.i64 1
+v182 = sub v178 v181
+store.i64 v176 v182
+call @R9 v9
+v184 = const.i64 4120
+v183 = inttoptr v184
+v185 = load.i64 v183
+v186 = const.i64 0
+v187 = icmp.eq v185 v186
+br v187 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v188 = const.i64 1
+v189 = sub v185 v188
+store.i64 v183 v189
+ret
+fn r @R3 (a0:i32, a1:ptr) () () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 24
+v8 = alloc v7
+v10 = const.i64 4120
+v9 = inttoptr v10
+v11 = load.i64 v9
+v12 = const.i64 0
+v13 = icmp.eq v11 v12
+br v13 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v14 = const.i64 1
+v15 = sub v11 v14
+store.i64 v9 v15
+v16 = const.i32 48
+store.i32 v8 v16
+v18 = const.i64 4120
+v17 = inttoptr v18
+v19 = load.i64 v17
+v20 = const.i64 0
+v21 = icmp.eq v19 v20
+br v21 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v22 = const.i64 1
+v23 = sub v19 v22
+store.i64 v17 v23
+v24 = ptrtoint.i64 v8
+v25 = const.i64 4
+v26 = add v24 v25
+v27 = inttoptr v26
+v29 = const.i64 4120
+v28 = inttoptr v29
+v30 = load.i64 v28
+v31 = const.i64 0
+v32 = icmp.eq v30 v31
+br v32 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v33 = const.i64 1
+v34 = sub v30 v33
+store.i64 v28 v34
+v35 = const.i32 176
+store.i32 v27 v35
+v37 = const.i64 4120
+v36 = inttoptr v37
+v38 = load.i64 v36
+v39 = const.i64 0
+v40 = icmp.eq v38 v39
+br v40 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v41 = const.i64 1
+v42 = sub v38 v41
+store.i64 v36 v42
+v43 = ptrtoint.i64 v8
+v44 = const.i64 8
+v45 = add v43 v44
+v46 = inttoptr v45
+v48 = const.i64 4120
+v47 = inttoptr v48
+v49 = load.i64 v47
+v50 = const.i64 0
+v51 = icmp.eq v49 v50
+br v51 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v52 = const.i64 1
+v53 = sub v49 v52
+store.i64 v47 v53
+v54 = ptrtoint.i64 a1
+store.i64 v46 v54
+v56 = const.i64 4120
+v55 = inttoptr v56
+v57 = load.i64 v55
+v58 = const.i64 0
+v59 = icmp.eq v57 v58
+br v59 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v60 = const.i64 1
+v61 = sub v57 v60
+store.i64 v55 v61
+v62 = ptrtoint.i64 v8
+v63 = const.i64 16
+v64 = add v62 v63
+v65 = inttoptr v64
+v67 = const.i64 4120
+v66 = inttoptr v67
+v68 = load.i64 v66
+v69 = const.i64 0
+v70 = icmp.eq v68 v69
+br v70 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v71 = const.i64 1
+v72 = sub v68 v71
+store.i64 v66 v72
+v74 = const.i64 0
+v73 = inttoptr v74
+v75 = ptrtoint.i64 v73
+store.i64 v65 v75
+v77 = const.i64 4120
+v76 = inttoptr v77
+v78 = load.i64 v76
+v79 = const.i64 0
+v80 = icmp.eq v78 v79
+br v80 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v81 = const.i64 1
+v82 = sub v78 v81
+store.i64 v76 v82
+call @R5 v8
+v84 = const.i64 4120
+v83 = inttoptr v84
+v85 = load.i64 v83
+v86 = const.i64 0
+v87 = icmp.eq v85 v86
+br v87 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v88 = const.i64 1
+v89 = sub v85 v88
+store.i64 v83 v89
+free v8
+ret
+fn r @R4 (a0:i32, a1:ptr) () () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 32
+v8 = const.i64 16
+v9 = call @R8 v7 v8
+v11 = const.i64 4120
+v10 = inttoptr v11
+v12 = load.i64 v10
+v13 = const.i64 0
+v14 = icmp.eq v12 v13
+br v14 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v15 = const.i64 1
+v16 = sub v12 v15
+store.i64 v10 v16
+v17 = ptrtoint.i64 v9
+v18 = inttoptr v17
+v20 = const.i64 4120
+v19 = inttoptr v20
+v21 = load.i64 v19
+v22 = const.i64 0
+v23 = icmp.eq v21 v22
+br v23 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v24 = const.i64 1
+v25 = sub v21 v24
+store.i64 v19 v25
+v26 = const.i64 4
+call @R10 v18 v26
+v28 = const.i64 4120
+v27 = inttoptr v28
+v29 = load.i64 v27
+v30 = const.i64 0
+v31 = icmp.eq v29 v30
+br v31 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v32 = const.i64 1
+v33 = sub v29 v32
+store.i64 v27 v33
+v34 = const.i32 48
+store.i32 v18 v34
+v36 = const.i64 4120
+v35 = inttoptr v36
+v37 = load.i64 v35
+v38 = const.i64 0
+v39 = icmp.eq v37 v38
+br v39 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v40 = const.i64 1
+v41 = sub v37 v40
+store.i64 v35 v41
+v42 = ptrtoint.i64 v18
+v43 = const.i64 4
+v44 = add v42 v43
+v45 = inttoptr v44
+v47 = const.i64 4120
+v46 = inttoptr v47
+v48 = load.i64 v46
+v49 = const.i64 0
+v50 = icmp.eq v48 v49
+br v50 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v51 = const.i64 1
+v52 = sub v48 v51
+store.i64 v46 v52
+v53 = const.i64 4
+call @R10 v45 v53
+v55 = const.i64 4120
+v54 = inttoptr v55
+v56 = load.i64 v54
+v57 = const.i64 0
+v58 = icmp.eq v56 v57
+br v58 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v59 = const.i64 1
+v60 = sub v56 v59
+store.i64 v54 v60
+v61 = const.i32 176
+store.i32 v45 v61
+v63 = const.i64 4120
+v62 = inttoptr v63
+v64 = load.i64 v62
+v65 = const.i64 0
+v66 = icmp.eq v64 v65
+br v66 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v67 = const.i64 1
+v68 = sub v64 v67
+store.i64 v62 v68
+v69 = ptrtoint.i64 v18
+v70 = const.i64 8
+v71 = add v69 v70
+v72 = inttoptr v71
+v74 = const.i64 4120
+v73 = inttoptr v74
+v75 = load.i64 v73
+v76 = const.i64 0
+v77 = icmp.eq v75 v76
+br v77 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v78 = const.i64 1
+v79 = sub v75 v78
+store.i64 v73 v79
+v80 = const.i64 8
+call @R10 v72 v80
+v82 = const.i64 4120
+v81 = inttoptr v82
+v83 = load.i64 v81
+v84 = const.i64 0
+v85 = icmp.eq v83 v84
+br v85 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v86 = const.i64 1
+v87 = sub v83 v86
+store.i64 v81 v87
+v88 = ptrtoint.i64 a1
+store.i64 v72 v88
+v90 = const.i64 4120
+v89 = inttoptr v90
+v91 = load.i64 v89
+v92 = const.i64 0
+v93 = icmp.eq v91 v92
+br v93 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v94 = const.i64 1
+v95 = sub v91 v94
+store.i64 v89 v95
+v96 = ptrtoint.i64 v18
+v97 = const.i64 16
+v98 = add v96 v97
+v99 = inttoptr v98
+v101 = const.i64 4120
+v100 = inttoptr v101
+v102 = load.i64 v100
+v103 = const.i64 0
+v104 = icmp.eq v102 v103
+br v104 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v105 = const.i64 1
+v106 = sub v102 v105
+store.i64 v100 v106
+v107 = const.i64 8
+call @R10 v99 v107
+v109 = const.i64 4120
+v108 = inttoptr v109
+v110 = load.i64 v108
+v111 = const.i64 0
+v112 = icmp.eq v110 v111
+br v112 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v113 = const.i64 1
+v114 = sub v110 v113
+store.i64 v108 v114
+v116 = const.i64 0
+v115 = inttoptr v116
+v117 = ptrtoint.i64 v115
+store.i64 v99 v117
+v119 = const.i64 4120
+v118 = inttoptr v119
+v120 = load.i64 v118
+v121 = const.i64 0
+v122 = icmp.eq v120 v121
+br v122 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v123 = const.i64 1
+v124 = sub v120 v123
+store.i64 v118 v124
+call @R5 v18
+v126 = const.i64 4120
+v125 = inttoptr v126
+v127 = load.i64 v125
+v128 = const.i64 0
+v129 = icmp.eq v127 v128
+br v129 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v130 = const.i64 1
+v131 = sub v127 v130
+store.i64 v125 v131
+call @R9 v9
+v133 = const.i64 4120
+v132 = inttoptr v133
+v134 = load.i64 v132
+v135 = const.i64 0
+v136 = icmp.eq v134 v135
+br v136 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v137 = const.i64 1
+v138 = sub v134 v137
+store.i64 v132 v138
+ret
+fn r @R5 (a0:ptr) () () () ()
+^b0():
+v9 = const.i64 4120
+v8 = inttoptr v9
+v10 = load.i64 v8
+v11 = const.i64 0
+v12 = icmp.eq v10 v11
+br v12 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v13 = const.i64 1
+v14 = sub v10 v13
+store.i64 v8 v14
+v15 = const.i64 80
+v16 = const.i64 16
+v17 = call @R8 v15 v16
+v19 = const.i64 4120
+v18 = inttoptr v19
+v20 = load.i64 v18
+v21 = const.i64 0
+v22 = icmp.eq v20 v21
+br v22 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v23 = const.i64 1
+v24 = sub v20 v23
+store.i64 v18 v24
+v25 = ptrtoint.i64 v17
+v26 = inttoptr v25
+v28 = const.i64 4120
+v27 = inttoptr v28
+v29 = load.i64 v27
+v30 = const.i64 0
+v31 = icmp.eq v29 v30
+br v31 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v32 = const.i64 1
+v33 = sub v29 v32
+store.i64 v27 v33
+v34 = ptrtoint.i64 v17
+v35 = const.i64 32
+v36 = add v34 v35
+v37 = inttoptr v36
+v39 = const.i64 4120
+v38 = inttoptr v39
+v40 = load.i64 v38
+v41 = const.i64 0
+v42 = icmp.eq v40 v41
+br v42 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v43 = const.i64 1
+v44 = sub v40 v43
+store.i64 v38 v44
+v45 = ptrtoint.i64 v17
+v46 = const.i64 56
+v47 = add v45 v46
+v48 = inttoptr v47
+v50 = const.i64 4120
+v49 = inttoptr v50
+v51 = load.i64 v49
+v52 = const.i64 0
+v53 = icmp.eq v51 v52
+br v53 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v54 = const.i64 1
+v55 = sub v51 v54
+store.i64 v49 v55
+v56 = ptrtoint.i64 a0
+v57 = inttoptr v56
+v59 = const.i64 4120
+v58 = inttoptr v59
+v60 = load.i64 v58
+v61 = const.i64 0
+v62 = icmp.eq v60 v61
+br v62 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v63 = const.i64 1
+v64 = sub v60 v63
+store.i64 v58 v64
+v65 = const.i64 8
+call @R10 v57 v65
+v67 = const.i64 4120
+v66 = inttoptr v67
+v68 = load.i64 v66
+v69 = const.i64 0
+v70 = icmp.eq v68 v69
+br v70 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v71 = const.i64 1
+v72 = sub v68 v71
+store.i64 v66 v72
+v73 = load.i64 v57
+v75 = const.i64 4120
+v74 = inttoptr v75
+v76 = load.i64 v74
+v77 = const.i64 0
+v78 = icmp.eq v76 v77
+br v78 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v79 = const.i64 1
+v80 = sub v76 v79
+store.i64 v74 v80
+v81 = ptrtoint.i64 a0
+v82 = const.i64 8
+v83 = add v81 v82
+v84 = inttoptr v83
+v86 = const.i64 4120
+v85 = inttoptr v86
+v87 = load.i64 v85
+v88 = const.i64 0
+v89 = icmp.eq v87 v88
+br v89 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v90 = const.i64 1
+v91 = sub v87 v90
+store.i64 v85 v91
+v92 = const.i64 8
+call @R10 v84 v92
+v94 = const.i64 4120
+v93 = inttoptr v94
+v95 = load.i64 v93
+v96 = const.i64 0
+v97 = icmp.eq v95 v96
+br v97 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v98 = const.i64 1
+v99 = sub v95 v98
+store.i64 v93 v99
+v100 = load.i64 v84
+v102 = const.i64 4120
+v101 = inttoptr v102
+v103 = load.i64 v101
+v104 = const.i64 0
+v105 = icmp.eq v103 v104
+br v105 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v106 = const.i64 1
+v107 = sub v103 v106
+store.i64 v101 v107
+v108 = ptrtoint.i64 a0
+v109 = const.i64 16
+v110 = add v108 v109
+v111 = inttoptr v110
+v113 = const.i64 4120
+v112 = inttoptr v113
+v114 = load.i64 v112
+v115 = const.i64 0
+v116 = icmp.eq v114 v115
+br v116 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v117 = const.i64 1
+v118 = sub v114 v117
+store.i64 v112 v118
+v119 = const.i64 8
+call @R10 v111 v119
+v121 = const.i64 4120
+v120 = inttoptr v121
+v122 = load.i64 v120
+v123 = const.i64 0
+v124 = icmp.eq v122 v123
+br v124 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v125 = const.i64 1
+v126 = sub v122 v125
+store.i64 v120 v126
+v127 = load.i64 v111
+v129 = const.i64 4120
+v128 = inttoptr v129
+v130 = load.i64 v128
+v131 = const.i64 0
+v132 = icmp.eq v130 v131
+br v132 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v133 = const.i64 1
+v134 = sub v130 v133
+store.i64 v128 v134
+v135 = ptrtoint.i64 v26
+v136 = inttoptr v135
+v138 = const.i64 4120
+v137 = inttoptr v138
+v139 = load.i64 v137
+v140 = const.i64 0
+v141 = icmp.eq v139 v140
+br v141 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v142 = const.i64 1
+v143 = sub v139 v142
+store.i64 v137 v143
+v144 = const.i64 8
+call @R10 v136 v144
+v146 = const.i64 4120
+v145 = inttoptr v146
+v147 = load.i64 v145
+v148 = const.i64 0
+v149 = icmp.eq v147 v148
+br v149 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v150 = const.i64 1
+v151 = sub v147 v150
+store.i64 v145 v151
+store.i64 v136 v73
+v153 = const.i64 4120
+v152 = inttoptr v153
+v154 = load.i64 v152
+v155 = const.i64 0
+v156 = icmp.eq v154 v155
+br v156 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v157 = const.i64 1
+v158 = sub v154 v157
+store.i64 v152 v158
+v159 = ptrtoint.i64 v26
+v160 = const.i64 8
+v161 = add v159 v160
+v162 = inttoptr v161
+v164 = const.i64 4120
+v163 = inttoptr v164
+v165 = load.i64 v163
+v166 = const.i64 0
+v167 = icmp.eq v165 v166
+br v167 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v168 = const.i64 1
+v169 = sub v165 v168
+store.i64 v163 v169
+v170 = const.i64 8
+call @R10 v162 v170
+v172 = const.i64 4120
+v171 = inttoptr v172
+v173 = load.i64 v171
+v174 = const.i64 0
+v175 = icmp.eq v173 v174
+br v175 ^budget18() ^step18()
+^budget18():
+trap
+^step18():
+v176 = const.i64 1
+v177 = sub v173 v176
+store.i64 v171 v177
+store.i64 v162 v100
+v179 = const.i64 4120
+v178 = inttoptr v179
+v180 = load.i64 v178
+v181 = const.i64 0
+v182 = icmp.eq v180 v181
+br v182 ^budget19() ^step19()
+^budget19():
+trap
+^step19():
+v183 = const.i64 1
+v184 = sub v180 v183
+store.i64 v178 v184
+v185 = ptrtoint.i64 v26
+v186 = const.i64 16
+v187 = add v185 v186
+v188 = inttoptr v187
+v190 = const.i64 4120
+v189 = inttoptr v190
+v191 = load.i64 v189
+v192 = const.i64 0
+v193 = icmp.eq v191 v192
+br v193 ^budget20() ^step20()
+^budget20():
+trap
+^step20():
+v194 = const.i64 1
+v195 = sub v191 v194
+store.i64 v189 v195
+v196 = const.i64 8
+call @R10 v188 v196
+v198 = const.i64 4120
+v197 = inttoptr v198
+v199 = load.i64 v197
+v200 = const.i64 0
+v201 = icmp.eq v199 v200
+br v201 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v202 = const.i64 1
+v203 = sub v199 v202
+store.i64 v197 v203
+store.i64 v188 v127
+v205 = const.i64 4120
+v204 = inttoptr v205
+v206 = load.i64 v204
+v207 = const.i64 0
+v208 = icmp.eq v206 v207
+br v208 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v209 = const.i64 1
+v210 = sub v206 v209
+store.i64 v204 v210
+v211 = ptrtoint.i64 v48
+v212 = const.i64 1
+v213 = add v211 v212
+v214 = inttoptr v213
+v216 = const.i64 4120
+v215 = inttoptr v216
+v217 = load.i64 v215
+v218 = const.i64 0
+v219 = icmp.eq v217 v218
+br v219 ^budget23() ^step23()
+^budget23():
+trap
+^step23():
+v220 = const.i64 1
+v221 = sub v217 v220
+store.i64 v215 v221
+v222 = ptrtoint.i64 v48
+v223 = const.i64 2
+v224 = add v222 v223
+v225 = inttoptr v224
+v227 = const.i64 4120
+v226 = inttoptr v227
+v228 = load.i64 v226
+v229 = const.i64 0
+v230 = icmp.eq v228 v229
+br v230 ^budget24() ^step24()
+^budget24():
+trap
+^step24():
+v231 = const.i64 1
+v232 = sub v228 v231
+store.i64 v226 v232
+v233 = ptrtoint.i64 v48
+v234 = const.i64 3
+v235 = add v233 v234
+v236 = inttoptr v235
+v238 = const.i64 4120
+v237 = inttoptr v238
+v239 = load.i64 v237
+v240 = const.i64 0
+v241 = icmp.eq v239 v240
+br v241 ^budget25() ^step25()
+^budget25():
+trap
+^step25():
+v242 = const.i64 1
+v243 = sub v239 v242
+store.i64 v237 v243
+v244 = ptrtoint.i64 v48
+v245 = const.i64 4
+v246 = add v244 v245
+v247 = inttoptr v246
+v249 = const.i64 4120
+v248 = inttoptr v249
+v250 = load.i64 v248
+v251 = const.i64 0
+v252 = icmp.eq v250 v251
+br v252 ^budget26() ^step26()
+^budget26():
+trap
+^step26():
+v253 = const.i64 1
+v254 = sub v250 v253
+store.i64 v248 v254
+v255 = ptrtoint.i64 v37
+v256 = const.i64 4
+v257 = add v255 v256
+v258 = inttoptr v257
+v260 = const.i64 4120
+v259 = inttoptr v260
+v261 = load.i64 v259
+v262 = const.i64 0
+v263 = icmp.eq v261 v262
+br v263 ^budget27() ^step27()
+^budget27():
+trap
+^step27():
+v264 = const.i64 1
+v265 = sub v261 v264
+store.i64 v259 v265
+v266 = ptrtoint.i64 v48
+v267 = const.i64 5
+v268 = add v266 v267
+v269 = inttoptr v268
+v271 = const.i64 4120
+v270 = inttoptr v271
+v272 = load.i64 v270
+v273 = const.i64 0
+v274 = icmp.eq v272 v273
+br v274 ^budget28() ^step28()
+^budget28():
+trap
+^step28():
+v275 = const.i64 1
+v276 = sub v272 v275
+store.i64 v270 v276
+v277 = ptrtoint.i64 v37
+v278 = const.i64 8
+v279 = add v277 v278
+v280 = inttoptr v279
+v282 = const.i64 4120
+v281 = inttoptr v282
+v283 = load.i64 v281
+v284 = const.i64 0
+v285 = icmp.eq v283 v284
+br v285 ^budget29() ^step29()
+^budget29():
+trap
+^step29():
+v286 = const.i64 1
+v287 = sub v283 v286
+store.i64 v281 v287
+v288 = ptrtoint.i64 v48
+v289 = const.i64 6
+v290 = add v288 v289
+v291 = inttoptr v290
+v293 = const.i64 4120
+v292 = inttoptr v293
+v294 = load.i64 v292
+v295 = const.i64 0
+v296 = icmp.eq v294 v295
+br v296 ^budget30() ^step30()
+^budget30():
+trap
+^step30():
+v297 = const.i64 1
+v298 = sub v294 v297
+store.i64 v292 v298
+v299 = ptrtoint.i64 v48
+v300 = const.i64 7
+v301 = add v299 v300
+v302 = inttoptr v301
+v304 = const.i64 4120
+v303 = inttoptr v304
+v305 = load.i64 v303
+v306 = const.i64 0
+v307 = icmp.eq v305 v306
+br v307 ^budget31() ^step31()
+^budget31():
+trap
+^step31():
+v308 = const.i64 1
+v309 = sub v305 v308
+store.i64 v303 v309
+v310 = ptrtoint.i64 v48
+v311 = const.i64 8
+v312 = add v310 v311
+v313 = inttoptr v312
+v315 = const.i64 4120
+v314 = inttoptr v315
+v316 = load.i64 v314
+v317 = const.i64 0
+v318 = icmp.eq v316 v317
+br v318 ^budget32() ^step32()
+^budget32():
+trap
+^step32():
+v319 = const.i64 1
+v320 = sub v316 v319
+store.i64 v314 v320
+v321 = ptrtoint.i64 v37
+v322 = const.i64 8
+v323 = add v321 v322
+v324 = inttoptr v323
+v326 = const.i64 4120
+v325 = inttoptr v326
+v327 = load.i64 v325
+v328 = const.i64 0
+v329 = icmp.eq v327 v328
+br v329 ^budget33() ^step33()
+^budget33():
+trap
+^step33():
+v330 = const.i64 1
+v331 = sub v327 v330
+store.i64 v325 v331
+v332 = ptrtoint.i64 v37
+v333 = const.i64 16
+v334 = add v332 v333
+v335 = inttoptr v334
+v337 = const.i64 4120
+v336 = inttoptr v337
+v338 = load.i64 v336
+v339 = const.i64 0
+v340 = icmp.eq v338 v339
+br v340 ^budget34() ^step34()
+^budget34():
+trap
+^step34():
+v341 = const.i64 1
+v342 = sub v338 v341
+store.i64 v336 v342
+v343 = ptrtoint.i64 v37
+v344 = const.i64 8
+v345 = add v343 v344
+v346 = inttoptr v345
+v348 = const.i64 4120
+v347 = inttoptr v348
+v349 = load.i64 v347
+v350 = const.i64 0
+v351 = icmp.eq v349 v350
+br v351 ^budget35() ^step35()
+^budget35():
+trap
+^step35():
+v352 = const.i64 1
+v353 = sub v349 v352
+store.i64 v347 v353
+v354 = ptrtoint.i64 v37
+v355 = const.i64 16
+v356 = add v354 v355
+v357 = inttoptr v356
+v359 = const.i64 4120
+v358 = inttoptr v359
+v360 = load.i64 v358
+v361 = const.i64 0
+v362 = icmp.eq v360 v361
+br v362 ^budget36() ^step36()
+^budget36():
+trap
+^step36():
+v363 = const.i64 1
+v364 = sub v360 v363
+store.i64 v358 v364
+v365 = ptrtoint.i64 v37
+v366 = const.i64 8
+v367 = add v365 v366
+v368 = inttoptr v367
+v370 = const.i64 4120
+v369 = inttoptr v370
+v371 = load.i64 v369
+v372 = const.i64 0
+v373 = icmp.eq v371 v372
+br v373 ^budget37() ^step37()
+^budget37():
+trap
+^step37():
+v374 = const.i64 1
+v375 = sub v371 v374
+store.i64 v369 v375
+v376 = ptrtoint.i64 v37
+v377 = const.i64 16
+v378 = add v376 v377
+v379 = inttoptr v378
+v381 = const.i64 4120
+v380 = inttoptr v381
+v382 = load.i64 v380
+v383 = const.i64 0
+v384 = icmp.eq v382 v383
+br v384 ^budget38() ^step38()
+^budget38():
+trap
+^step38():
+v385 = const.i64 1
+v386 = sub v382 v385
+store.i64 v380 v386
+v387 = ptrtoint.i64 v37
+v388 = const.i64 8
+v389 = add v387 v388
+v390 = inttoptr v389
+v392 = const.i64 4120
+v391 = inttoptr v392
+v393 = load.i64 v391
+v394 = const.i64 0
+v395 = icmp.eq v393 v394
+br v395 ^budget39() ^step39()
+^budget39():
+trap
+^step39():
+v396 = const.i64 1
+v397 = sub v393 v396
+store.i64 v391 v397
+v398 = ptrtoint.i64 v37
+v399 = const.i64 16
+v400 = add v398 v399
+v401 = inttoptr v400
+v403 = const.i64 4120
+v402 = inttoptr v403
+v404 = load.i64 v402
+v405 = const.i64 0
+v406 = icmp.eq v404 v405
+br v406 ^budget40() ^step40()
+^budget40():
+trap
+^step40():
+v407 = const.i64 1
+v408 = sub v404 v407
+store.i64 v402 v408
+v409 = ptrtoint.i64 v37
+v410 = const.i64 8
+v411 = add v409 v410
+v412 = inttoptr v411
+v414 = const.i64 4120
+v413 = inttoptr v414
+v415 = load.i64 v413
+v416 = const.i64 0
+v417 = icmp.eq v415 v416
+br v417 ^budget41() ^step41()
+^budget41():
+trap
+^step41():
+v418 = const.i64 1
+v419 = sub v415 v418
+store.i64 v413 v419
+v420 = ptrtoint.i64 v37
+v421 = const.i64 16
+v422 = add v420 v421
+v423 = inttoptr v422
+v425 = const.i64 4120
+v424 = inttoptr v425
+v426 = load.i64 v424
+v427 = const.i64 0
+v428 = icmp.eq v426 v427
+br v428 ^budget42() ^step42()
+^budget42():
+trap
+^step42():
+v429 = const.i64 1
+v430 = sub v426 v429
+store.i64 v424 v430
+v431 = ptrtoint.i64 v37
+v432 = const.i64 8
+v433 = add v431 v432
+v434 = inttoptr v433
+v436 = const.i64 4120
+v435 = inttoptr v436
+v437 = load.i64 v435
+v438 = const.i64 0
+v439 = icmp.eq v437 v438
+br v439 ^budget43() ^step43()
+^budget43():
+trap
+^step43():
+v440 = const.i64 1
+v441 = sub v437 v440
+store.i64 v435 v441
+v442 = ptrtoint.i64 v37
+v443 = const.i64 16
+v444 = add v442 v443
+v445 = inttoptr v444
+v447 = const.i64 4120
+v446 = inttoptr v447
+v448 = load.i64 v446
+v449 = const.i64 0
+v450 = icmp.eq v448 v449
+br v450 ^budget44() ^step44()
+^budget44():
+trap
+^step44():
+v451 = const.i64 1
+v452 = sub v448 v451
+store.i64 v446 v452
+v453 = ptrtoint.i64 v37
+v454 = const.i64 16
+v455 = add v453 v454
+v456 = inttoptr v455
+v458 = const.i64 4120
+v457 = inttoptr v458
+v459 = load.i64 v457
+v460 = const.i64 0
+v461 = icmp.eq v459 v460
+br v461 ^budget45() ^step45()
+^budget45():
+trap
+^step45():
+v462 = const.i64 1
+v463 = sub v459 v462
+store.i64 v457 v463
+v464 = const.i32 0
+br ^b2(v464)
+^b2(v0:i32):
+v466 = const.i64 4120
+v465 = inttoptr v466
+v467 = load.i64 v465
+v468 = const.i64 0
+v469 = icmp.eq v467 v468
+br v469 ^budget46() ^step46()
+^budget46():
+trap
+^step46():
+v470 = const.i64 1
+v471 = sub v467 v470
+store.i64 v465 v471
+v472 = const.i32 0
+v473 = icmp.eq v0 v472
+v475 = const.i64 4120
+v474 = inttoptr v475
+v476 = load.i64 v474
+v477 = const.i64 0
+v478 = icmp.eq v476 v477
+br v478 ^budget47() ^step47()
+^budget47():
+trap
+^step47():
+v479 = const.i64 1
+v480 = sub v476 v479
+store.i64 v474 v480
+v482 = ptrtoint.i64 a0
+v483 = ptrtoint.i64 v26
+v484 = select v473 v482 v483
+v481 = inttoptr v484
+v486 = const.i64 4120
+v485 = inttoptr v486
+v487 = load.i64 v485
+v488 = const.i64 0
+v489 = icmp.eq v487 v488
+br v489 ^budget48() ^step48()
+^budget48():
+trap
+^step48():
+v490 = const.i64 1
+v491 = sub v487 v490
+store.i64 v485 v491
+v492 = ptrtoint.i64 v481
+v493 = inttoptr v492
+v495 = const.i64 4120
+v494 = inttoptr v495
+v496 = load.i64 v494
+v497 = const.i64 0
+v498 = icmp.eq v496 v497
+br v498 ^budget49() ^step49()
+^budget49():
+trap
+^step49():
+v499 = const.i64 1
+v500 = sub v496 v499
+store.i64 v494 v500
+v501 = const.i64 8
+call @R10 v493 v501
+v503 = const.i64 4120
+v502 = inttoptr v503
+v504 = load.i64 v502
+v505 = const.i64 0
+v506 = icmp.eq v504 v505
+br v506 ^budget50() ^step50()
+^budget50():
+trap
+^step50():
+v507 = const.i64 1
+v508 = sub v504 v507
+store.i64 v502 v508
+v509 = load.i64 v493
+v511 = const.i64 4120
+v510 = inttoptr v511
+v512 = load.i64 v510
+v513 = const.i64 0
+v514 = icmp.eq v512 v513
+br v514 ^budget51() ^step51()
+^budget51():
+trap
+^step51():
+v515 = const.i64 1
+v516 = sub v512 v515
+store.i64 v510 v516
+v517 = ptrtoint.i64 v481
+v518 = const.i64 8
+v519 = add v517 v518
+v520 = inttoptr v519
+v522 = const.i64 4120
+v521 = inttoptr v522
+v523 = load.i64 v521
+v524 = const.i64 0
+v525 = icmp.eq v523 v524
+br v525 ^budget52() ^step52()
+^budget52():
+trap
+^step52():
+v526 = const.i64 1
+v527 = sub v523 v526
+store.i64 v521 v527
+v528 = const.i64 8
+call @R10 v520 v528
+v530 = const.i64 4120
+v529 = inttoptr v530
+v531 = load.i64 v529
+v532 = const.i64 0
+v533 = icmp.eq v531 v532
+br v533 ^budget53() ^step53()
+^budget53():
+trap
+^step53():
+v534 = const.i64 1
+v535 = sub v531 v534
+store.i64 v529 v535
+v536 = load.i64 v520
+v538 = const.i64 4120
+v537 = inttoptr v538
+v539 = load.i64 v537
+v540 = const.i64 0
+v541 = icmp.eq v539 v540
+br v541 ^budget54() ^step54()
+^budget54():
+trap
+^step54():
+v542 = const.i64 1
+v543 = sub v539 v542
+store.i64 v537 v543
+v544 = ptrtoint.i64 v481
+v545 = const.i64 16
+v546 = add v544 v545
+v547 = inttoptr v546
+v549 = const.i64 4120
+v548 = inttoptr v549
+v550 = load.i64 v548
+v551 = const.i64 0
+v552 = icmp.eq v550 v551
+br v552 ^budget55() ^step55()
+^budget55():
+trap
+^step55():
+v553 = const.i64 1
+v554 = sub v550 v553
+store.i64 v548 v554
+v555 = const.i64 8
+call @R10 v547 v555
+v557 = const.i64 4120
+v556 = inttoptr v557
+v558 = load.i64 v556
+v559 = const.i64 0
+v560 = icmp.eq v558 v559
+br v560 ^budget56() ^step56()
+^budget56():
+trap
+^step56():
+v561 = const.i64 1
+v562 = sub v558 v561
+store.i64 v556 v562
+v563 = load.i64 v547
+v565 = const.i64 4120
+v564 = inttoptr v565
+v566 = load.i64 v564
+v567 = const.i64 0
+v568 = icmp.eq v566 v567
+br v568 ^budget57() ^step57()
+^budget57():
+trap
+^step57():
+v569 = const.i64 1
+v570 = sub v566 v569
+store.i64 v564 v570
+v571 = ptrtoint.i64 v37
+v572 = inttoptr v571
+v574 = const.i64 4120
+v573 = inttoptr v574
+v575 = load.i64 v573
+v576 = const.i64 0
+v577 = icmp.eq v575 v576
+br v577 ^budget58() ^step58()
+^budget58():
+trap
+^step58():
+v578 = const.i64 1
+v579 = sub v575 v578
+store.i64 v573 v579
+v580 = const.i64 8
+call @R10 v572 v580
+v582 = const.i64 4120
+v581 = inttoptr v582
+v583 = load.i64 v581
+v584 = const.i64 0
+v585 = icmp.eq v583 v584
+br v585 ^budget59() ^step59()
+^budget59():
+trap
+^step59():
+v586 = const.i64 1
+v587 = sub v583 v586
+store.i64 v581 v587
+store.i64 v572 v509
+v589 = const.i64 4120
+v588 = inttoptr v589
+v590 = load.i64 v588
+v591 = const.i64 0
+v592 = icmp.eq v590 v591
+br v592 ^budget60() ^step60()
+^budget60():
+trap
+^step60():
+v593 = const.i64 1
+v594 = sub v590 v593
+store.i64 v588 v594
+v595 = ptrtoint.i64 v37
+v596 = const.i64 8
+v597 = add v595 v596
+v598 = inttoptr v597
+v600 = const.i64 4120
+v599 = inttoptr v600
+v601 = load.i64 v599
+v602 = const.i64 0
+v603 = icmp.eq v601 v602
+br v603 ^budget61() ^step61()
+^budget61():
+trap
+^step61():
+v604 = const.i64 1
+v605 = sub v601 v604
+store.i64 v599 v605
+v606 = const.i64 8
+call @R10 v598 v606
+v608 = const.i64 4120
+v607 = inttoptr v608
+v609 = load.i64 v607
+v610 = const.i64 0
+v611 = icmp.eq v609 v610
+br v611 ^budget62() ^step62()
+^budget62():
+trap
+^step62():
+v612 = const.i64 1
+v613 = sub v609 v612
+store.i64 v607 v613
+store.i64 v598 v536
+v615 = const.i64 4120
+v614 = inttoptr v615
+v616 = load.i64 v614
+v617 = const.i64 0
+v618 = icmp.eq v616 v617
+br v618 ^budget63() ^step63()
+^budget63():
+trap
+^step63():
+v619 = const.i64 1
+v620 = sub v616 v619
+store.i64 v614 v620
+v621 = ptrtoint.i64 v37
+v622 = const.i64 16
+v623 = add v621 v622
+v624 = inttoptr v623
+v626 = const.i64 4120
+v625 = inttoptr v626
+v627 = load.i64 v625
+v628 = const.i64 0
+v629 = icmp.eq v627 v628
+br v629 ^budget64() ^step64()
+^budget64():
+trap
+^step64():
+v630 = const.i64 1
+v631 = sub v627 v630
+store.i64 v625 v631
+v632 = const.i64 8
+call @R10 v624 v632
+v634 = const.i64 4120
+v633 = inttoptr v634
+v635 = load.i64 v633
+v636 = const.i64 0
+v637 = icmp.eq v635 v636
+br v637 ^budget65() ^step65()
+^budget65():
+trap
+^step65():
+v638 = const.i64 1
+v639 = sub v635 v638
+store.i64 v633 v639
+store.i64 v624 v563
+v641 = const.i64 4120
+v640 = inttoptr v641
+v642 = load.i64 v640
+v643 = const.i64 0
+v644 = icmp.eq v642 v643
+br v644 ^budget66() ^step66()
+^budget66():
+trap
+^step66():
+v645 = const.i64 1
+v646 = sub v642 v645
+store.i64 v640 v646
+v647 = const.i64 4
+call @R10 v37 v647
+v649 = const.i64 4120
+v648 = inttoptr v649
+v650 = load.i64 v648
+v651 = const.i64 0
+v652 = icmp.eq v650 v651
+br v652 ^budget67() ^step67()
+^budget67():
+trap
+^step67():
+v653 = const.i64 1
+v654 = sub v650 v653
+store.i64 v648 v654
+v655 = load.i32 v37
+v657 = const.i64 4120
+v656 = inttoptr v657
+v658 = load.i64 v656
+v659 = const.i64 0
+v660 = icmp.eq v658 v659
+br v660 ^budget68() ^step68()
+^budget68():
+trap
+^step68():
+v661 = const.i64 1
+v662 = sub v658 v661
+store.i64 v656 v662
+v663 = const.i32 41
+v664 = icmp.ult v655 v663
+v666 = const.i64 4120
+v665 = inttoptr v666
+v667 = load.i64 v665
+v668 = const.i64 0
+v669 = icmp.eq v667 v668
+br v669 ^budget69() ^step69()
+^budget69():
+trap
+^step69():
+v670 = const.i64 1
+v671 = sub v667 v670
+store.i64 v665 v671
+br v664 ^b3() ^b4()
+^b4():
+v673 = const.i64 4120
+v672 = inttoptr v673
+v674 = load.i64 v672
+v675 = const.i64 0
+v676 = icmp.eq v674 v675
+br v676 ^budget70() ^step70()
+^budget70():
+trap
+^step70():
+v677 = const.i64 1
+v678 = sub v674 v677
+store.i64 v672 v678
+v679 = const.i64 8
+call @R10 v324 v679
+v681 = const.i64 4120
+v680 = inttoptr v681
+v682 = load.i64 v680
+v683 = const.i64 0
+v684 = icmp.eq v682 v683
+br v684 ^budget71() ^step71()
+^budget71():
+trap
+^step71():
+v685 = const.i64 1
+v686 = sub v682 v685
+store.i64 v680 v686
+v687 = load.i64 v324
+v688 = inttoptr v687
+v690 = const.i64 4120
+v689 = inttoptr v690
+v691 = load.i64 v689
+v692 = const.i64 0
+v693 = icmp.eq v691 v692
+br v693 ^budget72() ^step72()
+^budget72():
+trap
+^step72():
+v694 = const.i64 1
+v695 = sub v691 v694
+store.i64 v689 v695
+v696 = ptrtoint.i64 v688
+v697 = const.i64 8
+v698 = add v696 v697
+v699 = inttoptr v698
+v701 = const.i64 4120
+v700 = inttoptr v701
+v702 = load.i64 v700
+v703 = const.i64 0
+v704 = icmp.eq v702 v703
+br v704 ^budget73() ^step73()
+^budget73():
+trap
+^step73():
+v705 = const.i64 1
+v706 = sub v702 v705
+store.i64 v700 v706
+v707 = const.i64 8
+call @R10 v324 v707
+v709 = const.i64 4120
+v708 = inttoptr v709
+v710 = load.i64 v708
+v711 = const.i64 0
+v712 = icmp.eq v710 v711
+br v712 ^budget74() ^step74()
+^budget74():
+trap
+^step74():
+v713 = const.i64 1
+v714 = sub v710 v713
+store.i64 v708 v714
+v715 = ptrtoint.i64 v699
+store.i64 v324 v715
+v717 = const.i64 4120
+v716 = inttoptr v717
+v718 = load.i64 v716
+v719 = const.i64 0
+v720 = icmp.eq v718 v719
+br v720 ^budget75() ^step75()
+^budget75():
+trap
+^step75():
+v721 = const.i64 1
+v722 = sub v718 v721
+store.i64 v716 v722
+br ^b5(v688)
+^b3():
+v724 = const.i64 4120
+v723 = inttoptr v724
+v725 = load.i64 v723
+v726 = const.i64 0
+v727 = icmp.eq v725 v726
+br v727 ^budget76() ^step76()
+^budget76():
+trap
+^step76():
+v728 = const.i64 1
+v729 = sub v725 v728
+store.i64 v723 v729
+v730 = const.i64 8
+call @R10 v335 v730
+v732 = const.i64 4120
+v731 = inttoptr v732
+v733 = load.i64 v731
+v734 = const.i64 0
+v735 = icmp.eq v733 v734
+br v735 ^budget77() ^step77()
+^budget77():
+trap
+^step77():
+v736 = const.i64 1
+v737 = sub v733 v736
+store.i64 v731 v737
+v738 = load.i64 v335
+v739 = inttoptr v738
+v741 = const.i64 4120
+v740 = inttoptr v741
+v742 = load.i64 v740
+v743 = const.i64 0
+v744 = icmp.eq v742 v743
+br v744 ^budget78() ^step78()
+^budget78():
+trap
+^step78():
+v745 = const.i64 1
+v746 = sub v742 v745
+store.i64 v740 v746
+v747 = zext.i64 v655
+v749 = const.i64 4120
+v748 = inttoptr v749
+v750 = load.i64 v748
+v751 = const.i64 0
+v752 = icmp.eq v750 v751
+br v752 ^budget79() ^step79()
+^budget79():
+trap
+^step79():
+v753 = const.i64 1
+v754 = sub v750 v753
+store.i64 v748 v754
+v755 = ptrtoint.i64 v739
+v756 = add v755 v747
+v757 = inttoptr v756
+v759 = const.i64 4120
+v758 = inttoptr v759
+v760 = load.i64 v758
+v761 = const.i64 0
+v762 = icmp.eq v760 v761
+br v762 ^budget80() ^step80()
+^budget80():
+trap
+^step80():
+v763 = const.i64 1
+v764 = sub v760 v763
+store.i64 v758 v764
+v765 = const.i32 8
+v766 = add v655 v765
+v768 = const.i64 4120
+v767 = inttoptr v768
+v769 = load.i64 v767
+v770 = const.i64 0
+v771 = icmp.eq v769 v770
+br v771 ^budget81() ^step81()
+^budget81():
+trap
+^step81():
+v772 = const.i64 1
+v773 = sub v769 v772
+store.i64 v767 v773
+v774 = const.i64 4
+call @R10 v37 v774
+v776 = const.i64 4120
+v775 = inttoptr v776
+v777 = load.i64 v775
+v778 = const.i64 0
+v779 = icmp.eq v777 v778
+br v779 ^budget82() ^step82()
+^budget82():
+trap
+^step82():
+v780 = const.i64 1
+v781 = sub v777 v780
+store.i64 v775 v781
+store.i32 v37 v766
+v783 = const.i64 4120
+v782 = inttoptr v783
+v784 = load.i64 v782
+v785 = const.i64 0
+v786 = icmp.eq v784 v785
+br v786 ^budget83() ^step83()
+^budget83():
+trap
+^step83():
+v787 = const.i64 1
+v788 = sub v784 v787
+store.i64 v782 v788
+br ^b5(v757)
+^b5(v1:ptr):
+v790 = const.i64 4120
+v789 = inttoptr v790
+v791 = load.i64 v789
+v792 = const.i64 0
+v793 = icmp.eq v791 v792
+br v793 ^budget84() ^step84()
+^budget84():
+trap
+^step84():
+v794 = const.i64 1
+v795 = sub v791 v794
+store.i64 v789 v795
+v796 = const.i64 4
+call @R10 v1 v796
+v798 = const.i64 4120
+v797 = inttoptr v798
+v799 = load.i64 v797
+v800 = const.i64 0
+v801 = icmp.eq v799 v800
+br v801 ^budget85() ^step85()
+^budget85():
+trap
+^step85():
+v802 = const.i64 1
+v803 = sub v799 v802
+store.i64 v797 v803
+v804 = load.i32 v1
+v806 = const.i64 4120
+v805 = inttoptr v806
+v807 = load.i64 v805
+v808 = const.i64 0
+v809 = icmp.eq v807 v808
+br v809 ^budget86() ^step86()
+^budget86():
+trap
+^step86():
+v810 = const.i64 1
+v811 = sub v807 v810
+store.i64 v805 v811
+v812 = const.i32 4294967279
+v813 = icmp.eq v804 v812
+v815 = const.i64 4120
+v814 = inttoptr v815
+v816 = load.i64 v814
+v817 = const.i64 0
+v818 = icmp.eq v816 v817
+br v818 ^budget87() ^step87()
+^budget87():
+trap
+^step87():
+v819 = const.i64 1
+v820 = sub v816 v819
+store.i64 v814 v820
+v821 = const.i8 105
+v822 = const.i8 33
+v823 = select v813 v821 v822
+v825 = const.i64 4120
+v824 = inttoptr v825
+v826 = load.i64 v824
+v827 = const.i64 0
+v828 = icmp.eq v826 v827
+br v828 ^budget88() ^step88()
+^budget88():
+trap
+^step88():
+v829 = const.i64 1
+v830 = sub v826 v829
+store.i64 v824 v830
+v831 = const.i64 1
+call @R10 v48 v831
+v833 = const.i64 4120
+v832 = inttoptr v833
+v834 = load.i64 v832
+v835 = const.i64 0
+v836 = icmp.eq v834 v835
+br v836 ^budget89() ^step89()
+^budget89():
+trap
+^step89():
+v837 = const.i64 1
+v838 = sub v834 v837
+store.i64 v832 v838
+store.i8 v48 v823
+v840 = const.i64 4120
+v839 = inttoptr v840
+v841 = load.i64 v839
+v842 = const.i64 0
+v843 = icmp.eq v841 v842
+br v843 ^budget90() ^step90()
+^budget90():
+trap
+^step90():
+v844 = const.i64 1
+v845 = sub v841 v844
+store.i64 v839 v845
+v846 = const.i64 4
+call @R10 v37 v846
+v848 = const.i64 4120
+v847 = inttoptr v848
+v849 = load.i64 v847
+v850 = const.i64 0
+v851 = icmp.eq v849 v850
+br v851 ^budget91() ^step91()
+^budget91():
+trap
+^step91():
+v852 = const.i64 1
+v853 = sub v849 v852
+store.i64 v847 v853
+v854 = load.i32 v37
+v856 = const.i64 4120
+v855 = inttoptr v856
+v857 = load.i64 v855
+v858 = const.i64 0
+v859 = icmp.eq v857 v858
+br v859 ^budget92() ^step92()
+^budget92():
+trap
+^step92():
+v860 = const.i64 1
+v861 = sub v857 v860
+store.i64 v855 v861
+v862 = const.i32 41
+v863 = icmp.ult v854 v862
+v865 = const.i64 4120
+v864 = inttoptr v865
+v866 = load.i64 v864
+v867 = const.i64 0
+v868 = icmp.eq v866 v867
+br v868 ^budget93() ^step93()
+^budget93():
+trap
+^step93():
+v869 = const.i64 1
+v870 = sub v866 v869
+store.i64 v864 v870
+br v863 ^b6() ^b7()
+^b7():
+v872 = const.i64 4120
+v871 = inttoptr v872
+v873 = load.i64 v871
+v874 = const.i64 0
+v875 = icmp.eq v873 v874
+br v875 ^budget94() ^step94()
+^budget94():
+trap
+^step94():
+v876 = const.i64 1
+v877 = sub v873 v876
+store.i64 v871 v877
+v878 = const.i64 8
+call @R10 v346 v878
+v880 = const.i64 4120
+v879 = inttoptr v880
+v881 = load.i64 v879
+v882 = const.i64 0
+v883 = icmp.eq v881 v882
+br v883 ^budget95() ^step95()
+^budget95():
+trap
+^step95():
+v884 = const.i64 1
+v885 = sub v881 v884
+store.i64 v879 v885
+v886 = load.i64 v346
+v887 = inttoptr v886
+v889 = const.i64 4120
+v888 = inttoptr v889
+v890 = load.i64 v888
+v891 = const.i64 0
+v892 = icmp.eq v890 v891
+br v892 ^budget96() ^step96()
+^budget96():
+trap
+^step96():
+v893 = const.i64 1
+v894 = sub v890 v893
+store.i64 v888 v894
+v895 = ptrtoint.i64 v887
+v896 = const.i64 8
+v897 = add v895 v896
+v898 = inttoptr v897
+v900 = const.i64 4120
+v899 = inttoptr v900
+v901 = load.i64 v899
+v902 = const.i64 0
+v903 = icmp.eq v901 v902
+br v903 ^budget97() ^step97()
+^budget97():
+trap
+^step97():
+v904 = const.i64 1
+v905 = sub v901 v904
+store.i64 v899 v905
+v906 = const.i64 8
+call @R10 v346 v906
+v908 = const.i64 4120
+v907 = inttoptr v908
+v909 = load.i64 v907
+v910 = const.i64 0
+v911 = icmp.eq v909 v910
+br v911 ^budget98() ^step98()
+^budget98():
+trap
+^step98():
+v912 = const.i64 1
+v913 = sub v909 v912
+store.i64 v907 v913
+v914 = ptrtoint.i64 v898
+store.i64 v346 v914
+v916 = const.i64 4120
+v915 = inttoptr v916
+v917 = load.i64 v915
+v918 = const.i64 0
+v919 = icmp.eq v917 v918
+br v919 ^budget99() ^step99()
+^budget99():
+trap
+^step99():
+v920 = const.i64 1
+v921 = sub v917 v920
+store.i64 v915 v921
+br ^b8(v887)
+^b6():
+v923 = const.i64 4120
+v922 = inttoptr v923
+v924 = load.i64 v922
+v925 = const.i64 0
+v926 = icmp.eq v924 v925
+br v926 ^budget100() ^step100()
+^budget100():
+trap
+^step100():
+v927 = const.i64 1
+v928 = sub v924 v927
+store.i64 v922 v928
+v929 = const.i64 8
+call @R10 v357 v929
+v931 = const.i64 4120
+v930 = inttoptr v931
+v932 = load.i64 v930
+v933 = const.i64 0
+v934 = icmp.eq v932 v933
+br v934 ^budget101() ^step101()
+^budget101():
+trap
+^step101():
+v935 = const.i64 1
+v936 = sub v932 v935
+store.i64 v930 v936
+v937 = load.i64 v357
+v938 = inttoptr v937
+v940 = const.i64 4120
+v939 = inttoptr v940
+v941 = load.i64 v939
+v942 = const.i64 0
+v943 = icmp.eq v941 v942
+br v943 ^budget102() ^step102()
+^budget102():
+trap
+^step102():
+v944 = const.i64 1
+v945 = sub v941 v944
+store.i64 v939 v945
+v946 = zext.i64 v854
+v948 = const.i64 4120
+v947 = inttoptr v948
+v949 = load.i64 v947
+v950 = const.i64 0
+v951 = icmp.eq v949 v950
+br v951 ^budget103() ^step103()
+^budget103():
+trap
+^step103():
+v952 = const.i64 1
+v953 = sub v949 v952
+store.i64 v947 v953
+v954 = ptrtoint.i64 v938
+v955 = add v954 v946
+v956 = inttoptr v955
+v958 = const.i64 4120
+v957 = inttoptr v958
+v959 = load.i64 v957
+v960 = const.i64 0
+v961 = icmp.eq v959 v960
+br v961 ^budget104() ^step104()
+^budget104():
+trap
+^step104():
+v962 = const.i64 1
+v963 = sub v959 v962
+store.i64 v957 v963
+v964 = const.i32 8
+v965 = add v854 v964
+v967 = const.i64 4120
+v966 = inttoptr v967
+v968 = load.i64 v966
+v969 = const.i64 0
+v970 = icmp.eq v968 v969
+br v970 ^budget105() ^step105()
+^budget105():
+trap
+^step105():
+v971 = const.i64 1
+v972 = sub v968 v971
+store.i64 v966 v972
+v973 = const.i64 4
+call @R10 v37 v973
+v975 = const.i64 4120
+v974 = inttoptr v975
+v976 = load.i64 v974
+v977 = const.i64 0
+v978 = icmp.eq v976 v977
+br v978 ^budget106() ^step106()
+^budget106():
+trap
+^step106():
+v979 = const.i64 1
+v980 = sub v976 v979
+store.i64 v974 v980
+store.i32 v37 v965
+v982 = const.i64 4120
+v981 = inttoptr v982
+v983 = load.i64 v981
+v984 = const.i64 0
+v985 = icmp.eq v983 v984
+br v985 ^budget107() ^step107()
+^budget107():
+trap
+^step107():
+v986 = const.i64 1
+v987 = sub v983 v986
+store.i64 v981 v987
+br ^b8(v956)
+^b8(v2:ptr):
+v989 = const.i64 4120
+v988 = inttoptr v989
+v990 = load.i64 v988
+v991 = const.i64 0
+v992 = icmp.eq v990 v991
+br v992 ^budget108() ^step108()
+^budget108():
+trap
+^step108():
+v993 = const.i64 1
+v994 = sub v990 v993
+store.i64 v988 v994
+v995 = const.i64 8
+call @R10 v2 v995
+v997 = const.i64 4120
+v996 = inttoptr v997
+v998 = load.i64 v996
+v999 = const.i64 0
+v1000 = icmp.eq v998 v999
+br v1000 ^budget109() ^step109()
+^budget109():
+trap
+^step109():
+v1001 = const.i64 1
+v1002 = sub v998 v1001
+store.i64 v996 v1002
+v1003 = load.i64 v2
+v1004 = inttoptr v1003
+v1006 = const.i64 4120
+v1005 = inttoptr v1006
+v1007 = load.i64 v1005
+v1008 = const.i64 0
+v1009 = icmp.eq v1007 v1008
+br v1009 ^budget110() ^step110()
+^budget110():
+trap
+^step110():
+v1010 = const.i64 1
+v1011 = sub v1007 v1010
+store.i64 v1005 v1011
+v1012 = const.i64 1
+call @R10 v1004 v1012
+v1014 = const.i64 4120
+v1013 = inttoptr v1014
+v1015 = load.i64 v1013
+v1016 = const.i64 0
+v1017 = icmp.eq v1015 v1016
+br v1017 ^budget111() ^step111()
+^budget111():
+trap
+^step111():
+v1018 = const.i64 1
+v1019 = sub v1015 v1018
+store.i64 v1013 v1019
+v1020 = load.i8 v1004
+v1022 = const.i64 4120
+v1021 = inttoptr v1022
+v1023 = load.i64 v1021
+v1024 = const.i64 0
+v1025 = icmp.eq v1023 v1024
+br v1025 ^budget112() ^step112()
+^budget112():
+trap
+^step112():
+v1026 = const.i64 1
+v1027 = sub v1023 v1026
+store.i64 v1021 v1027
+v1028 = const.i8 112
+v1029 = icmp.eq v1020 v1028
+v1031 = const.i64 4120
+v1030 = inttoptr v1031
+v1032 = load.i64 v1030
+v1033 = const.i64 0
+v1034 = icmp.eq v1032 v1033
+br v1034 ^budget113() ^step113()
+^budget113():
+trap
+^step113():
+v1035 = const.i64 1
+v1036 = sub v1032 v1035
+store.i64 v1030 v1036
+v1037 = const.i8 112
+v1038 = const.i8 33
+v1039 = select v1029 v1037 v1038
+v1041 = const.i64 4120
+v1040 = inttoptr v1041
+v1042 = load.i64 v1040
+v1043 = const.i64 0
+v1044 = icmp.eq v1042 v1043
+br v1044 ^budget114() ^step114()
+^budget114():
+trap
+^step114():
+v1045 = const.i64 1
+v1046 = sub v1042 v1045
+store.i64 v1040 v1046
+v1047 = const.i64 1
+call @R10 v214 v1047
+v1049 = const.i64 4120
+v1048 = inttoptr v1049
+v1050 = load.i64 v1048
+v1051 = const.i64 0
+v1052 = icmp.eq v1050 v1051
+br v1052 ^budget115() ^step115()
+^budget115():
+trap
+^step115():
+v1053 = const.i64 1
+v1054 = sub v1050 v1053
+store.i64 v1048 v1054
+store.i8 v214 v1039
+v1056 = const.i64 4120
+v1055 = inttoptr v1056
+v1057 = load.i64 v1055
+v1058 = const.i64 0
+v1059 = icmp.eq v1057 v1058
+br v1059 ^budget116() ^step116()
+^budget116():
+trap
+^step116():
+v1060 = const.i64 1
+v1061 = sub v1057 v1060
+store.i64 v1055 v1061
+v1062 = const.i64 4
+call @R10 v37 v1062
+v1064 = const.i64 4120
+v1063 = inttoptr v1064
+v1065 = load.i64 v1063
+v1066 = const.i64 0
+v1067 = icmp.eq v1065 v1066
+br v1067 ^budget117() ^step117()
+^budget117():
+trap
+^step117():
+v1068 = const.i64 1
+v1069 = sub v1065 v1068
+store.i64 v1063 v1069
+v1070 = load.i32 v37
+v1072 = const.i64 4120
+v1071 = inttoptr v1072
+v1073 = load.i64 v1071
+v1074 = const.i64 0
+v1075 = icmp.eq v1073 v1074
+br v1075 ^budget118() ^step118()
+^budget118():
+trap
+^step118():
+v1076 = const.i64 1
+v1077 = sub v1073 v1076
+store.i64 v1071 v1077
+v1078 = const.i32 41
+v1079 = icmp.ult v1070 v1078
+v1081 = const.i64 4120
+v1080 = inttoptr v1081
+v1082 = load.i64 v1080
+v1083 = const.i64 0
+v1084 = icmp.eq v1082 v1083
+br v1084 ^budget119() ^step119()
+^budget119():
+trap
+^step119():
+v1085 = const.i64 1
+v1086 = sub v1082 v1085
+store.i64 v1080 v1086
+br v1079 ^b9() ^b10()
+^b10():
+v1088 = const.i64 4120
+v1087 = inttoptr v1088
+v1089 = load.i64 v1087
+v1090 = const.i64 0
+v1091 = icmp.eq v1089 v1090
+br v1091 ^budget120() ^step120()
+^budget120():
+trap
+^step120():
+v1092 = const.i64 1
+v1093 = sub v1089 v1092
+store.i64 v1087 v1093
+v1094 = const.i64 8
+call @R10 v368 v1094
+v1096 = const.i64 4120
+v1095 = inttoptr v1096
+v1097 = load.i64 v1095
+v1098 = const.i64 0
+v1099 = icmp.eq v1097 v1098
+br v1099 ^budget121() ^step121()
+^budget121():
+trap
+^step121():
+v1100 = const.i64 1
+v1101 = sub v1097 v1100
+store.i64 v1095 v1101
+v1102 = load.i64 v368
+v1103 = inttoptr v1102
+v1105 = const.i64 4120
+v1104 = inttoptr v1105
+v1106 = load.i64 v1104
+v1107 = const.i64 0
+v1108 = icmp.eq v1106 v1107
+br v1108 ^budget122() ^step122()
+^budget122():
+trap
+^step122():
+v1109 = const.i64 1
+v1110 = sub v1106 v1109
+store.i64 v1104 v1110
+v1111 = ptrtoint.i64 v1103
+v1112 = const.i64 8
+v1113 = add v1111 v1112
+v1114 = inttoptr v1113
+v1116 = const.i64 4120
+v1115 = inttoptr v1116
+v1117 = load.i64 v1115
+v1118 = const.i64 0
+v1119 = icmp.eq v1117 v1118
+br v1119 ^budget123() ^step123()
+^budget123():
+trap
+^step123():
+v1120 = const.i64 1
+v1121 = sub v1117 v1120
+store.i64 v1115 v1121
+v1122 = const.i64 8
+call @R10 v368 v1122
+v1124 = const.i64 4120
+v1123 = inttoptr v1124
+v1125 = load.i64 v1123
+v1126 = const.i64 0
+v1127 = icmp.eq v1125 v1126
+br v1127 ^budget124() ^step124()
+^budget124():
+trap
+^step124():
+v1128 = const.i64 1
+v1129 = sub v1125 v1128
+store.i64 v1123 v1129
+v1130 = ptrtoint.i64 v1114
+store.i64 v368 v1130
+v1132 = const.i64 4120
+v1131 = inttoptr v1132
+v1133 = load.i64 v1131
+v1134 = const.i64 0
+v1135 = icmp.eq v1133 v1134
+br v1135 ^budget125() ^step125()
+^budget125():
+trap
+^step125():
+v1136 = const.i64 1
+v1137 = sub v1133 v1136
+store.i64 v1131 v1137
+br ^b11(v1103)
+^b9():
+v1139 = const.i64 4120
+v1138 = inttoptr v1139
+v1140 = load.i64 v1138
+v1141 = const.i64 0
+v1142 = icmp.eq v1140 v1141
+br v1142 ^budget126() ^step126()
+^budget126():
+trap
+^step126():
+v1143 = const.i64 1
+v1144 = sub v1140 v1143
+store.i64 v1138 v1144
+v1145 = const.i64 8
+call @R10 v379 v1145
+v1147 = const.i64 4120
+v1146 = inttoptr v1147
+v1148 = load.i64 v1146
+v1149 = const.i64 0
+v1150 = icmp.eq v1148 v1149
+br v1150 ^budget127() ^step127()
+^budget127():
+trap
+^step127():
+v1151 = const.i64 1
+v1152 = sub v1148 v1151
+store.i64 v1146 v1152
+v1153 = load.i64 v379
+v1154 = inttoptr v1153
+v1156 = const.i64 4120
+v1155 = inttoptr v1156
+v1157 = load.i64 v1155
+v1158 = const.i64 0
+v1159 = icmp.eq v1157 v1158
+br v1159 ^budget128() ^step128()
+^budget128():
+trap
+^step128():
+v1160 = const.i64 1
+v1161 = sub v1157 v1160
+store.i64 v1155 v1161
+v1162 = zext.i64 v1070
+v1164 = const.i64 4120
+v1163 = inttoptr v1164
+v1165 = load.i64 v1163
+v1166 = const.i64 0
+v1167 = icmp.eq v1165 v1166
+br v1167 ^budget129() ^step129()
+^budget129():
+trap
+^step129():
+v1168 = const.i64 1
+v1169 = sub v1165 v1168
+store.i64 v1163 v1169
+v1170 = ptrtoint.i64 v1154
+v1171 = add v1170 v1162
+v1172 = inttoptr v1171
+v1174 = const.i64 4120
+v1173 = inttoptr v1174
+v1175 = load.i64 v1173
+v1176 = const.i64 0
+v1177 = icmp.eq v1175 v1176
+br v1177 ^budget130() ^step130()
+^budget130():
+trap
+^step130():
+v1178 = const.i64 1
+v1179 = sub v1175 v1178
+store.i64 v1173 v1179
+v1180 = const.i32 8
+v1181 = add v1070 v1180
+v1183 = const.i64 4120
+v1182 = inttoptr v1183
+v1184 = load.i64 v1182
+v1185 = const.i64 0
+v1186 = icmp.eq v1184 v1185
+br v1186 ^budget131() ^step131()
+^budget131():
+trap
+^step131():
+v1187 = const.i64 1
+v1188 = sub v1184 v1187
+store.i64 v1182 v1188
+v1189 = const.i64 4
+call @R10 v37 v1189
+v1191 = const.i64 4120
+v1190 = inttoptr v1191
+v1192 = load.i64 v1190
+v1193 = const.i64 0
+v1194 = icmp.eq v1192 v1193
+br v1194 ^budget132() ^step132()
+^budget132():
+trap
+^step132():
+v1195 = const.i64 1
+v1196 = sub v1192 v1195
+store.i64 v1190 v1196
+store.i32 v37 v1181
+v1198 = const.i64 4120
+v1197 = inttoptr v1198
+v1199 = load.i64 v1197
+v1200 = const.i64 0
+v1201 = icmp.eq v1199 v1200
+br v1201 ^budget133() ^step133()
+^budget133():
+trap
+^step133():
+v1202 = const.i64 1
+v1203 = sub v1199 v1202
+store.i64 v1197 v1203
+br ^b11(v1172)
+^b11(v3:ptr):
+v1205 = const.i64 4120
+v1204 = inttoptr v1205
+v1206 = load.i64 v1204
+v1207 = const.i64 0
+v1208 = icmp.eq v1206 v1207
+br v1208 ^budget134() ^step134()
+^budget134():
+trap
+^step134():
+v1209 = const.i64 1
+v1210 = sub v1206 v1209
+store.i64 v1204 v1210
+v1211 = const.i64 8
+call @R10 v3 v1211
+v1213 = const.i64 4120
+v1212 = inttoptr v1213
+v1214 = load.i64 v1212
+v1215 = const.i64 0
+v1216 = icmp.eq v1214 v1215
+br v1216 ^budget135() ^step135()
+^budget135():
+trap
+^step135():
+v1217 = const.i64 1
+v1218 = sub v1214 v1217
+store.i64 v1212 v1218
+v1219 = load.i64 v3
+v1221 = const.i64 4120
+v1220 = inttoptr v1221
+v1222 = load.i64 v1220
+v1223 = const.i64 0
+v1224 = icmp.eq v1222 v1223
+br v1224 ^budget136() ^step136()
+^budget136():
+trap
+^step136():
+v1225 = const.i64 1
+v1226 = sub v1222 v1225
+store.i64 v1220 v1226
+v1227 = const.i64 18446744061363872715
+v1228 = icmp.eq v1219 v1227
+v1230 = const.i64 4120
+v1229 = inttoptr v1230
+v1231 = load.i64 v1229
+v1232 = const.i64 0
+v1233 = icmp.eq v1231 v1232
+br v1233 ^budget137() ^step137()
+^budget137():
+trap
+^step137():
+v1234 = const.i64 1
+v1235 = sub v1231 v1234
+store.i64 v1229 v1235
+v1236 = const.i8 108
+v1237 = const.i8 33
+v1238 = select v1228 v1236 v1237
+v1240 = const.i64 4120
+v1239 = inttoptr v1240
+v1241 = load.i64 v1239
+v1242 = const.i64 0
+v1243 = icmp.eq v1241 v1242
+br v1243 ^budget138() ^step138()
+^budget138():
+trap
+^step138():
+v1244 = const.i64 1
+v1245 = sub v1241 v1244
+store.i64 v1239 v1245
+v1246 = const.i64 1
+call @R10 v225 v1246
+v1248 = const.i64 4120
+v1247 = inttoptr v1248
+v1249 = load.i64 v1247
+v1250 = const.i64 0
+v1251 = icmp.eq v1249 v1250
+br v1251 ^budget139() ^step139()
+^budget139():
+trap
+^step139():
+v1252 = const.i64 1
+v1253 = sub v1249 v1252
+store.i64 v1247 v1253
+store.i8 v225 v1238
+v1255 = const.i64 4120
+v1254 = inttoptr v1255
+v1256 = load.i64 v1254
+v1257 = const.i64 0
+v1258 = icmp.eq v1256 v1257
+br v1258 ^budget140() ^step140()
+^budget140():
+trap
+^step140():
+v1259 = const.i64 1
+v1260 = sub v1256 v1259
+store.i64 v1254 v1260
+v1261 = const.i64 4
+call @R10 v37 v1261
+v1263 = const.i64 4120
+v1262 = inttoptr v1263
+v1264 = load.i64 v1262
+v1265 = const.i64 0
+v1266 = icmp.eq v1264 v1265
+br v1266 ^budget141() ^step141()
+^budget141():
+trap
+^step141():
+v1267 = const.i64 1
+v1268 = sub v1264 v1267
+store.i64 v1262 v1268
+v1269 = load.i32 v37
+v1271 = const.i64 4120
+v1270 = inttoptr v1271
+v1272 = load.i64 v1270
+v1273 = const.i64 0
+v1274 = icmp.eq v1272 v1273
+br v1274 ^budget142() ^step142()
+^budget142():
+trap
+^step142():
+v1275 = const.i64 1
+v1276 = sub v1272 v1275
+store.i64 v1270 v1276
+v1277 = const.i32 41
+v1278 = icmp.ult v1269 v1277
+v1280 = const.i64 4120
+v1279 = inttoptr v1280
+v1281 = load.i64 v1279
+v1282 = const.i64 0
+v1283 = icmp.eq v1281 v1282
+br v1283 ^budget143() ^step143()
+^budget143():
+trap
+^step143():
+v1284 = const.i64 1
+v1285 = sub v1281 v1284
+store.i64 v1279 v1285
+br v1278 ^b12() ^b13()
+^b13():
+v1287 = const.i64 4120
+v1286 = inttoptr v1287
+v1288 = load.i64 v1286
+v1289 = const.i64 0
+v1290 = icmp.eq v1288 v1289
+br v1290 ^budget144() ^step144()
+^budget144():
+trap
+^step144():
+v1291 = const.i64 1
+v1292 = sub v1288 v1291
+store.i64 v1286 v1292
+v1293 = const.i64 8
+call @R10 v390 v1293
+v1295 = const.i64 4120
+v1294 = inttoptr v1295
+v1296 = load.i64 v1294
+v1297 = const.i64 0
+v1298 = icmp.eq v1296 v1297
+br v1298 ^budget145() ^step145()
+^budget145():
+trap
+^step145():
+v1299 = const.i64 1
+v1300 = sub v1296 v1299
+store.i64 v1294 v1300
+v1301 = load.i64 v390
+v1302 = inttoptr v1301
+v1304 = const.i64 4120
+v1303 = inttoptr v1304
+v1305 = load.i64 v1303
+v1306 = const.i64 0
+v1307 = icmp.eq v1305 v1306
+br v1307 ^budget146() ^step146()
+^budget146():
+trap
+^step146():
+v1308 = const.i64 1
+v1309 = sub v1305 v1308
+store.i64 v1303 v1309
+v1310 = ptrtoint.i64 v1302
+v1311 = const.i64 8
+v1312 = add v1310 v1311
+v1313 = inttoptr v1312
+v1315 = const.i64 4120
+v1314 = inttoptr v1315
+v1316 = load.i64 v1314
+v1317 = const.i64 0
+v1318 = icmp.eq v1316 v1317
+br v1318 ^budget147() ^step147()
+^budget147():
+trap
+^step147():
+v1319 = const.i64 1
+v1320 = sub v1316 v1319
+store.i64 v1314 v1320
+v1321 = const.i64 8
+call @R10 v390 v1321
+v1323 = const.i64 4120
+v1322 = inttoptr v1323
+v1324 = load.i64 v1322
+v1325 = const.i64 0
+v1326 = icmp.eq v1324 v1325
+br v1326 ^budget148() ^step148()
+^budget148():
+trap
+^step148():
+v1327 = const.i64 1
+v1328 = sub v1324 v1327
+store.i64 v1322 v1328
+v1329 = ptrtoint.i64 v1313
+store.i64 v390 v1329
+v1331 = const.i64 4120
+v1330 = inttoptr v1331
+v1332 = load.i64 v1330
+v1333 = const.i64 0
+v1334 = icmp.eq v1332 v1333
+br v1334 ^budget149() ^step149()
+^budget149():
+trap
+^step149():
+v1335 = const.i64 1
+v1336 = sub v1332 v1335
+store.i64 v1330 v1336
+br ^b14(v1302)
+^b12():
+v1338 = const.i64 4120
+v1337 = inttoptr v1338
+v1339 = load.i64 v1337
+v1340 = const.i64 0
+v1341 = icmp.eq v1339 v1340
+br v1341 ^budget150() ^step150()
+^budget150():
+trap
+^step150():
+v1342 = const.i64 1
+v1343 = sub v1339 v1342
+store.i64 v1337 v1343
+v1344 = const.i64 8
+call @R10 v401 v1344
+v1346 = const.i64 4120
+v1345 = inttoptr v1346
+v1347 = load.i64 v1345
+v1348 = const.i64 0
+v1349 = icmp.eq v1347 v1348
+br v1349 ^budget151() ^step151()
+^budget151():
+trap
+^step151():
+v1350 = const.i64 1
+v1351 = sub v1347 v1350
+store.i64 v1345 v1351
+v1352 = load.i64 v401
+v1353 = inttoptr v1352
+v1355 = const.i64 4120
+v1354 = inttoptr v1355
+v1356 = load.i64 v1354
+v1357 = const.i64 0
+v1358 = icmp.eq v1356 v1357
+br v1358 ^budget152() ^step152()
+^budget152():
+trap
+^step152():
+v1359 = const.i64 1
+v1360 = sub v1356 v1359
+store.i64 v1354 v1360
+v1361 = zext.i64 v1269
+v1363 = const.i64 4120
+v1362 = inttoptr v1363
+v1364 = load.i64 v1362
+v1365 = const.i64 0
+v1366 = icmp.eq v1364 v1365
+br v1366 ^budget153() ^step153()
+^budget153():
+trap
+^step153():
+v1367 = const.i64 1
+v1368 = sub v1364 v1367
+store.i64 v1362 v1368
+v1369 = ptrtoint.i64 v1353
+v1370 = add v1369 v1361
+v1371 = inttoptr v1370
+v1373 = const.i64 4120
+v1372 = inttoptr v1373
+v1374 = load.i64 v1372
+v1375 = const.i64 0
+v1376 = icmp.eq v1374 v1375
+br v1376 ^budget154() ^step154()
+^budget154():
+trap
+^step154():
+v1377 = const.i64 1
+v1378 = sub v1374 v1377
+store.i64 v1372 v1378
+v1379 = const.i32 8
+v1380 = add v1269 v1379
+v1382 = const.i64 4120
+v1381 = inttoptr v1382
+v1383 = load.i64 v1381
+v1384 = const.i64 0
+v1385 = icmp.eq v1383 v1384
+br v1385 ^budget155() ^step155()
+^budget155():
+trap
+^step155():
+v1386 = const.i64 1
+v1387 = sub v1383 v1386
+store.i64 v1381 v1387
+v1388 = const.i64 4
+call @R10 v37 v1388
+v1390 = const.i64 4120
+v1389 = inttoptr v1390
+v1391 = load.i64 v1389
+v1392 = const.i64 0
+v1393 = icmp.eq v1391 v1392
+br v1393 ^budget156() ^step156()
+^budget156():
+trap
+^step156():
+v1394 = const.i64 1
+v1395 = sub v1391 v1394
+store.i64 v1389 v1395
+store.i32 v37 v1380
+v1397 = const.i64 4120
+v1396 = inttoptr v1397
+v1398 = load.i64 v1396
+v1399 = const.i64 0
+v1400 = icmp.eq v1398 v1399
+br v1400 ^budget157() ^step157()
+^budget157():
+trap
+^step157():
+v1401 = const.i64 1
+v1402 = sub v1398 v1401
+store.i64 v1396 v1402
+br ^b14(v1371)
+^b14(v4:ptr):
+v1404 = const.i64 4120
+v1403 = inttoptr v1404
+v1405 = load.i64 v1403
+v1406 = const.i64 0
+v1407 = icmp.eq v1405 v1406
+br v1407 ^budget158() ^step158()
+^budget158():
+trap
+^step158():
+v1408 = const.i64 1
+v1409 = sub v1405 v1408
+store.i64 v1403 v1409
+v1410 = const.i64 8
+call @R10 v4 v1410
+v1412 = const.i64 4120
+v1411 = inttoptr v1412
+v1413 = load.i64 v1411
+v1414 = const.i64 0
+v1415 = icmp.eq v1413 v1414
+br v1415 ^budget159() ^step159()
+^budget159():
+trap
+^step159():
+v1416 = const.i64 1
+v1417 = sub v1413 v1416
+store.i64 v1411 v1417
+v1418 = load.i64 v4
+v1420 = const.i64 4120
+v1419 = inttoptr v1420
+v1421 = load.i64 v1419
+v1422 = const.i64 0
+v1423 = icmp.eq v1421 v1422
+br v1423 ^budget160() ^step160()
+^budget160():
+trap
+^step160():
+v1424 = const.i64 1
+v1425 = sub v1421 v1424
+store.i64 v1419 v1425
+v1426 = const.i64 81985529216486895
+v1427 = icmp.eq v1418 v1426
+v1429 = const.i64 4120
+v1428 = inttoptr v1429
+v1430 = load.i64 v1428
+v1431 = const.i64 0
+v1432 = icmp.eq v1430 v1431
+br v1432 ^budget161() ^step161()
+^budget161():
+trap
+^step161():
+v1433 = const.i64 1
+v1434 = sub v1430 v1433
+store.i64 v1428 v1434
+v1435 = const.i8 113
+v1436 = const.i8 33
+v1437 = select v1427 v1435 v1436
+v1439 = const.i64 4120
+v1438 = inttoptr v1439
+v1440 = load.i64 v1438
+v1441 = const.i64 0
+v1442 = icmp.eq v1440 v1441
+br v1442 ^budget162() ^step162()
+^budget162():
+trap
+^step162():
+v1443 = const.i64 1
+v1444 = sub v1440 v1443
+store.i64 v1438 v1444
+v1445 = const.i64 1
+call @R10 v236 v1445
+v1447 = const.i64 4120
+v1446 = inttoptr v1447
+v1448 = load.i64 v1446
+v1449 = const.i64 0
+v1450 = icmp.eq v1448 v1449
+br v1450 ^budget163() ^step163()
+^budget163():
+trap
+^step163():
+v1451 = const.i64 1
+v1452 = sub v1448 v1451
+store.i64 v1446 v1452
+store.i8 v236 v1437
+v1454 = const.i64 4120
+v1453 = inttoptr v1454
+v1455 = load.i64 v1453
+v1456 = const.i64 0
+v1457 = icmp.eq v1455 v1456
+br v1457 ^budget164() ^step164()
+^budget164():
+trap
+^step164():
+v1458 = const.i64 1
+v1459 = sub v1455 v1458
+store.i64 v1453 v1459
+v1460 = const.i64 4
+call @R10 v37 v1460
+v1462 = const.i64 4120
+v1461 = inttoptr v1462
+v1463 = load.i64 v1461
+v1464 = const.i64 0
+v1465 = icmp.eq v1463 v1464
+br v1465 ^budget165() ^step165()
+^budget165():
+trap
+^step165():
+v1466 = const.i64 1
+v1467 = sub v1463 v1466
+store.i64 v1461 v1467
+v1468 = load.i32 v37
+v1470 = const.i64 4120
+v1469 = inttoptr v1470
+v1471 = load.i64 v1469
+v1472 = const.i64 0
+v1473 = icmp.eq v1471 v1472
+br v1473 ^budget166() ^step166()
+^budget166():
+trap
+^step166():
+v1474 = const.i64 1
+v1475 = sub v1471 v1474
+store.i64 v1469 v1475
+v1476 = const.i32 41
+v1477 = icmp.ult v1468 v1476
+v1479 = const.i64 4120
+v1478 = inttoptr v1479
+v1480 = load.i64 v1478
+v1481 = const.i64 0
+v1482 = icmp.eq v1480 v1481
+br v1482 ^budget167() ^step167()
+^budget167():
+trap
+^step167():
+v1483 = const.i64 1
+v1484 = sub v1480 v1483
+store.i64 v1478 v1484
+br v1477 ^b15() ^b16()
+^b16():
+v1486 = const.i64 4120
+v1485 = inttoptr v1486
+v1487 = load.i64 v1485
+v1488 = const.i64 0
+v1489 = icmp.eq v1487 v1488
+br v1489 ^budget168() ^step168()
+^budget168():
+trap
+^step168():
+v1490 = const.i64 1
+v1491 = sub v1487 v1490
+store.i64 v1485 v1491
+v1492 = const.i64 8
+call @R10 v412 v1492
+v1494 = const.i64 4120
+v1493 = inttoptr v1494
+v1495 = load.i64 v1493
+v1496 = const.i64 0
+v1497 = icmp.eq v1495 v1496
+br v1497 ^budget169() ^step169()
+^budget169():
+trap
+^step169():
+v1498 = const.i64 1
+v1499 = sub v1495 v1498
+store.i64 v1493 v1499
+v1500 = load.i64 v412
+v1501 = inttoptr v1500
+v1503 = const.i64 4120
+v1502 = inttoptr v1503
+v1504 = load.i64 v1502
+v1505 = const.i64 0
+v1506 = icmp.eq v1504 v1505
+br v1506 ^budget170() ^step170()
+^budget170():
+trap
+^step170():
+v1507 = const.i64 1
+v1508 = sub v1504 v1507
+store.i64 v1502 v1508
+v1509 = ptrtoint.i64 v1501
+v1510 = const.i64 8
+v1511 = add v1509 v1510
+v1512 = inttoptr v1511
+v1514 = const.i64 4120
+v1513 = inttoptr v1514
+v1515 = load.i64 v1513
+v1516 = const.i64 0
+v1517 = icmp.eq v1515 v1516
+br v1517 ^budget171() ^step171()
+^budget171():
+trap
+^step171():
+v1518 = const.i64 1
+v1519 = sub v1515 v1518
+store.i64 v1513 v1519
+v1520 = const.i64 8
+call @R10 v412 v1520
+v1522 = const.i64 4120
+v1521 = inttoptr v1522
+v1523 = load.i64 v1521
+v1524 = const.i64 0
+v1525 = icmp.eq v1523 v1524
+br v1525 ^budget172() ^step172()
+^budget172():
+trap
+^step172():
+v1526 = const.i64 1
+v1527 = sub v1523 v1526
+store.i64 v1521 v1527
+v1528 = ptrtoint.i64 v1512
+store.i64 v412 v1528
+v1530 = const.i64 4120
+v1529 = inttoptr v1530
+v1531 = load.i64 v1529
+v1532 = const.i64 0
+v1533 = icmp.eq v1531 v1532
+br v1533 ^budget173() ^step173()
+^budget173():
+trap
+^step173():
+v1534 = const.i64 1
+v1535 = sub v1531 v1534
+store.i64 v1529 v1535
+br ^b17(v1501)
+^b15():
+v1537 = const.i64 4120
+v1536 = inttoptr v1537
+v1538 = load.i64 v1536
+v1539 = const.i64 0
+v1540 = icmp.eq v1538 v1539
+br v1540 ^budget174() ^step174()
+^budget174():
+trap
+^step174():
+v1541 = const.i64 1
+v1542 = sub v1538 v1541
+store.i64 v1536 v1542
+v1543 = const.i64 8
+call @R10 v423 v1543
+v1545 = const.i64 4120
+v1544 = inttoptr v1545
+v1546 = load.i64 v1544
+v1547 = const.i64 0
+v1548 = icmp.eq v1546 v1547
+br v1548 ^budget175() ^step175()
+^budget175():
+trap
+^step175():
+v1549 = const.i64 1
+v1550 = sub v1546 v1549
+store.i64 v1544 v1550
+v1551 = load.i64 v423
+v1552 = inttoptr v1551
+v1554 = const.i64 4120
+v1553 = inttoptr v1554
+v1555 = load.i64 v1553
+v1556 = const.i64 0
+v1557 = icmp.eq v1555 v1556
+br v1557 ^budget176() ^step176()
+^budget176():
+trap
+^step176():
+v1558 = const.i64 1
+v1559 = sub v1555 v1558
+store.i64 v1553 v1559
+v1560 = zext.i64 v1468
+v1562 = const.i64 4120
+v1561 = inttoptr v1562
+v1563 = load.i64 v1561
+v1564 = const.i64 0
+v1565 = icmp.eq v1563 v1564
+br v1565 ^budget177() ^step177()
+^budget177():
+trap
+^step177():
+v1566 = const.i64 1
+v1567 = sub v1563 v1566
+store.i64 v1561 v1567
+v1568 = ptrtoint.i64 v1552
+v1569 = add v1568 v1560
+v1570 = inttoptr v1569
+v1572 = const.i64 4120
+v1571 = inttoptr v1572
+v1573 = load.i64 v1571
+v1574 = const.i64 0
+v1575 = icmp.eq v1573 v1574
+br v1575 ^budget178() ^step178()
+^budget178():
+trap
+^step178():
+v1576 = const.i64 1
+v1577 = sub v1573 v1576
+store.i64 v1571 v1577
+v1578 = const.i32 8
+v1579 = add v1468 v1578
+v1581 = const.i64 4120
+v1580 = inttoptr v1581
+v1582 = load.i64 v1580
+v1583 = const.i64 0
+v1584 = icmp.eq v1582 v1583
+br v1584 ^budget179() ^step179()
+^budget179():
+trap
+^step179():
+v1585 = const.i64 1
+v1586 = sub v1582 v1585
+store.i64 v1580 v1586
+v1587 = const.i64 4
+call @R10 v37 v1587
+v1589 = const.i64 4120
+v1588 = inttoptr v1589
+v1590 = load.i64 v1588
+v1591 = const.i64 0
+v1592 = icmp.eq v1590 v1591
+br v1592 ^budget180() ^step180()
+^budget180():
+trap
+^step180():
+v1593 = const.i64 1
+v1594 = sub v1590 v1593
+store.i64 v1588 v1594
+store.i32 v37 v1579
+v1596 = const.i64 4120
+v1595 = inttoptr v1596
+v1597 = load.i64 v1595
+v1598 = const.i64 0
+v1599 = icmp.eq v1597 v1598
+br v1599 ^budget181() ^step181()
+^budget181():
+trap
+^step181():
+v1600 = const.i64 1
+v1601 = sub v1597 v1600
+store.i64 v1595 v1601
+br ^b17(v1570)
+^b17(v5:ptr):
+v1603 = const.i64 4120
+v1602 = inttoptr v1603
+v1604 = load.i64 v1602
+v1605 = const.i64 0
+v1606 = icmp.eq v1604 v1605
+br v1606 ^budget182() ^step182()
+^budget182():
+trap
+^step182():
+v1607 = const.i64 1
+v1608 = sub v1604 v1607
+store.i64 v1602 v1608
+v1609 = const.i64 4
+call @R10 v5 v1609
+v1611 = const.i64 4120
+v1610 = inttoptr v1611
+v1612 = load.i64 v1610
+v1613 = const.i64 0
+v1614 = icmp.eq v1612 v1613
+br v1614 ^budget183() ^step183()
+^budget183():
+trap
+^step183():
+v1615 = const.i64 1
+v1616 = sub v1612 v1615
+store.i64 v1610 v1616
+v1617 = load.i32 v5
+v1619 = const.i64 4120
+v1618 = inttoptr v1619
+v1620 = load.i64 v1618
+v1621 = const.i64 0
+v1622 = icmp.eq v1620 v1621
+br v1622 ^budget184() ^step184()
+^budget184():
+trap
+^step184():
+v1623 = const.i64 1
+v1624 = sub v1620 v1623
+store.i64 v1618 v1624
+v1625 = const.i32 4000000001
+v1626 = icmp.eq v1617 v1625
+v1628 = const.i64 4120
+v1627 = inttoptr v1628
+v1629 = load.i64 v1627
+v1630 = const.i64 0
+v1631 = icmp.eq v1629 v1630
+br v1631 ^budget185() ^step185()
+^budget185():
+trap
+^step185():
+v1632 = const.i64 1
+v1633 = sub v1629 v1632
+store.i64 v1627 v1633
+v1634 = const.i8 117
+v1635 = const.i8 33
+v1636 = select v1626 v1634 v1635
+v1638 = const.i64 4120
+v1637 = inttoptr v1638
+v1639 = load.i64 v1637
+v1640 = const.i64 0
+v1641 = icmp.eq v1639 v1640
+br v1641 ^budget186() ^step186()
+^budget186():
+trap
+^step186():
+v1642 = const.i64 1
+v1643 = sub v1639 v1642
+store.i64 v1637 v1643
+v1644 = const.i64 1
+call @R10 v247 v1644
+v1646 = const.i64 4120
+v1645 = inttoptr v1646
+v1647 = load.i64 v1645
+v1648 = const.i64 0
+v1649 = icmp.eq v1647 v1648
+br v1649 ^budget187() ^step187()
+^budget187():
+trap
+^step187():
+v1650 = const.i64 1
+v1651 = sub v1647 v1650
+store.i64 v1645 v1651
+store.i8 v247 v1636
+v1653 = const.i64 4120
+v1652 = inttoptr v1653
+v1654 = load.i64 v1652
+v1655 = const.i64 0
+v1656 = icmp.eq v1654 v1655
+br v1656 ^budget188() ^step188()
+^budget188():
+trap
+^step188():
+v1657 = const.i64 1
+v1658 = sub v1654 v1657
+store.i64 v1652 v1658
+v1659 = const.i64 4
+call @R10 v258 v1659
+v1661 = const.i64 4120
+v1660 = inttoptr v1661
+v1662 = load.i64 v1660
+v1663 = const.i64 0
+v1664 = icmp.eq v1662 v1663
+br v1664 ^budget189() ^step189()
+^budget189():
+trap
+^step189():
+v1665 = const.i64 1
+v1666 = sub v1662 v1665
+store.i64 v1660 v1666
+v1667 = load.i32 v258
+v1669 = const.i64 4120
+v1668 = inttoptr v1669
+v1670 = load.i64 v1668
+v1671 = const.i64 0
+v1672 = icmp.eq v1670 v1671
+br v1672 ^budget190() ^step190()
+^budget190():
+trap
+^step190():
+v1673 = const.i64 1
+v1674 = sub v1670 v1673
+store.i64 v1668 v1674
+v1675 = const.i32 161
+v1676 = icmp.ult v1667 v1675
+v1678 = const.i64 4120
+v1677 = inttoptr v1678
+v1679 = load.i64 v1677
+v1680 = const.i64 0
+v1681 = icmp.eq v1679 v1680
+br v1681 ^budget191() ^step191()
+^budget191():
+trap
+^step191():
+v1682 = const.i64 1
+v1683 = sub v1679 v1682
+store.i64 v1677 v1683
+br v1676 ^b18() ^b19()
+^b19():
+v1685 = const.i64 4120
+v1684 = inttoptr v1685
+v1686 = load.i64 v1684
+v1687 = const.i64 0
+v1688 = icmp.eq v1686 v1687
+br v1688 ^budget192() ^step192()
+^budget192():
+trap
+^step192():
+v1689 = const.i64 1
+v1690 = sub v1686 v1689
+store.i64 v1684 v1690
+v1691 = const.i64 8
+call @R10 v434 v1691
+v1693 = const.i64 4120
+v1692 = inttoptr v1693
+v1694 = load.i64 v1692
+v1695 = const.i64 0
+v1696 = icmp.eq v1694 v1695
+br v1696 ^budget193() ^step193()
+^budget193():
+trap
+^step193():
+v1697 = const.i64 1
+v1698 = sub v1694 v1697
+store.i64 v1692 v1698
+v1699 = load.i64 v434
+v1700 = inttoptr v1699
+v1702 = const.i64 4120
+v1701 = inttoptr v1702
+v1703 = load.i64 v1701
+v1704 = const.i64 0
+v1705 = icmp.eq v1703 v1704
+br v1705 ^budget194() ^step194()
+^budget194():
+trap
+^step194():
+v1706 = const.i64 1
+v1707 = sub v1703 v1706
+store.i64 v1701 v1707
+v1708 = ptrtoint.i64 v1700
+v1709 = const.i64 8
+v1710 = add v1708 v1709
+v1711 = inttoptr v1710
+v1713 = const.i64 4120
+v1712 = inttoptr v1713
+v1714 = load.i64 v1712
+v1715 = const.i64 0
+v1716 = icmp.eq v1714 v1715
+br v1716 ^budget195() ^step195()
+^budget195():
+trap
+^step195():
+v1717 = const.i64 1
+v1718 = sub v1714 v1717
+store.i64 v1712 v1718
+v1719 = const.i64 8
+call @R10 v434 v1719
+v1721 = const.i64 4120
+v1720 = inttoptr v1721
+v1722 = load.i64 v1720
+v1723 = const.i64 0
+v1724 = icmp.eq v1722 v1723
+br v1724 ^budget196() ^step196()
+^budget196():
+trap
+^step196():
+v1725 = const.i64 1
+v1726 = sub v1722 v1725
+store.i64 v1720 v1726
+v1727 = ptrtoint.i64 v1711
+store.i64 v434 v1727
+v1729 = const.i64 4120
+v1728 = inttoptr v1729
+v1730 = load.i64 v1728
+v1731 = const.i64 0
+v1732 = icmp.eq v1730 v1731
+br v1732 ^budget197() ^step197()
+^budget197():
+trap
+^step197():
+v1733 = const.i64 1
+v1734 = sub v1730 v1733
+store.i64 v1728 v1734
+br ^b20(v1700)
+^b18():
+v1736 = const.i64 4120
+v1735 = inttoptr v1736
+v1737 = load.i64 v1735
+v1738 = const.i64 0
+v1739 = icmp.eq v1737 v1738
+br v1739 ^budget198() ^step198()
+^budget198():
+trap
+^step198():
+v1740 = const.i64 1
+v1741 = sub v1737 v1740
+store.i64 v1735 v1741
+v1742 = const.i64 8
+call @R10 v445 v1742
+v1744 = const.i64 4120
+v1743 = inttoptr v1744
+v1745 = load.i64 v1743
+v1746 = const.i64 0
+v1747 = icmp.eq v1745 v1746
+br v1747 ^budget199() ^step199()
+^budget199():
+trap
+^step199():
+v1748 = const.i64 1
+v1749 = sub v1745 v1748
+store.i64 v1743 v1749
+v1750 = load.i64 v445
+v1751 = inttoptr v1750
+v1753 = const.i64 4120
+v1752 = inttoptr v1753
+v1754 = load.i64 v1752
+v1755 = const.i64 0
+v1756 = icmp.eq v1754 v1755
+br v1756 ^budget200() ^step200()
+^budget200():
+trap
+^step200():
+v1757 = const.i64 1
+v1758 = sub v1754 v1757
+store.i64 v1752 v1758
+v1759 = zext.i64 v1667
+v1761 = const.i64 4120
+v1760 = inttoptr v1761
+v1762 = load.i64 v1760
+v1763 = const.i64 0
+v1764 = icmp.eq v1762 v1763
+br v1764 ^budget201() ^step201()
+^budget201():
+trap
+^step201():
+v1765 = const.i64 1
+v1766 = sub v1762 v1765
+store.i64 v1760 v1766
+v1767 = ptrtoint.i64 v1751
+v1768 = add v1767 v1759
+v1769 = inttoptr v1768
+v1771 = const.i64 4120
+v1770 = inttoptr v1771
+v1772 = load.i64 v1770
+v1773 = const.i64 0
+v1774 = icmp.eq v1772 v1773
+br v1774 ^budget202() ^step202()
+^budget202():
+trap
+^step202():
+v1775 = const.i64 1
+v1776 = sub v1772 v1775
+store.i64 v1770 v1776
+v1777 = const.i32 16
+v1778 = add v1667 v1777
+v1780 = const.i64 4120
+v1779 = inttoptr v1780
+v1781 = load.i64 v1779
+v1782 = const.i64 0
+v1783 = icmp.eq v1781 v1782
+br v1783 ^budget203() ^step203()
+^budget203():
+trap
+^step203():
+v1784 = const.i64 1
+v1785 = sub v1781 v1784
+store.i64 v1779 v1785
+v1786 = const.i64 4
+call @R10 v258 v1786
+v1788 = const.i64 4120
+v1787 = inttoptr v1788
+v1789 = load.i64 v1787
+v1790 = const.i64 0
+v1791 = icmp.eq v1789 v1790
+br v1791 ^budget204() ^step204()
+^budget204():
+trap
+^step204():
+v1792 = const.i64 1
+v1793 = sub v1789 v1792
+store.i64 v1787 v1793
+store.i32 v258 v1778
+v1795 = const.i64 4120
+v1794 = inttoptr v1795
+v1796 = load.i64 v1794
+v1797 = const.i64 0
+v1798 = icmp.eq v1796 v1797
+br v1798 ^budget205() ^step205()
+^budget205():
+trap
+^step205():
+v1799 = const.i64 1
+v1800 = sub v1796 v1799
+store.i64 v1794 v1800
+br ^b20(v1769)
+^b20(v6:ptr):
+v1802 = const.i64 4120
+v1801 = inttoptr v1802
+v1803 = load.i64 v1801
+v1804 = const.i64 0
+v1805 = icmp.eq v1803 v1804
+br v1805 ^budget206() ^step206()
+^budget206():
+trap
+^step206():
+v1806 = const.i64 1
+v1807 = sub v1803 v1806
+store.i64 v1801 v1807
+v1808 = const.i64 8
+call @R10 v6 v1808
+v1810 = const.i64 4120
+v1809 = inttoptr v1810
+v1811 = load.i64 v1809
+v1812 = const.i64 0
+v1813 = icmp.eq v1811 v1812
+br v1813 ^budget207() ^step207()
+^budget207():
+trap
+^step207():
+v1814 = const.i64 1
+v1815 = sub v1811 v1814
+store.i64 v1809 v1815
+v1816 = load.i64 v6
+v1818 = const.i64 4120
+v1817 = inttoptr v1818
+v1819 = load.i64 v1817
+v1820 = const.i64 0
+v1821 = icmp.eq v1819 v1820
+br v1821 ^budget208() ^step208()
+^budget208():
+trap
+^step208():
+v1822 = const.i64 1
+v1823 = sub v1819 v1822
+store.i64 v1817 v1823
+v1824 = const.i64 4614500768194494464
+v1825 = icmp.eq v1816 v1824
+v1827 = const.i64 4120
+v1826 = inttoptr v1827
+v1828 = load.i64 v1826
+v1829 = const.i64 0
+v1830 = icmp.eq v1828 v1829
+br v1830 ^budget209() ^step209()
+^budget209():
+trap
+^step209():
+v1831 = const.i64 1
+v1832 = sub v1828 v1831
+store.i64 v1826 v1832
+v1833 = const.i8 100
+v1834 = const.i8 33
+v1835 = select v1825 v1833 v1834
+v1837 = const.i64 4120
+v1836 = inttoptr v1837
+v1838 = load.i64 v1836
+v1839 = const.i64 0
+v1840 = icmp.eq v1838 v1839
+br v1840 ^budget210() ^step210()
+^budget210():
+trap
+^step210():
+v1841 = const.i64 1
+v1842 = sub v1838 v1841
+store.i64 v1836 v1842
+v1843 = const.i64 1
+call @R10 v269 v1843
+v1845 = const.i64 4120
+v1844 = inttoptr v1845
+v1846 = load.i64 v1844
+v1847 = const.i64 0
+v1848 = icmp.eq v1846 v1847
+br v1848 ^budget211() ^step211()
+^budget211():
+trap
+^step211():
+v1849 = const.i64 1
+v1850 = sub v1846 v1849
+store.i64 v1844 v1850
+store.i8 v269 v1835
+v1852 = const.i64 4120
+v1851 = inttoptr v1852
+v1853 = load.i64 v1851
+v1854 = const.i64 0
+v1855 = icmp.eq v1853 v1854
+br v1855 ^budget212() ^step212()
+^budget212():
+trap
+^step212():
+v1856 = const.i64 1
+v1857 = sub v1853 v1856
+store.i64 v1851 v1857
+v1858 = const.i64 8
+call @R10 v280 v1858
+v1860 = const.i64 4120
+v1859 = inttoptr v1860
+v1861 = load.i64 v1859
+v1862 = const.i64 0
+v1863 = icmp.eq v1861 v1862
+br v1863 ^budget213() ^step213()
+^budget213():
+trap
+^step213():
+v1864 = const.i64 1
+v1865 = sub v1861 v1864
+store.i64 v1859 v1865
+v1866 = load.i64 v280
+v1867 = inttoptr v1866
+v1869 = const.i64 4120
+v1868 = inttoptr v1869
+v1870 = load.i64 v1868
+v1871 = const.i64 0
+v1872 = icmp.eq v1870 v1871
+br v1872 ^budget214() ^step214()
+^budget214():
+trap
+^step214():
+v1873 = const.i64 1
+v1874 = sub v1870 v1873
+store.i64 v1868 v1874
+v1875 = ptrtoint.i64 v1867
+v1876 = const.i64 15
+v1877 = add v1875 v1876
+v1878 = inttoptr v1877
+v1880 = const.i64 4120
+v1879 = inttoptr v1880
+v1881 = load.i64 v1879
+v1882 = const.i64 0
+v1883 = icmp.eq v1881 v1882
+br v1883 ^budget215() ^step215()
+^budget215():
+trap
+^step215():
+v1884 = const.i64 1
+v1885 = sub v1881 v1884
+store.i64 v1879 v1885
+v1886 = ptrtoint.i64 v1878
+v1888 = const.i64 4120
+v1887 = inttoptr v1888
+v1889 = load.i64 v1887
+v1890 = const.i64 0
+v1891 = icmp.eq v1889 v1890
+br v1891 ^budget216() ^step216()
+^budget216():
+trap
+^step216():
+v1892 = const.i64 1
+v1893 = sub v1889 v1892
+store.i64 v1887 v1893
+v1894 = const.i64 18446744073709551600
+v1895 = and v1886 v1894
+v1897 = const.i64 4120
+v1896 = inttoptr v1897
+v1898 = load.i64 v1896
+v1899 = const.i64 0
+v1900 = icmp.eq v1898 v1899
+br v1900 ^budget217() ^step217()
+^budget217():
+trap
+^step217():
+v1901 = const.i64 1
+v1902 = sub v1898 v1901
+store.i64 v1896 v1902
+v1903 = inttoptr v1895
+v1905 = const.i64 4120
+v1904 = inttoptr v1905
+v1906 = load.i64 v1904
+v1907 = const.i64 0
+v1908 = icmp.eq v1906 v1907
+br v1908 ^budget218() ^step218()
+^budget218():
+trap
+^step218():
+v1909 = const.i64 1
+v1910 = sub v1906 v1909
+store.i64 v1904 v1910
+v1911 = ptrtoint.i64 v1903
+v1912 = const.i64 16
+v1913 = add v1911 v1912
+v1914 = inttoptr v1913
+v1916 = const.i64 4120
+v1915 = inttoptr v1916
+v1917 = load.i64 v1915
+v1918 = const.i64 0
+v1919 = icmp.eq v1917 v1918
+br v1919 ^budget219() ^step219()
+^budget219():
+trap
+^step219():
+v1920 = const.i64 1
+v1921 = sub v1917 v1920
+store.i64 v1915 v1921
+v1922 = const.i64 8
+call @R10 v280 v1922
+v1924 = const.i64 4120
+v1923 = inttoptr v1924
+v1925 = load.i64 v1923
+v1926 = const.i64 0
+v1927 = icmp.eq v1925 v1926
+br v1927 ^budget220() ^step220()
+^budget220():
+trap
+^step220():
+v1928 = const.i64 1
+v1929 = sub v1925 v1928
+store.i64 v1923 v1929
+v1930 = ptrtoint.i64 v1914
+store.i64 v280 v1930
+v1932 = const.i64 4120
+v1931 = inttoptr v1932
+v1933 = load.i64 v1931
+v1934 = const.i64 0
+v1935 = icmp.eq v1933 v1934
+br v1935 ^budget221() ^step221()
+^budget221():
+trap
+^step221():
+v1936 = const.i64 1
+v1937 = sub v1933 v1936
+store.i64 v1931 v1937
+v1938 = const.i64 10
+call @R10 v1903 v1938
+v1940 = const.i64 4120
+v1939 = inttoptr v1940
+v1941 = load.i64 v1939
+v1942 = const.i64 0
+v1943 = icmp.eq v1941 v1942
+br v1943 ^budget222() ^step222()
+^budget222():
+trap
+^step222():
+v1944 = const.i64 1
+v1945 = sub v1941 v1944
+store.i64 v1939 v1945
+v1946 = load.i80 v1903
+v1948 = const.i64 4120
+v1947 = inttoptr v1948
+v1949 = load.i64 v1947
+v1950 = const.i64 0
+v1951 = icmp.eq v1949 v1950
+br v1951 ^budget223() ^step223()
+^budget223():
+trap
+^step223():
+v1952 = const.i64 1
+v1953 = sub v1949 v1952
+store.i64 v1947 v1953
+v1954 = const.i80 302226843217638866288640
+v1955 = icmp.eq v1946 v1954
+v1957 = const.i64 4120
+v1956 = inttoptr v1957
+v1958 = load.i64 v1956
+v1959 = const.i64 0
+v1960 = icmp.eq v1958 v1959
+br v1960 ^budget224() ^step224()
+^budget224():
+trap
+^step224():
+v1961 = const.i64 1
+v1962 = sub v1958 v1961
+store.i64 v1956 v1962
+v1963 = const.i8 101
+v1964 = const.i8 33
+v1965 = select v1955 v1963 v1964
+v1967 = const.i64 4120
+v1966 = inttoptr v1967
+v1968 = load.i64 v1966
+v1969 = const.i64 0
+v1970 = icmp.eq v1968 v1969
+br v1970 ^budget225() ^step225()
+^budget225():
+trap
+^step225():
+v1971 = const.i64 1
+v1972 = sub v1968 v1971
+store.i64 v1966 v1972
+v1973 = const.i64 1
+call @R10 v291 v1973
+v1975 = const.i64 4120
+v1974 = inttoptr v1975
+v1976 = load.i64 v1974
+v1977 = const.i64 0
+v1978 = icmp.eq v1976 v1977
+br v1978 ^budget226() ^step226()
+^budget226():
+trap
+^step226():
+v1979 = const.i64 1
+v1980 = sub v1976 v1979
+store.i64 v1974 v1980
+store.i8 v291 v1965
+v1982 = const.i64 4120
+v1981 = inttoptr v1982
+v1983 = load.i64 v1981
+v1984 = const.i64 0
+v1985 = icmp.eq v1983 v1984
+br v1985 ^budget227() ^step227()
+^budget227():
+trap
+^step227():
+v1986 = const.i64 1
+v1987 = sub v1983 v1986
+store.i64 v1981 v1987
+v1988 = const.i64 4
+call @R10 v37 v1988
+v1990 = const.i64 4120
+v1989 = inttoptr v1990
+v1991 = load.i64 v1989
+v1992 = const.i64 0
+v1993 = icmp.eq v1991 v1992
+br v1993 ^budget228() ^step228()
+^budget228():
+trap
+^step228():
+v1994 = const.i64 1
+v1995 = sub v1991 v1994
+store.i64 v1989 v1995
+v1996 = load.i32 v37
+v1998 = const.i64 4120
+v1997 = inttoptr v1998
+v1999 = load.i64 v1997
+v2000 = const.i64 0
+v2001 = icmp.eq v1999 v2000
+br v2001 ^budget229() ^step229()
+^budget229():
+trap
+^step229():
+v2002 = const.i64 1
+v2003 = sub v1999 v2002
+store.i64 v1997 v2003
+v2004 = const.i32 41
+v2005 = icmp.ult v1996 v2004
+v2007 = const.i64 4120
+v2006 = inttoptr v2007
+v2008 = load.i64 v2006
+v2009 = const.i64 0
+v2010 = icmp.eq v2008 v2009
+br v2010 ^budget230() ^step230()
+^budget230():
+trap
+^step230():
+v2011 = const.i64 1
+v2012 = sub v2008 v2011
+store.i64 v2006 v2012
+br v2005 ^b21() ^b22()
+^b22():
+v2014 = const.i64 4120
+v2013 = inttoptr v2014
+v2015 = load.i64 v2013
+v2016 = const.i64 0
+v2017 = icmp.eq v2015 v2016
+br v2017 ^budget231() ^step231()
+^budget231():
+trap
+^step231():
+v2018 = const.i64 1
+v2019 = sub v2015 v2018
+store.i64 v2013 v2019
+v2020 = ptrtoint.i64 v1903
+v2021 = const.i64 24
+v2022 = add v2020 v2021
+v2023 = inttoptr v2022
+v2025 = const.i64 4120
+v2024 = inttoptr v2025
+v2026 = load.i64 v2024
+v2027 = const.i64 0
+v2028 = icmp.eq v2026 v2027
+br v2028 ^budget232() ^step232()
+^budget232():
+trap
+^step232():
+v2029 = const.i64 1
+v2030 = sub v2026 v2029
+store.i64 v2024 v2030
+v2031 = const.i64 8
+call @R10 v280 v2031
+v2033 = const.i64 4120
+v2032 = inttoptr v2033
+v2034 = load.i64 v2032
+v2035 = const.i64 0
+v2036 = icmp.eq v2034 v2035
+br v2036 ^budget233() ^step233()
+^budget233():
+trap
+^step233():
+v2037 = const.i64 1
+v2038 = sub v2034 v2037
+store.i64 v2032 v2038
+v2039 = ptrtoint.i64 v2023
+store.i64 v280 v2039
+v2041 = const.i64 4120
+v2040 = inttoptr v2041
+v2042 = load.i64 v2040
+v2043 = const.i64 0
+v2044 = icmp.eq v2042 v2043
+br v2044 ^budget234() ^step234()
+^budget234():
+trap
+^step234():
+v2045 = const.i64 1
+v2046 = sub v2042 v2045
+store.i64 v2040 v2046
+br ^b23(v1914)
+^b21():
+v2048 = const.i64 4120
+v2047 = inttoptr v2048
+v2049 = load.i64 v2047
+v2050 = const.i64 0
+v2051 = icmp.eq v2049 v2050
+br v2051 ^budget235() ^step235()
+^budget235():
+trap
+^step235():
+v2052 = const.i64 1
+v2053 = sub v2049 v2052
+store.i64 v2047 v2053
+v2054 = const.i64 8
+call @R10 v456 v2054
+v2056 = const.i64 4120
+v2055 = inttoptr v2056
+v2057 = load.i64 v2055
+v2058 = const.i64 0
+v2059 = icmp.eq v2057 v2058
+br v2059 ^budget236() ^step236()
+^budget236():
+trap
+^step236():
+v2060 = const.i64 1
+v2061 = sub v2057 v2060
+store.i64 v2055 v2061
+v2062 = load.i64 v456
+v2063 = inttoptr v2062
+v2065 = const.i64 4120
+v2064 = inttoptr v2065
+v2066 = load.i64 v2064
+v2067 = const.i64 0
+v2068 = icmp.eq v2066 v2067
+br v2068 ^budget237() ^step237()
+^budget237():
+trap
+^step237():
+v2069 = const.i64 1
+v2070 = sub v2066 v2069
+store.i64 v2064 v2070
+v2071 = zext.i64 v1996
+v2073 = const.i64 4120
+v2072 = inttoptr v2073
+v2074 = load.i64 v2072
+v2075 = const.i64 0
+v2076 = icmp.eq v2074 v2075
+br v2076 ^budget238() ^step238()
+^budget238():
+trap
+^step238():
+v2077 = const.i64 1
+v2078 = sub v2074 v2077
+store.i64 v2072 v2078
+v2079 = ptrtoint.i64 v2063
+v2080 = add v2079 v2071
+v2081 = inttoptr v2080
+v2083 = const.i64 4120
+v2082 = inttoptr v2083
+v2084 = load.i64 v2082
+v2085 = const.i64 0
+v2086 = icmp.eq v2084 v2085
+br v2086 ^budget239() ^step239()
+^budget239():
+trap
+^step239():
+v2087 = const.i64 1
+v2088 = sub v2084 v2087
+store.i64 v2082 v2088
+v2089 = const.i32 8
+v2090 = add v1996 v2089
+v2092 = const.i64 4120
+v2091 = inttoptr v2092
+v2093 = load.i64 v2091
+v2094 = const.i64 0
+v2095 = icmp.eq v2093 v2094
+br v2095 ^budget240() ^step240()
+^budget240():
+trap
+^step240():
+v2096 = const.i64 1
+v2097 = sub v2093 v2096
+store.i64 v2091 v2097
+v2098 = const.i64 4
+call @R10 v37 v2098
+v2100 = const.i64 4120
+v2099 = inttoptr v2100
+v2101 = load.i64 v2099
+v2102 = const.i64 0
+v2103 = icmp.eq v2101 v2102
+br v2103 ^budget241() ^step241()
+^budget241():
+trap
+^step241():
+v2104 = const.i64 1
+v2105 = sub v2101 v2104
+store.i64 v2099 v2105
+store.i32 v37 v2090
+v2107 = const.i64 4120
+v2106 = inttoptr v2107
+v2108 = load.i64 v2106
+v2109 = const.i64 0
+v2110 = icmp.eq v2108 v2109
+br v2110 ^budget242() ^step242()
+^budget242():
+trap
+^step242():
+v2111 = const.i64 1
+v2112 = sub v2108 v2111
+store.i64 v2106 v2112
+br ^b23(v2081)
+^b23(v7:ptr):
+v2114 = const.i64 4120
+v2113 = inttoptr v2114
+v2115 = load.i64 v2113
+v2116 = const.i64 0
+v2117 = icmp.eq v2115 v2116
+br v2117 ^budget243() ^step243()
+^budget243():
+trap
+^step243():
+v2118 = const.i64 1
+v2119 = sub v2115 v2118
+store.i64 v2113 v2119
+v2120 = const.i64 4
+call @R10 v7 v2120
+v2122 = const.i64 4120
+v2121 = inttoptr v2122
+v2123 = load.i64 v2121
+v2124 = const.i64 0
+v2125 = icmp.eq v2123 v2124
+br v2125 ^budget244() ^step244()
+^budget244():
+trap
+^step244():
+v2126 = const.i64 1
+v2127 = sub v2123 v2126
+store.i64 v2121 v2127
+v2128 = load.i32 v7
+v2130 = const.i64 4120
+v2129 = inttoptr v2130
+v2131 = load.i64 v2129
+v2132 = const.i64 0
+v2133 = icmp.eq v2131 v2132
+br v2133 ^budget245() ^step245()
+^budget245():
+trap
+^step245():
+v2134 = const.i64 1
+v2135 = sub v2131 v2134
+store.i64 v2129 v2135
+v2136 = const.i32 91
+v2137 = icmp.eq v2128 v2136
+v2139 = const.i64 4120
+v2138 = inttoptr v2139
+v2140 = load.i64 v2138
+v2141 = const.i64 0
+v2142 = icmp.eq v2140 v2141
+br v2142 ^budget246() ^step246()
+^budget246():
+trap
+^step246():
+v2143 = const.i64 1
+v2144 = sub v2140 v2143
+store.i64 v2138 v2144
+v2145 = const.i8 122
+v2146 = const.i8 33
+v2147 = select v2137 v2145 v2146
+v2149 = const.i64 4120
+v2148 = inttoptr v2149
+v2150 = load.i64 v2148
+v2151 = const.i64 0
+v2152 = icmp.eq v2150 v2151
+br v2152 ^budget247() ^step247()
+^budget247():
+trap
+^step247():
+v2153 = const.i64 1
+v2154 = sub v2150 v2153
+store.i64 v2148 v2154
+v2155 = const.i64 1
+call @R10 v302 v2155
+v2157 = const.i64 4120
+v2156 = inttoptr v2157
+v2158 = load.i64 v2156
+v2159 = const.i64 0
+v2160 = icmp.eq v2158 v2159
+br v2160 ^budget248() ^step248()
+^budget248():
+trap
+^step248():
+v2161 = const.i64 1
+v2162 = sub v2158 v2161
+store.i64 v2156 v2162
+store.i8 v302 v2147
+v2164 = const.i64 4120
+v2163 = inttoptr v2164
+v2165 = load.i64 v2163
+v2166 = const.i64 0
+v2167 = icmp.eq v2165 v2166
+br v2167 ^budget249() ^step249()
+^budget249():
+trap
+^step249():
+v2168 = const.i64 1
+v2169 = sub v2165 v2168
+store.i64 v2163 v2169
+v2170 = const.i64 1
+call @R10 v313 v2170
+v2172 = const.i64 4120
+v2171 = inttoptr v2172
+v2173 = load.i64 v2171
+v2174 = const.i64 0
+v2175 = icmp.eq v2173 v2174
+br v2175 ^budget250() ^step250()
+^budget250():
+trap
+^step250():
+v2176 = const.i64 1
+v2177 = sub v2173 v2176
+store.i64 v2171 v2177
+v2178 = const.i8 10
+store.i8 v313 v2178
+v2180 = const.i64 4120
+v2179 = inttoptr v2180
+v2181 = load.i64 v2179
+v2182 = const.i64 0
+v2183 = icmp.eq v2181 v2182
+br v2183 ^budget251() ^step251()
+^budget251():
+trap
+^step251():
+v2184 = const.i64 1
+v2185 = sub v2181 v2184
+store.i64 v2179 v2185
+v2186 = const.i64 9
+effect console.write v48 v2186
+v2188 = const.i64 4120
+v2187 = inttoptr v2188
+v2189 = load.i64 v2187
+v2190 = const.i64 0
+v2191 = icmp.eq v2189 v2190
+br v2191 ^budget252() ^step252()
+^budget252():
+trap
+^step252():
+v2192 = const.i64 1
+v2193 = sub v2189 v2192
+store.i64 v2187 v2193
+v2194 = const.i32 1
+v2195 = add v0 v2194
+v2197 = const.i64 4120
+v2196 = inttoptr v2197
+v2198 = load.i64 v2196
+v2199 = const.i64 0
+v2200 = icmp.eq v2198 v2199
+br v2200 ^budget253() ^step253()
+^budget253():
+trap
+^step253():
+v2201 = const.i64 1
+v2202 = sub v2198 v2201
+store.i64 v2196 v2202
+v2203 = const.i32 0
+v2204 = icmp.eq v0 v2203
+v2206 = const.i64 4120
+v2205 = inttoptr v2206
+v2207 = load.i64 v2205
+v2208 = const.i64 0
+v2209 = icmp.eq v2207 v2208
+br v2209 ^budget254() ^step254()
+^budget254():
+trap
+^step254():
+v2210 = const.i64 1
+v2211 = sub v2207 v2210
+store.i64 v2205 v2211
+br v2204 ^b2(v2195) ^b1()
+^b1():
+v2213 = const.i64 4120
+v2212 = inttoptr v2213
+v2214 = load.i64 v2212
+v2215 = const.i64 0
+v2216 = icmp.eq v2214 v2215
+br v2216 ^budget255() ^step255()
+^budget255():
+trap
+^step255():
+v2217 = const.i64 1
+v2218 = sub v2214 v2217
+store.i64 v2212 v2218
+call @R9 v17
+v2220 = const.i64 4120
+v2219 = inttoptr v2220
+v2221 = load.i64 v2219
+v2222 = const.i64 0
+v2223 = icmp.eq v2221 v2222
+br v2223 ^budget256() ^step256()
+^budget256():
+trap
+^step256():
+v2224 = const.i64 1
+v2225 = sub v2221 v2224
+store.i64 v2219 v2225
+ret
+fn cc @R6 (a0:i64) () () () ()
+^b0():
+v1 = const.i64 4128
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = inttoptr v2
+v5 = const.i64 0
+v4 = inttoptr v5
+v6 = icmp.eq v3 v4
+br v6 ^b1() ^b2()
+^b1():
+v7 = alloc a0
+v9 = const.i64 4128
+v8 = inttoptr v9
+v10 = ptrtoint.i64 v7
+store.i64 v8 v10
+v12 = const.i64 4136
+v11 = inttoptr v12
+store.i64 v11 a0
+v13 = const.i64 0
+v15 = const.i64 4144
+v14 = inttoptr v15
+store.i64 v14 v13
+v16 = const.i64 0
+v18 = const.i64 4152
+v17 = inttoptr v18
+store.i64 v17 v16
+br ^b2()
+^b2():
+ret
+fn r @R7 (a0:i64, a1:i64, a2:i64) (result:ptr) () () ()
+^b0():
+v2 = const.i64 4120
+v1 = inttoptr v2
+v3 = load.i64 v1
+v4 = const.i64 0
+v5 = icmp.eq v3 v4
+br v5 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v6 = const.i64 1
+v7 = sub v3 v6
+store.i64 v1 v7
+v9 = const.i64 4144
+v8 = inttoptr v9
+v10 = load.i64 v8
+v12 = const.i64 4120
+v11 = inttoptr v12
+v13 = load.i64 v11
+v14 = const.i64 0
+v15 = icmp.eq v13 v14
+br v15 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v16 = const.i64 1
+v17 = sub v13 v16
+store.i64 v11 v17
+v19 = const.i64 4128
+v18 = inttoptr v19
+v20 = load.i64 v18
+v21 = inttoptr v20
+v23 = const.i64 4120
+v22 = inttoptr v23
+v24 = load.i64 v22
+v25 = const.i64 0
+v26 = icmp.eq v24 v25
+br v26 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v27 = const.i64 1
+v28 = sub v24 v27
+store.i64 v22 v28
+v29 = ptrtoint.i64 v21
+v31 = const.i64 4120
+v30 = inttoptr v31
+v32 = load.i64 v30
+v33 = const.i64 0
+v34 = icmp.eq v32 v33
+br v34 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v35 = const.i64 1
+v36 = sub v32 v35
+store.i64 v30 v36
+v37 = const.i64 1
+v38 = icmp.eq a2 v37
+v40 = const.i64 4120
+v39 = inttoptr v40
+v41 = load.i64 v39
+v42 = const.i64 0
+v43 = icmp.eq v41 v42
+br v43 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v44 = const.i64 1
+v45 = sub v41 v44
+store.i64 v39 v45
+v46 = const.i64 16
+v47 = const.i64 0
+v48 = select v38 v46 v47
+v50 = const.i64 4120
+v49 = inttoptr v50
+v51 = load.i64 v49
+v52 = const.i64 0
+v53 = icmp.eq v51 v52
+br v53 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v54 = const.i64 1
+v55 = sub v51 v54
+store.i64 v49 v55
+v56 = add v10 v48
+v58 = const.i64 4120
+v57 = inttoptr v58
+v59 = load.i64 v57
+v60 = const.i64 0
+v61 = icmp.eq v59 v60
+br v61 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v62 = const.i64 1
+v63 = sub v59 v62
+store.i64 v57 v63
+v64 = add v29 v56
+v66 = const.i64 4120
+v65 = inttoptr v66
+v67 = load.i64 v65
+v68 = const.i64 0
+v69 = icmp.eq v67 v68
+br v69 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v70 = const.i64 1
+v71 = sub v67 v70
+store.i64 v65 v71
+v72 = const.i64 1
+v73 = sub a1 v72
+v75 = const.i64 4120
+v74 = inttoptr v75
+v76 = load.i64 v74
+v77 = const.i64 0
+v78 = icmp.eq v76 v77
+br v78 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v79 = const.i64 1
+v80 = sub v76 v79
+store.i64 v74 v80
+v81 = add v64 v73
+v83 = const.i64 4120
+v82 = inttoptr v83
+v84 = load.i64 v82
+v85 = const.i64 0
+v86 = icmp.eq v84 v85
+br v86 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v87 = const.i64 1
+v88 = sub v84 v87
+store.i64 v82 v88
+v89 = const.i64 0
+v90 = sub v89 a1
+v92 = const.i64 4120
+v91 = inttoptr v92
+v93 = load.i64 v91
+v94 = const.i64 0
+v95 = icmp.eq v93 v94
+br v95 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v96 = const.i64 1
+v97 = sub v93 v96
+store.i64 v91 v97
+v98 = and v81 v90
+v100 = const.i64 4120
+v99 = inttoptr v100
+v101 = load.i64 v99
+v102 = const.i64 0
+v103 = icmp.eq v101 v102
+br v103 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v104 = const.i64 1
+v105 = sub v101 v104
+store.i64 v99 v105
+v106 = sub v98 v29
+v108 = const.i64 4120
+v107 = inttoptr v108
+v109 = load.i64 v107
+v110 = const.i64 0
+v111 = icmp.eq v109 v110
+br v111 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v112 = const.i64 1
+v113 = sub v109 v112
+store.i64 v107 v113
+v114 = const.i64 0
+v115 = icmp.eq a0 v114
+v117 = const.i64 4120
+v116 = inttoptr v117
+v118 = load.i64 v116
+v119 = const.i64 0
+v120 = icmp.eq v118 v119
+br v120 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v121 = const.i64 1
+v122 = sub v118 v121
+store.i64 v116 v122
+v123 = const.i64 1
+v124 = select v115 v123 a0
+v126 = const.i64 4120
+v125 = inttoptr v126
+v127 = load.i64 v125
+v128 = const.i64 0
+v129 = icmp.eq v127 v128
+br v129 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v130 = const.i64 1
+v131 = sub v127 v130
+store.i64 v125 v131
+v132 = add v106 v124
+v134 = const.i64 4120
+v133 = inttoptr v134
+v135 = load.i64 v133
+v136 = const.i64 0
+v137 = icmp.eq v135 v136
+br v137 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v138 = const.i64 1
+v139 = sub v135 v138
+store.i64 v133 v139
+v141 = const.i64 4136
+v140 = inttoptr v141
+v142 = load.i64 v140
+v144 = const.i64 4120
+v143 = inttoptr v144
+v145 = load.i64 v143
+v146 = const.i64 0
+v147 = icmp.eq v145 v146
+br v147 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v148 = const.i64 1
+v149 = sub v145 v148
+store.i64 v143 v149
+v150 = icmp.ult v142 v132
+v152 = const.i64 4120
+v151 = inttoptr v152
+v153 = load.i64 v151
+v154 = const.i64 0
+v155 = icmp.eq v153 v154
+br v155 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v156 = const.i64 1
+v157 = sub v153 v156
+store.i64 v151 v157
+v158 = icmp.ult v56 v10
+v160 = const.i64 4120
+v159 = inttoptr v160
+v161 = load.i64 v159
+v162 = const.i64 0
+v163 = icmp.eq v161 v162
+br v163 ^budget18() ^step18()
+^budget18():
+trap
+^step18():
+v164 = const.i64 1
+v165 = sub v161 v164
+store.i64 v159 v165
+v166 = icmp.ult v64 v29
+v168 = const.i64 4120
+v167 = inttoptr v168
+v169 = load.i64 v167
+v170 = const.i64 0
+v171 = icmp.eq v169 v170
+br v171 ^budget19() ^step19()
+^budget19():
+trap
+^step19():
+v172 = const.i64 1
+v173 = sub v169 v172
+store.i64 v167 v173
+v174 = icmp.ult v81 v64
+v176 = const.i64 4120
+v175 = inttoptr v176
+v177 = load.i64 v175
+v178 = const.i64 0
+v179 = icmp.eq v177 v178
+br v179 ^budget20() ^step20()
+^budget20():
+trap
+^step20():
+v180 = const.i64 1
+v181 = sub v177 v180
+store.i64 v175 v181
+v182 = icmp.ult v132 v106
+v184 = const.i64 4120
+v183 = inttoptr v184
+v185 = load.i64 v183
+v186 = const.i64 0
+v187 = icmp.eq v185 v186
+br v187 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v188 = const.i64 1
+v189 = sub v185 v188
+store.i64 v183 v189
+v190 = or v158 v166
+v192 = const.i64 4120
+v191 = inttoptr v192
+v193 = load.i64 v191
+v194 = const.i64 0
+v195 = icmp.eq v193 v194
+br v195 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v196 = const.i64 1
+v197 = sub v193 v196
+store.i64 v191 v197
+v198 = or v174 v182
+v200 = const.i64 4120
+v199 = inttoptr v200
+v201 = load.i64 v199
+v202 = const.i64 0
+v203 = icmp.eq v201 v202
+br v203 ^budget23() ^step23()
+^budget23():
+trap
+^step23():
+v204 = const.i64 1
+v205 = sub v201 v204
+store.i64 v199 v205
+v206 = or v190 v198
+v208 = const.i64 4120
+v207 = inttoptr v208
+v209 = load.i64 v207
+v210 = const.i64 0
+v211 = icmp.eq v209 v210
+br v211 ^budget24() ^step24()
+^budget24():
+trap
+^step24():
+v212 = const.i64 1
+v213 = sub v209 v212
+store.i64 v207 v213
+v214 = or v150 v206
+v216 = const.i64 4120
+v215 = inttoptr v216
+v217 = load.i64 v215
+v218 = const.i64 0
+v219 = icmp.eq v217 v218
+br v219 ^budget25() ^step25()
+^budget25():
+trap
+^step25():
+v220 = const.i64 1
+v221 = sub v217 v220
+store.i64 v215 v221
+br v214 ^b1() ^b2()
+^b2():
+v223 = const.i64 4120
+v222 = inttoptr v223
+v224 = load.i64 v222
+v225 = const.i64 0
+v226 = icmp.eq v224 v225
+br v226 ^budget26() ^step26()
+^budget26():
+trap
+^step26():
+v227 = const.i64 1
+v228 = sub v224 v227
+store.i64 v222 v228
+v229 = inttoptr v98
+v231 = const.i64 4120
+v230 = inttoptr v231
+v232 = load.i64 v230
+v233 = const.i64 0
+v234 = icmp.eq v232 v233
+br v234 ^budget27() ^step27()
+^budget27():
+trap
+^step27():
+v235 = const.i64 1
+v236 = sub v232 v235
+store.i64 v230 v236
+v238 = const.i64 4152
+v237 = inttoptr v238
+v239 = load.i64 v237
+v241 = const.i64 4120
+v240 = inttoptr v241
+v242 = load.i64 v240
+v243 = const.i64 0
+v244 = icmp.eq v242 v243
+br v244 ^budget28() ^step28()
+^budget28():
+trap
+^step28():
+v245 = const.i64 1
+v246 = sub v242 v245
+store.i64 v240 v246
+v249 = const.i64 8272
+v248 = inttoptr v249
+v247 = ptrtoint.i64 v248
+v250 = const.i64 24
+v251 = mul v239 v250
+v252 = add v247 v251
+v253 = inttoptr v252
+v255 = const.i64 4120
+v254 = inttoptr v255
+v256 = load.i64 v254
+v257 = const.i64 0
+v258 = icmp.eq v256 v257
+br v258 ^budget29() ^step29()
+^budget29():
+trap
+^step29():
+v259 = const.i64 1
+v260 = sub v256 v259
+store.i64 v254 v260
+store.i64 v253 v98
+v262 = const.i64 4120
+v261 = inttoptr v262
+v263 = load.i64 v261
+v264 = const.i64 0
+v265 = icmp.eq v263 v264
+br v265 ^budget30() ^step30()
+^budget30():
+trap
+^step30():
+v266 = const.i64 1
+v267 = sub v263 v266
+store.i64 v261 v267
+v268 = ptrtoint.i64 v253
+v269 = const.i64 8
+v270 = add v268 v269
+v271 = inttoptr v270
+v273 = const.i64 4120
+v272 = inttoptr v273
+v274 = load.i64 v272
+v275 = const.i64 0
+v276 = icmp.eq v274 v275
+br v276 ^budget31() ^step31()
+^budget31():
+trap
+^step31():
+v277 = const.i64 1
+v278 = sub v274 v277
+store.i64 v272 v278
+store.i64 v271 a0
+v280 = const.i64 4120
+v279 = inttoptr v280
+v281 = load.i64 v279
+v282 = const.i64 0
+v283 = icmp.eq v281 v282
+br v283 ^budget32() ^step32()
+^budget32():
+trap
+^step32():
+v284 = const.i64 1
+v285 = sub v281 v284
+store.i64 v279 v285
+v286 = ptrtoint.i64 v253
+v287 = const.i64 16
+v288 = add v286 v287
+v289 = inttoptr v288
+v291 = const.i64 4120
+v290 = inttoptr v291
+v292 = load.i64 v290
+v293 = const.i64 0
+v294 = icmp.eq v292 v293
+br v294 ^budget33() ^step33()
+^budget33():
+trap
+^step33():
+v295 = const.i64 1
+v296 = sub v292 v295
+store.i64 v290 v296
+store.i64 v289 a2
+v298 = const.i64 4120
+v297 = inttoptr v298
+v299 = load.i64 v297
+v300 = const.i64 0
+v301 = icmp.eq v299 v300
+br v301 ^budget34() ^step34()
+^budget34():
+trap
+^step34():
+v302 = const.i64 1
+v303 = sub v299 v302
+store.i64 v297 v303
+v304 = const.i64 1
+v305 = add v239 v304
+v307 = const.i64 4120
+v306 = inttoptr v307
+v308 = load.i64 v306
+v309 = const.i64 0
+v310 = icmp.eq v308 v309
+br v310 ^budget35() ^step35()
+^budget35():
+trap
+^step35():
+v311 = const.i64 1
+v312 = sub v308 v311
+store.i64 v306 v312
+v314 = const.i64 4152
+v313 = inttoptr v314
+store.i64 v313 v305
+v316 = const.i64 4120
+v315 = inttoptr v316
+v317 = load.i64 v315
+v318 = const.i64 0
+v319 = icmp.eq v317 v318
+br v319 ^budget36() ^step36()
+^budget36():
+trap
+^step36():
+v320 = const.i64 1
+v321 = sub v317 v320
+store.i64 v315 v321
+v323 = const.i64 4144
+v322 = inttoptr v323
+store.i64 v322 v132
+v325 = const.i64 4120
+v324 = inttoptr v325
+v326 = load.i64 v324
+v327 = const.i64 0
+v328 = icmp.eq v326 v327
+br v328 ^budget37() ^step37()
+^budget37():
+trap
+^step37():
+v329 = const.i64 1
+v330 = sub v326 v329
+store.i64 v324 v330
+v331 = const.i64 0
+br v38 ^b3() ^b4(v331)
+^b3():
+v333 = const.i64 4120
+v332 = inttoptr v333
+v334 = load.i64 v332
+v335 = const.i64 0
+v336 = icmp.eq v334 v335
+br v336 ^budget38() ^step38()
+^budget38():
+trap
+^step38():
+v337 = const.i64 1
+v338 = sub v334 v337
+store.i64 v332 v338
+v339 = ptrtoint.i64 v229
+v340 = const.i64 18446744073709551600
+v341 = add v339 v340
+v342 = inttoptr v341
+v344 = const.i64 4120
+v343 = inttoptr v344
+v345 = load.i64 v343
+v346 = const.i64 0
+v347 = icmp.eq v345 v346
+br v347 ^budget39() ^step39()
+^budget39():
+trap
+^step39():
+v348 = const.i64 1
+v349 = sub v345 v348
+store.i64 v343 v349
+store.i64 v342 v10
+v351 = const.i64 4120
+v350 = inttoptr v351
+v352 = load.i64 v350
+v353 = const.i64 0
+v354 = icmp.eq v352 v353
+br v354 ^budget40() ^step40()
+^budget40():
+trap
+^step40():
+v355 = const.i64 1
+v356 = sub v352 v355
+store.i64 v350 v356
+v357 = ptrtoint.i64 v229
+v358 = const.i64 18446744073709551608
+v359 = add v357 v358
+v360 = inttoptr v359
+v362 = const.i64 4120
+v361 = inttoptr v362
+v363 = load.i64 v361
+v364 = const.i64 0
+v365 = icmp.eq v363 v364
+br v365 ^budget41() ^step41()
+^budget41():
+trap
+^step41():
+v366 = const.i64 1
+v367 = sub v363 v366
+store.i64 v361 v367
+store.i64 v360 v239
+v369 = const.i64 4120
+v368 = inttoptr v369
+v370 = load.i64 v368
+v371 = const.i64 0
+v372 = icmp.eq v370 v371
+br v372 ^budget42() ^step42()
+^budget42():
+trap
+^step42():
+v373 = const.i64 1
+v374 = sub v370 v373
+store.i64 v368 v374
+v375 = const.i64 0
+br ^b4(v375)
+^b4(v0:i64):
+v377 = const.i64 4120
+v376 = inttoptr v377
+v378 = load.i64 v376
+v379 = const.i64 0
+v380 = icmp.eq v378 v379
+br v380 ^budget43() ^step43()
+^budget43():
+trap
+^step43():
+v381 = const.i64 1
+v382 = sub v378 v381
+store.i64 v376 v382
+v383 = icmp.eq v0 a0
+v385 = const.i64 4120
+v384 = inttoptr v385
+v386 = load.i64 v384
+v387 = const.i64 0
+v388 = icmp.eq v386 v387
+br v388 ^budget44() ^step44()
+^budget44():
+trap
+^step44():
+v389 = const.i64 1
+v390 = sub v386 v389
+store.i64 v384 v390
+br v383 ^b6() ^b5()
+^b5():
+v392 = const.i64 4120
+v391 = inttoptr v392
+v393 = load.i64 v391
+v394 = const.i64 0
+v395 = icmp.eq v393 v394
+br v395 ^budget45() ^step45()
+^budget45():
+trap
+^step45():
+v396 = const.i64 1
+v397 = sub v393 v396
+store.i64 v391 v397
+v398 = ptrtoint.i64 v229
+v399 = add v398 v0
+v400 = inttoptr v399
+v402 = const.i64 4120
+v401 = inttoptr v402
+v403 = load.i64 v401
+v404 = const.i64 0
+v405 = icmp.eq v403 v404
+br v405 ^budget46() ^step46()
+^budget46():
+trap
+^step46():
+v406 = const.i64 1
+v407 = sub v403 v406
+store.i64 v401 v407
+v408 = const.i8 0
+store.i8 v400 v408
+v410 = const.i64 4120
+v409 = inttoptr v410
+v411 = load.i64 v409
+v412 = const.i64 0
+v413 = icmp.eq v411 v412
+br v413 ^budget47() ^step47()
+^budget47():
+trap
+^step47():
+v414 = const.i64 1
+v415 = sub v411 v414
+store.i64 v409 v415
+v416 = const.i64 1
+v417 = add v0 v416
+v419 = const.i64 4120
+v418 = inttoptr v419
+v420 = load.i64 v418
+v421 = const.i64 0
+v422 = icmp.eq v420 v421
+br v422 ^budget48() ^step48()
+^budget48():
+trap
+^step48():
+v423 = const.i64 1
+v424 = sub v420 v423
+store.i64 v418 v424
+br ^b4(v417)
+^b6():
+v426 = const.i64 4120
+v425 = inttoptr v426
+v427 = load.i64 v425
+v428 = const.i64 0
+v429 = icmp.eq v427 v428
+br v429 ^budget49() ^step49()
+^budget49():
+trap
+^step49():
+v430 = const.i64 1
+v431 = sub v427 v430
+store.i64 v425 v431
+ret v229
+^b1():
+v433 = const.i64 4120
+v432 = inttoptr v433
+v434 = load.i64 v432
+v435 = const.i64 0
+v436 = icmp.eq v434 v435
+br v436 ^budget50() ^step50()
+^budget50():
+trap
+^step50():
+v437 = const.i64 1
+v438 = sub v434 v437
+store.i64 v432 v438
+trap
+fn r @R8 (a0:i64, a1:i64) (result:ptr) () () ()
+^b0():
+v1 = const.i64 4120
+v0 = inttoptr v1
+v2 = load.i64 v0
+v3 = const.i64 0
+v4 = icmp.eq v2 v3
+br v4 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v5 = const.i64 1
+v6 = sub v2 v5
+store.i64 v0 v6
+v7 = const.i64 1
+v8 = call @R7 a0 a1 v7
+v10 = const.i64 4120
+v9 = inttoptr v10
+v11 = load.i64 v9
+v12 = const.i64 0
+v13 = icmp.eq v11 v12
+br v13 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v14 = const.i64 1
+v15 = sub v11 v14
+store.i64 v9 v15
+ret v8
+fn r @R9 (a0:ptr) () () () ()
+^b0():
+v3 = const.i64 4120
+v2 = inttoptr v3
+v4 = load.i64 v2
+v5 = const.i64 0
+v6 = icmp.eq v4 v5
+br v6 ^budget0() ^step0()
+^budget0():
+trap
+^step0():
+v7 = const.i64 1
+v8 = sub v4 v7
+store.i64 v2 v8
+v9 = ptrtoint.i64 a0
+v11 = const.i64 4120
+v10 = inttoptr v11
+v12 = load.i64 v10
+v13 = const.i64 0
+v14 = icmp.eq v12 v13
+br v14 ^budget1() ^step1()
+^budget1():
+trap
+^step1():
+v15 = const.i64 1
+v16 = sub v12 v15
+store.i64 v10 v16
+v18 = const.i64 4152
+v17 = inttoptr v18
+v19 = load.i64 v17
+v21 = const.i64 4120
+v20 = inttoptr v21
+v22 = load.i64 v20
+v23 = const.i64 0
+v24 = icmp.eq v22 v23
+br v24 ^budget2() ^step2()
+^budget2():
+trap
+^step2():
+v25 = const.i64 1
+v26 = sub v22 v25
+store.i64 v20 v26
+v27 = const.i64 0
+br ^b1(v27)
+^b1(v0:i64):
+v29 = const.i64 4120
+v28 = inttoptr v29
+v30 = load.i64 v28
+v31 = const.i64 0
+v32 = icmp.eq v30 v31
+br v32 ^budget3() ^step3()
+^budget3():
+trap
+^step3():
+v33 = const.i64 1
+v34 = sub v30 v33
+store.i64 v28 v34
+v35 = icmp.eq v0 v19
+v37 = const.i64 4120
+v36 = inttoptr v37
+v38 = load.i64 v36
+v39 = const.i64 0
+v40 = icmp.eq v38 v39
+br v40 ^budget4() ^step4()
+^budget4():
+trap
+^step4():
+v41 = const.i64 1
+v42 = sub v38 v41
+store.i64 v36 v42
+br v35 ^b4() ^b2()
+^b2():
+v44 = const.i64 4120
+v43 = inttoptr v44
+v45 = load.i64 v43
+v46 = const.i64 0
+v47 = icmp.eq v45 v46
+br v47 ^budget5() ^step5()
+^budget5():
+trap
+^step5():
+v48 = const.i64 1
+v49 = sub v45 v48
+store.i64 v43 v49
+v52 = const.i64 8272
+v51 = inttoptr v52
+v50 = ptrtoint.i64 v51
+v53 = const.i64 24
+v54 = mul v0 v53
+v55 = add v50 v54
+v56 = inttoptr v55
+v58 = const.i64 4120
+v57 = inttoptr v58
+v59 = load.i64 v57
+v60 = const.i64 0
+v61 = icmp.eq v59 v60
+br v61 ^budget6() ^step6()
+^budget6():
+trap
+^step6():
+v62 = const.i64 1
+v63 = sub v59 v62
+store.i64 v57 v63
+v64 = load.i64 v56
+v66 = const.i64 4120
+v65 = inttoptr v66
+v67 = load.i64 v65
+v68 = const.i64 0
+v69 = icmp.eq v67 v68
+br v69 ^budget7() ^step7()
+^budget7():
+trap
+^step7():
+v70 = const.i64 1
+v71 = sub v67 v70
+store.i64 v65 v71
+v72 = ptrtoint.i64 v56
+v73 = const.i64 16
+v74 = add v72 v73
+v75 = inttoptr v74
+v77 = const.i64 4120
+v76 = inttoptr v77
+v78 = load.i64 v76
+v79 = const.i64 0
+v80 = icmp.eq v78 v79
+br v80 ^budget8() ^step8()
+^budget8():
+trap
+^step8():
+v81 = const.i64 1
+v82 = sub v78 v81
+store.i64 v76 v82
+v83 = load.i64 v75
+v85 = const.i64 4120
+v84 = inttoptr v85
+v86 = load.i64 v84
+v87 = const.i64 0
+v88 = icmp.eq v86 v87
+br v88 ^budget9() ^step9()
+^budget9():
+trap
+^step9():
+v89 = const.i64 1
+v90 = sub v86 v89
+store.i64 v84 v90
+v91 = icmp.eq v64 v9
+v93 = const.i64 4120
+v92 = inttoptr v93
+v94 = load.i64 v92
+v95 = const.i64 0
+v96 = icmp.eq v94 v95
+br v96 ^budget10() ^step10()
+^budget10():
+trap
+^step10():
+v97 = const.i64 1
+v98 = sub v94 v97
+store.i64 v92 v98
+v99 = const.i64 1
+v100 = icmp.eq v83 v99
+v102 = const.i64 4120
+v101 = inttoptr v102
+v103 = load.i64 v101
+v104 = const.i64 0
+v105 = icmp.eq v103 v104
+br v105 ^budget11() ^step11()
+^budget11():
+trap
+^step11():
+v106 = const.i64 1
+v107 = sub v103 v106
+store.i64 v101 v107
+v108 = and v91 v100
+v110 = const.i64 4120
+v109 = inttoptr v110
+v111 = load.i64 v109
+v112 = const.i64 0
+v113 = icmp.eq v111 v112
+br v113 ^budget12() ^step12()
+^budget12():
+trap
+^step12():
+v114 = const.i64 1
+v115 = sub v111 v114
+store.i64 v109 v115
+br v108 ^b5() ^b3()
+^b3():
+v117 = const.i64 4120
+v116 = inttoptr v117
+v118 = load.i64 v116
+v119 = const.i64 0
+v120 = icmp.eq v118 v119
+br v120 ^budget13() ^step13()
+^budget13():
+trap
+^step13():
+v121 = const.i64 1
+v122 = sub v118 v121
+store.i64 v116 v122
+v123 = const.i64 1
+v124 = add v0 v123
+v126 = const.i64 4120
+v125 = inttoptr v126
+v127 = load.i64 v125
+v128 = const.i64 0
+v129 = icmp.eq v127 v128
+br v129 ^budget14() ^step14()
+^budget14():
+trap
+^step14():
+v130 = const.i64 1
+v131 = sub v127 v130
+store.i64 v125 v131
+br ^b1(v124)
+^b5():
+v133 = const.i64 4120
+v132 = inttoptr v133
+v134 = load.i64 v132
+v135 = const.i64 0
+v136 = icmp.eq v134 v135
+br v136 ^budget15() ^step15()
+^budget15():
+trap
+^step15():
+v137 = const.i64 1
+v138 = sub v134 v137
+store.i64 v132 v138
+v139 = ptrtoint.i64 a0
+v140 = const.i64 18446744073709551600
+v141 = add v139 v140
+v142 = inttoptr v141
+v144 = const.i64 4120
+v143 = inttoptr v144
+v145 = load.i64 v143
+v146 = const.i64 0
+v147 = icmp.eq v145 v146
+br v147 ^budget16() ^step16()
+^budget16():
+trap
+^step16():
+v148 = const.i64 1
+v149 = sub v145 v148
+store.i64 v143 v149
+v150 = load.i64 v142
+v152 = const.i64 4120
+v151 = inttoptr v152
+v153 = load.i64 v151
+v154 = const.i64 0
+v155 = icmp.eq v153 v154
+br v155 ^budget17() ^step17()
+^budget17():
+trap
+^step17():
+v156 = const.i64 1
+v157 = sub v153 v156
+store.i64 v151 v157
+v159 = const.i64 4144
+v158 = inttoptr v159
+store.i64 v158 v150
+v161 = const.i64 4120
+v160 = inttoptr v161
+v162 = load.i64 v160
+v163 = const.i64 0
+v164 = icmp.eq v162 v163
+br v164 ^budget18() ^step18()
+^budget18():
+trap
+^step18():
+v165 = const.i64 1
+v166 = sub v162 v165
+store.i64 v160 v166
+v168 = const.i64 4152
+v167 = inttoptr v168
+store.i64 v167 v0
+v170 = const.i64 4120
+v169 = inttoptr v170
+v171 = load.i64 v169
+v172 = const.i64 0
+v173 = icmp.eq v171 v172
+br v173 ^budget19() ^step19()
+^budget19():
+trap
+^step19():
+v174 = const.i64 1
+v175 = sub v171 v174
+store.i64 v169 v175
+v177 = const.i64 4160
+v176 = inttoptr v177
+v178 = load.i64 v176
+v180 = const.i64 4120
+v179 = inttoptr v180
+v181 = load.i64 v179
+v182 = const.i64 0
+v183 = icmp.eq v181 v182
+br v183 ^budget20() ^step20()
+^budget20():
+trap
+^step20():
+v184 = const.i64 1
+v185 = sub v181 v184
+store.i64 v179 v185
+v186 = const.i64 0
+br ^b6(v186)
+^b6(v1:i64):
+v188 = const.i64 4120
+v187 = inttoptr v188
+v189 = load.i64 v187
+v190 = const.i64 0
+v191 = icmp.eq v189 v190
+br v191 ^budget21() ^step21()
+^budget21():
+trap
+^step21():
+v192 = const.i64 1
+v193 = sub v189 v192
+store.i64 v187 v193
+v194 = icmp.eq v1 v178
+v196 = const.i64 4120
+v195 = inttoptr v196
+v197 = load.i64 v195
+v198 = const.i64 0
+v199 = icmp.eq v197 v198
+br v199 ^budget22() ^step22()
+^budget22():
+trap
+^step22():
+v200 = const.i64 1
+v201 = sub v197 v200
+store.i64 v195 v201
+br v194 ^b9() ^b7()
+^b7():
+v203 = const.i64 4120
+v202 = inttoptr v203
+v204 = load.i64 v202
+v205 = const.i64 0
+v206 = icmp.eq v204 v205
+br v206 ^budget23() ^step23()
+^budget23():
+trap
+^step23():
+v207 = const.i64 1
+v208 = sub v204 v207
+store.i64 v202 v208
+v211 = const.i64 4168
+v210 = inttoptr v211
+v209 = ptrtoint.i64 v210
+v212 = const.i64 8
+v213 = mul v1 v212
+v214 = add v209 v213
+v215 = inttoptr v214
+v217 = const.i64 4120
+v216 = inttoptr v217
+v218 = load.i64 v216
+v219 = const.i64 0
+v220 = icmp.eq v218 v219
+br v220 ^budget24() ^step24()
+^budget24():
+trap
+^step24():
+v221 = const.i64 1
+v222 = sub v218 v221
+store.i64 v216 v222
+v223 = load.i64 v215
+v225 = const.i64 4120
+v224 = inttoptr v225
+v226 = load.i64 v224
+v227 = const.i64 0
+v228 = icmp.eq v226 v227
+br v228 ^budget25() ^step25()
+^budget25():
+trap
+^step25():
+v229 = const.i64 1
+v230 = sub v226 v229
+store.i64 v224 v230
+v231 = icmp.ult v150 v223
+v233 = const.i64 4120
+v232 = inttoptr v233
+v234 = load.i64 v232
+v235 = const.i64 0
+v236 = icmp.eq v234 v235
+br v236 ^budget26() ^step26()
+^budget26():
+trap
+^step26():
+v237 = const.i64 1
+v238 = sub v234 v237
+store.i64 v232 v238
+br v231 ^b9() ^b8()
+^b8():
+v240 = const.i64 4120
+v239 = inttoptr v240
+v241 = load.i64 v239
+v242 = const.i64 0
+v243 = icmp.eq v241 v242
+br v243 ^budget27() ^step27()
+^budget27():
+trap
+^step27():
+v244 = const.i64 1
+v245 = sub v241 v244
+store.i64 v239 v245
+v246 = const.i64 1
+v247 = add v1 v246
+v249 = const.i64 4120
+v248 = inttoptr v249
+v250 = load.i64 v248
+v251 = const.i64 0
+v252 = icmp.eq v250 v251
+br v252 ^budget28() ^step28()
+^budget28():
+trap
+^step28():
+v253 = const.i64 1
+v254 = sub v250 v253
+store.i64 v248 v254
+br ^b6(v247)
+^b9():
+v256 = const.i64 4120
+v255 = inttoptr v256
+v257 = load.i64 v255
+v258 = const.i64 0
+v259 = icmp.eq v257 v258
+br v259 ^budget29() ^step29()
+^budget29():
+trap
+^step29():
+v260 = const.i64 1
+v261 = sub v257 v260
+store.i64 v255 v261
+v263 = const.i64 4160
+v262 = inttoptr v263
+store.i64 v262 v1
+v265 = const.i64 4120
+v264 = inttoptr v265
+v266 = load.i64 v264
+v267 = const.i64 0
+v268 = icmp.eq v266 v267
+br v268 ^budget30() ^step30()
+^budget30():
+trap
+^step30():
+v269 = const.i64 1
+v270 = sub v266 v269
+store.i64 v264 v270
+ret
+^b4():
+v272 = const.i64 4120
+v271 = inttoptr v272
+v273 = load.i64 v271
+v274 = const.i64 0
+v275 = icmp.eq v273 v274
+br v275 ^budget31() ^step31()
+^budget31():
+trap
+^step31():
+v276 = const.i64 1
+v277 = sub v273 v276
+store.i64 v271 v277
+trap
+
+section data
+G1 4060000000000000
+G10 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+G11 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+G12 0000000000000000000000000000000000000000
+G2 706f696e74657200
+G3 656d70747900
+G4 0000000000000000
+G5 0000000000000000
+G6 0000000000000000
+G7 0000000000000000
+G8 0000000000000000
+G9 0000000000000000
+
+section devices
+{"models":{"console":{"version":"0.8"}},"services":{"bennett.argv":{"version":"0.2.10"}}}
+
+section layout
+{"A_tab":17,"H":17,"S_cells":13,"globals":{"G1":{"base":4096,"image":"G1","size":8},"G10":{"base":4168,"image":"G10","size":4104},"G11":{"base":8272,"image":"G11","size":12312},"G12":{"base":20592,"image":"G12","size":20},"G2":{"base":4104,"image":"G2","size":8},"G3":{"base":4112,"image":"G3","size":6},"G4":{"base":4120,"image":"G4","size":8},"G5":{"base":4128,"image":"G5","size":8},"G6":{"base":4136,"image":"G6","size":8},"G7":{"base":4144,"image":"G7","size":8},"G8":{"base":4152,"image":"G8","size":8},"G9":{"base":4160,"image":"G9","size":8}},"heap_base":28672,"heap_limit_max":65536,"interface_regions":{},"null_size":4096,"ptr_width":64}

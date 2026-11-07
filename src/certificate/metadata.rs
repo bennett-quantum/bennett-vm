@@ -14,11 +14,17 @@ fn claim_shape(obj: &Object, name: &str, claim: &Json) -> Result<(), String> {
     if matches!(string(claim, "kind")?, "exhaustive" | "sampled") {
         field(claim, "expected")?;
         let mut domain = field(claim, "domain")?.clone();
-        let controls = claim
-            .get("subject")
-            .and_then(|s| s.get("inherited_controls"))
-            .and_then(Json::as_usize)
-            .unwrap_or(0);
+        let controls = match claim.get("subject") {
+            Some(subject) => {
+                let Json::Num(count) = field(subject, "inherited_controls")? else {
+                    return Err(err("invalid inherited_controls"));
+                };
+                count
+                    .parse::<usize>()
+                    .map_err(|_| err("invalid inherited_controls"))?
+            }
+            None => 0,
+        };
         if controls != 0 {
             let Json::Obj(ref mut fields) = domain else {
                 return Err(err("invalid domain"));

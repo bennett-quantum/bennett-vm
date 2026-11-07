@@ -66,11 +66,14 @@ pub fn bind(
         Ok(Value::TokenId(*id, budget))
     };
     let primary = primary.map(&mut token).transpose()?;
-    for value in args {
-        if let Value::Token(b) | Value::TokenId(_, b) = value {
-            *value = token(*b)?;
-        }
-    }
+    let bound = args
+        .iter()
+        .map(|value| match value {
+            Value::Token(b) | Value::TokenId(_, b) => token(*b),
+            _ => Ok(value.clone()),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    args.clone_from_slice(&bound);
     Ok(primary)
 }
 

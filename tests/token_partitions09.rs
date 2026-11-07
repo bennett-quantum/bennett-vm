@@ -89,6 +89,20 @@ fn certificate_cannot_follow_changed_source_without_rebinding() {
 }
 
 #[test]
+fn malformed_control_counts_do_not_default_to_zero() {
+    let path = crate::pins::isa().join("conformance/fixtures/accepted-k84-09/baseline.bisa");
+    let original = std::fs::read_to_string(path).unwrap();
+    for value in ["-1", "null", "true", "\"0\""] {
+        let text = original.replace(
+            "\"inherited_controls\":0",
+            &format!("\"inherited_controls\":{value}"),
+        );
+        let error = bennett_vm::load(&text, false).unwrap_err();
+        assert!(error.contains("inherited_controls"), "{value}: {error}");
+    }
+}
+
+#[test]
 fn source_cleanup_uses_identity_through_forwarding_and_adjoint() {
     use bennett_vm::{json, ref_library::Catalog};
     let source = crate::source09::source(
@@ -181,10 +195,15 @@ fn partitions_reject_invalid_requests_and_preserve_fresh_identities() {
         Value::Token(budget),
         Value::Token(Budget { steps: 2, ..budget }),
     ];
+    let before = unequal.clone();
     assert!(
         token_aliases::bind(&mut unequal, None, Some(&aliases))
             .unwrap_err()
             .contains("unequal tuples")
+    );
+    assert_eq!(
+        unequal, before,
+        "invalid partition must not change argument identities"
     );
 }
 

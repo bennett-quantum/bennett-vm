@@ -1,4 +1,5 @@
 use bennett_vm::{json::Json, object, validate};
+#[allow(dead_code)]
 pub fn source(functions: &str) -> String {
     source_at("0.9", functions)
 }

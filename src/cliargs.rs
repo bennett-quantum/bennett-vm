@@ -120,37 +120,11 @@ pub fn parse_token(text: &str, defaults: &Budget) -> Result<Budget, String> {
 
 /// Canonical equality classes for tuple-only token arguments (ISA 0.9 K91).
 pub fn parse_token_aliases(raw: Option<&str>, count: usize) -> Result<Vec<usize>, String> {
-    let invalid = || "§10: E_ARG: invalid token_aliases partition".to_string();
-    let Some(raw) = raw else {
-        return if count == 0 {
-            Ok(vec![])
-        } else {
-            Err("§10: E_ARG: tuple-only token arguments require token_aliases".into())
-        };
-    };
-    let crate::json::Json::Arr(labels) = crate::json::parse(raw).map_err(|_| invalid())? else {
-        return Err(invalid());
-    };
-    if labels.len() != count {
-        return Err(invalid());
+    match crate::token_aliases::parse(raw)? {
+        Some(labels) => crate::token_aliases::validate(&labels, count),
+        None if count == 0 => Ok(vec![]),
+        None => Err("§10: E_ARG: tuple-only token arguments require token_aliases".into()),
     }
-    let mut next = 0;
-    labels
-        .into_iter()
-        .map(|label| {
-            let crate::json::Json::Num(number) = label else {
-                return Err(invalid());
-            };
-            let label: usize = number.parse().map_err(|_| invalid())?;
-            if label > next {
-                return Err(invalid());
-            }
-            if label == next {
-                next += 1;
-            }
-            Ok(label)
-        })
-        .collect()
 }
 
 pub enum RawArg {
@@ -259,6 +233,31 @@ impl Opts {
     pub fn all(&self, name: &str) -> Vec<String> {
         self.map.get(name).cloned().unwrap_or_default()
     }
+}
+
+/// Read each named region once, preserving binary file bytes without a hex round trip.
+pub fn region_bindings(opts: &Opts) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
+    let mut given = std::collections::BTreeMap::new();
+    for flag in ["mem", "mem-file"] {
+        for binding in opts.all(flag) {
+            let (name, value) = binding
+                .split_once('=')
+                .filter(|(name, value)| !name.is_empty() && !value.is_empty())
+                .ok_or_else(|| format!("--{flag} requires name=value"))?;
+            if given.contains_key(name) {
+                return Err(format!("duplicate region binding {name:?}"));
+            }
+            let bytes = match flag {
+                "mem" => crate::sha256::from_hex(value)
+                    .map_err(|e| format!("invalid --mem hex for {name:?}: {e}"))?,
+                "mem-file" => std::fs::read(value)
+                    .map_err(|e| format!("--mem-file {name:?} at {value:?}: {e}"))?,
+                _ => unreachable!("region binding flags are fixed"),
+            };
+            given.insert(name.to_string(), bytes);
+        }
+    }
+    Ok(given)
 }
 
 /// Strip a leading `@` from an entry name, as the reference CLI allows.

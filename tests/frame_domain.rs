@@ -1,10 +1,7 @@
 //! §5.6/K76: entry facts are constants and causal adjoint pops only.
 use bennett_vm::load;
 fn source(body: &str) -> String {
-    let p = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa"
-    );
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let text = std::fs::read_to_string(p).unwrap();
     let start = text.find("perm_action @borrowed").unwrap();
     let head_end = start + text[start..].find("^entry():\n").unwrap() + "^entry():\n".len();
@@ -16,10 +13,7 @@ fn source(body: &str) -> String {
 #[test]
 fn council_local_zero_frames_are_admitted() {
     for case in ["sol-oracle", "codex-oracle", "loop", "sol-qinplace"] {
-        let p = format!(
-            "{}/../bennett-isa-spec/reference-interpreter/tests/fixtures/r9-{case}.bisa",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let p = crate::pins::isa().join(format!("reference-interpreter/tests/fixtures/r9-{case}.bisa"));
         load(&std::fs::read_to_string(p).unwrap(), false).unwrap_or_else(|e| panic!("{case}: {e}"));
     }
 }
@@ -50,10 +44,7 @@ fn overlapping_borrow_lifetimes_keep_separate_maximal_frames() {
 #[test]
 fn every_loop_visit_contributes_to_the_entry_domain() {
     // c is zero on the first visit, one on the second: the union must reject.
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/reference-interpreter/tests/fixtures/r9-loop.bisa"
-    ))
+    let text = std::fs::read_to_string(crate::pins::isa().join("reference-interpreter/tests/fixtures/r9-loop.bisa"))
     .unwrap()
     .replace("qfree c\nc = qalloc any 1", "x c");
     let e = load(&text, true).unwrap_err();
@@ -62,10 +53,7 @@ fn every_loop_visit_contributes_to_the_entry_domain() {
 
 #[test]
 fn lifetime_boundary_invalidates_connected_reader_history() {
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"
-    ))
+    let text = std::fs::read_to_string(crate::pins::isa().join("reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"))
     .unwrap();
     let text = text.replacen(
         "oracle_call @o tk (c) t f () ()\n",
@@ -78,10 +66,7 @@ fn lifetime_boundary_invalidates_connected_reader_history() {
 
 #[test]
 fn disjoint_and_nested_adjoint_events_restore_constants() {
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"
-    ))
+    let text = std::fs::read_to_string(crate::pins::isa().join("reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"))
     .unwrap();
     let text = text.replace(
         "h c\noracle_call @o tk (c) t f () ()\noracle_call @o tk (c) t f () ()\nh c",
@@ -100,10 +85,7 @@ fn resolved_x_family_arities_share_exact_gate_identity() {
 
 #[test]
 fn local_action_adjoints_resolve_indexed_aliases_and_inherited_controls() {
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"
-    ))
+    let text = std::fs::read_to_string(crate::pins::isa().join("reference-interpreter/tests/fixtures/r9-sol-oracle.bisa"))
     .unwrap();
     let entry = format!(
         r#""9":{{"name":"turn","kind":"action","interface_hash":"{}","signature":{{"abi":"0.8","args":[],"bounds":[],"in":[],"kind":"action","mem":[],"mut":[1],"tier":"q"}}}},"#,

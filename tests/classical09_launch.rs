@@ -1,6 +1,5 @@
 //! Run ownership and token lifetimes through the published launch entry points.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::launch::*;
 use std::{ffi::CString, ptr};
 
@@ -173,8 +172,7 @@ fn minted_tokens_revoke_on_reverse_and_close_but_host_tokens_remain_program_scop
 #[test]
 fn nominal_class_allocations_accept_literal_and_runtime_widths_on_an_installed_target() {
     use bennett_vm::json::{self, Json};
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json");
+    let path = crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json");
     let mut target = json::parse(std::fs::read_to_string(path).unwrap().trim_end()).unwrap();
     let Json::Obj(fields) = &mut target else {
         panic!("target object");
@@ -241,8 +239,7 @@ fn failed_register_capacity_is_a_terminal_record_without_allocation_or_ownership
     unsafe {
         let source =
             support::source("fn cc @main (n:i64) () () () ()\n^entry():\nq = qreg.new any n\nret");
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json");
+        let path = crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json");
         let mut target = json::parse(std::fs::read_to_string(path).unwrap().trim_end()).unwrap();
         let Json::Obj(fields) = &mut target else {
             panic!("target object");

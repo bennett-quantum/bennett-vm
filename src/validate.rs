@@ -910,7 +910,6 @@ pub fn lproc_sig(obj: &Object, name: &str) -> Result<(Vec<usize>, usize), String
     ))
 }
 
-const CC_BINOPS: [&str; 8] = ["add", "sub", "mul", "and", "or", "xor", "shl", "lshr"];
 const GATES_1: [&str; 6] = ["x", "h", "s", "sdg", "t", "tdg"];
 
 /// Base mnemonic without type/predicate suffix beyond the first dot part
@@ -1370,7 +1369,7 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
         }
         let synthetic = crate::object::Instr {
             lhs: Vec::new(),
-            op: inner.clone(),
+            op: inner.clone().into(),
             operands: ins.operands[call_idx + 1..].to_vec(),
             nested: Vec::new(),
             line: ins.line,
@@ -1402,10 +1401,35 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
         }
         return Ok(());
     }
-    if CC_BINOPS.contains(&base)
-        || base == "ashr"
-        || ["udiv", "urem", "sdiv", "srem"].contains(&base)
-    {
+    if matches!(
+        ins.op,
+        crate::object::Op::Add
+            | crate::object::Op::Sub
+            | crate::object::Op::Mul
+            | crate::object::Op::And
+            | crate::object::Op::Or
+            | crate::object::Op::Xor
+            | crate::object::Op::Shl
+            | crate::object::Op::Lshr
+            | crate::object::Op::Ashr
+            | crate::object::Op::Udiv
+            | crate::object::Op::Urem
+            | crate::object::Op::Sdiv
+            | crate::object::Op::Srem
+            | crate::object::Op::LiftAdd
+            | crate::object::Op::LiftSub
+            | crate::object::Op::LiftMul
+            | crate::object::Op::LiftAnd
+            | crate::object::Op::LiftOr
+            | crate::object::Op::LiftXor
+            | crate::object::Op::LiftShl
+            | crate::object::Op::LiftLshr
+            | crate::object::Op::LiftAshr
+            | crate::object::Op::LiftUdiv
+            | crate::object::Op::LiftUrem
+            | crate::object::Op::LiftSdiv
+            | crate::object::Op::LiftSrem
+    ) {
         arity(f, ins, 2)?;
         lhs_n(f, ins, 1)?;
         return Ok(());
@@ -1433,16 +1457,16 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             return Ok(());
         }
     }
-    match op {
-        "inttoptr" => {
+    match &ins.op {
+        crate::object::Op::Inttoptr => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
         }
-        "alloc" => {
+        crate::object::Op::Alloc => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
         }
-        "free" | "trap" => {
+        crate::object::Op::Free | crate::object::Op::Trap => {
             if op == "free" {
                 arity(f, ins, 1)?;
             } else {
@@ -1450,9 +1474,9 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             lhs_n(f, ins, 0)
         }
-        "br" => validate_br(obj, f, ins),
-        "call" => validate_call(obj, f, ins),
-        "ret" => {
+        crate::object::Op::Br => validate_br(obj, f, ins),
+        crate::object::Op::Call => validate_call(obj, f, ins),
+        crate::object::Op::Ret => {
             let (_, results) = cc_sig(obj, &f.name)?;
             if ins.operands.len() != results.len() {
                 return Err(err(
@@ -1467,8 +1491,8 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             lhs_n(f, ins, 0)
         }
-        "uncall" => validate_uncall(obj, f, ins),
-        "hostcall" => {
+        crate::object::Op::Uncall => validate_uncall(obj, f, ins),
+        crate::object::Op::Hostcall => {
             arity(f, ins, 3)?;
             lhs_n(f, ins, 1)?;
             let service = &ins.operands[0];
@@ -1489,7 +1513,11 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             Ok(())
         }
-        "qreg.width" | "qreg.id" | "qreg.from_id" if obj.isa == "0.9" => {
+        crate::object::Op::QregWidth
+        | crate::object::Op::QregId
+        | crate::object::Op::QregFromId
+            if obj.isa == "0.9" =>
+        {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
         }
@@ -1500,11 +1528,11 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
         }
-        "measure" => {
+        crate::object::Op::Measure => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 1)
         }
-        "effect" => {
+        crate::object::Op::Effect => {
             if ins.operands.is_empty() || !ins.operands[0].contains('.') {
                 return Err(err(
                     "4.1",
@@ -1513,7 +1541,7 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             lhs_n(f, ins, 0)
         }
-        "budget.mint" if obj.isa == "0.9" => {
+        crate::object::Op::BudgetMint if obj.isa == "0.9" => {
             if !matches!(f.kind, FnKind::Cc | FnKind::R) {
                 return Err(err("3.3", "budget.mint outside CC/R"));
             }
@@ -1524,19 +1552,19 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             lhs_n(f, ins, 1)
         }
-        "qreg.new" => {
+        crate::object::Op::QregNew => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 1)
         }
-        "qreg.free" => {
+        crate::object::Op::QregFree => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)
         }
-        "qreg.slice" => {
+        crate::object::Op::QregSlice => {
             arity(f, ins, 3)?;
             lhs_n(f, ins, 1)
         }
-        "qreg.concat" => {
+        crate::object::Op::QregConcat => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 1)
         }
@@ -2022,38 +2050,46 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
             ),
         ));
     }
-    match op {
-        "x" | "h" | "s" | "sdg" | "t" | "tdg" => {
+    match &ins.op {
+        crate::object::Op::X
+        | crate::object::Op::H
+        | crate::object::Op::S
+        | crate::object::Op::Sdg
+        | crate::object::Op::T
+        | crate::object::Op::Tdg => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)
         }
-        "cx" | "swap" | "cz" => {
+        crate::object::Op::Cx | crate::object::Op::Swap | crate::object::Op::Cz => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 0)
         }
-        "ccx" => {
+        crate::object::Op::Ccx => {
             arity(f, ins, 3)?;
             lhs_n(f, ins, 0)
         }
-        "mcx" => {
+        crate::object::Op::Mcx => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 0)?;
             list_operand(&ins.operands[0])?;
             Ok(())
         }
-        "rx" | "ry" | "rz" => {
+        crate::object::Op::Rx | crate::object::Op::Ry | crate::object::Op::Rz => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 0)
         }
-        "qalloc" | "qborrow" => {
+        crate::object::Op::Qalloc | crate::object::Op::Qborrow => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 1)
         }
-        "qfree" | "qreturn" | "qpred" | "qunpred" => {
+        crate::object::Op::Qfree
+        | crate::object::Op::Qreturn
+        | crate::object::Op::Qpred
+        | crate::object::Op::Qunpred => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)
         }
-        "qcopy" | "qload" => {
+        crate::object::Op::Qcopy | crate::object::Op::Qload => {
             lhs_n(f, ins, 1)?;
             if op == "qcopy" {
                 arity(f, ins, 1)
@@ -2061,15 +2097,15 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
                 arity(f, ins, 2)
             }
         }
-        "quncopy" | "qxor" | "qexch" => {
+        crate::object::Op::Quncopy | crate::object::Op::Qxor | crate::object::Op::Qexch => {
             arity(f, ins, 2)?;
             lhs_n(f, ins, 0)
         }
-        "qunload" | "qstore" | "qexchm" => {
+        crate::object::Op::Qunload | crate::object::Op::Qstore | crate::object::Op::Qexchm => {
             arity(f, ins, 3)?;
             lhs_n(f, ins, 0)
         }
-        "qinplace" => {
+        crate::object::Op::Qinplace => {
             if obj.isa == "0.9" {
                 return validate_qinplace09(obj, f, ins);
             }
@@ -2089,7 +2125,7 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
             }
             Ok(())
         }
-        "qregion" => {
+        crate::object::Op::Qregion => {
             if ins.operands.len() != 3 && ins.operands.len() != 4 {
                 return Err(err(
                     "4.6",
@@ -2119,7 +2155,7 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
             }
             Ok(())
         }
-        "qif" => {
+        crate::object::Op::Qif => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)?;
             if ins.nested.len() != 2 {
@@ -2130,7 +2166,7 @@ fn validate_q(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<
             }
             Ok(())
         }
-        "qloop" => {
+        crate::object::Op::Qloop => {
             lhs_n(f, ins, 0)?;
             if ins.nested.len() != 1 {
                 return Err(err("4.6", format!("qloop in @{} needs one body", f.name)));

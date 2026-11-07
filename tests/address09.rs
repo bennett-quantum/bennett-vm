@@ -216,8 +216,7 @@ fn k54_and_k65_cleanup_carriers_are_disjoint_nonemitting_decisions() {
     );
 }
 
-#[path = "support/source09.rs"]
-mod source09;
+use crate::source09;
 fn load(functions: &str) -> (bennett_vm::object::Object, bennett_vm::identity::Identities) {
     bennett_vm::load(&source09::source(functions.trim_end()), false).unwrap()
 }

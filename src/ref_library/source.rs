@@ -102,6 +102,19 @@ impl Catalog {
         inherited_controls: usize,
         entries: &[CleanupEntry],
     ) -> Result<ActionExpansion, String> {
+        self.lower_action_with_token_aliases(object, name, params, adjoint, inherited_controls, entries, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn lower_action_with_token_aliases(
+        &self,
+        object: &Object,
+        name: &str,
+        params: &Json,
+        adjoint: bool,
+        inherited_controls: usize,
+        entries: &[CleanupEntry],
+        aliases: Option<&Json>,
+    ) -> Result<ActionExpansion, String> {
         let mut env = Bindings::new();
         env.link(object)?;
         // Root formation has the same source authentication boundary as a
@@ -115,7 +128,13 @@ impl Catalog {
             return Err(err("source is not an action"));
         }
         let types = f.lists[3].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
-        crate::invocation::decode_args(params, &types, object.ptr_width)?;
+        let mut values = crate::invocation::decode_args(params, &types, object.ptr_width)?;
+        for value in &values {
+            if let crate::value::Value::Token(budget) = value {
+                crate::cliargs::validate_budget(object, budget)?;
+            }
+        }
+        crate::token_aliases::bind(&mut values, None, aliases)?;
         env.cleanup.entries = Rc::new(entries.to_vec());
         for p in f.lists[0].iter().chain(&f.lists[1]) {
             let Type::Wire(width) = p.ty else {
@@ -147,13 +166,16 @@ impl Catalog {
                 },
             );
         }
-        for (p, value) in f.lists[3].iter().zip(arr(params)?) {
+        for ((p, value), resolved) in f.lists[3].iter().zip(arr(params)?).zip(&values) {
             let ty = match p.ty {
                 Type::Ptr => Json::obj(vec![("ptr", num(object.ptr_width))]),
                 _ => text(p.ty.signature_text()),
             };
             env.values
-                .insert(p.name.clone(), Bound::Value(value.clone(), ty));
+                .insert(p.name.clone(), Bound::Value(value.clone(), ty, match resolved {
+                    crate::value::Value::TokenId(id, _) => Some(*id),
+                    _ => None,
+                }));
         }
         env.wire("$controls", inherited_controls);
         env.add_controls(wires(&text("$controls"), &env)?);
@@ -232,7 +254,7 @@ pub(super) fn action_body(
     }
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction) {
         return Err(err(
-            "unavailable.reason: linked oracle construction staged in bennett-vm-47t",
+            "unavailable.reason: linked oracle construction is unavailable",
         ));
     }
     let bound = (object.isa == "0.9").then(|| crate::action::bind_allocations(f));
@@ -247,54 +269,8 @@ pub(super) fn action_body(
         .get(name)
         .ok_or_else(|| err("source interface identity missing"))?
         .clone();
-    let points = crate::sched::points(f)
-        .into_iter()
-        .map(|(name, p)| (p.instruction.line, name))
-        .collect();
-    let mut source = Source {
-        symbol,
-        points,
-        widths: BTreeMap::new(),
-        regions: BTreeMap::new(),
-        declarations: vec![],
-        locals: vec![],
-        computations: BTreeMap::new(),
-        cleanup_sites: BTreeMap::new(),
-        history: vec![],
-        images: object.data.clone(),
-        readonly: f.lists[1].iter().map(|p| p.name.clone()).collect(),
-        history_replay: false,
-        forbidden_witnesses: BTreeSet::new(),
-    };
-
-    for p in f.lists[0].iter().chain(&f.lists[1]) {
-        let Type::Wire(width) = p.ty else {
-            return Err(err("non-wire interface"));
-        };
-        source.widths.insert(p.name.clone(), width);
-    }
-    for p in &f.lists[2] {
-        let Type::Region(address, cell) = p.ty else {
-            return Err(err("non-region interface"));
-        };
-        source.regions.insert(
-            p.name.clone(),
-            Region {
-                address,
-                cell,
-                role: p.role.clone().ok_or_else(|| err("region role missing"))?,
-                local: false,
-            },
-        );
-    }
-    let instructions = f
-        .blocks
-        .iter()
-        .flat_map(|b| b.instrs.clone())
-        .collect::<Vec<_>>();
-    source.history = instructions.clone();
-    source.collect_regions(&instructions)?;
-    source.declarations(&instructions)?;
+    let source = Source::new(object, f, symbol)?;
+    let instructions = source.history.clone();
     env.source_history = Some(Rc::new(source.clone()));
     let mut body = source.sequence(&instructions, adjoint, env)?;
     for (name, width, class, state) in source.declarations.iter().rev() {
@@ -504,15 +480,15 @@ impl Source {
     }
     // Match a whole written inverse at source level before any cleanup leaf
     // is expanded. Keep the original row wrappers for reverse; recompute is
-    // newly instantiated at the release point (see ISA b-isa-spec-5cd).
-    fn inverse_rows(a: &Instr, b: &Instr) -> bool {
+    // newly instantiated at the release point.
+    fn inverse_rows(a: &Instr, b: &Instr, env: &Bindings) -> bool {
         if a.op == b.op && a.operands == b.operands && (a.op == "qif" || a.op == "qloop") {
             return a.nested.len() == b.nested.len()
                 && a.nested.iter().zip(&b.nested).all(|(a, b)| {
                     a.len() == b.len()
                         && a.iter()
                             .zip(b.iter().rev())
-                            .all(|(a, b)| Self::inverse_rows(a, b))
+                            .all(|(a, b)| Self::inverse_rows(a, b, env))
                 });
         }
         if matches!(a.op.as_str(), "action_call" | "adj" | "ctl")
@@ -528,7 +504,9 @@ impl Source {
                 _ => false,
             };
         }
-        if a.operands != b.operands || !a.lhs.is_empty() || !b.lhs.is_empty() {
+        let operands_equal = a.operands.len() == b.operands.len() && a.operands.iter().zip(&b.operands)
+            .all(|(a,b)| Self::operand_identity(a, env) == Self::operand_identity(b, env));
+        if !operands_equal || !a.lhs.is_empty() || !b.lhs.is_empty() {
             return false;
         }
         let inverse = match a.op.as_str() {
@@ -537,7 +515,7 @@ impl Source {
             "t" => "tdg",
             "tdg" => "t",
             "x" | "y" | "z" | "h" | "cx" | "cy" | "cz" | "ccx" | "mcx" | "swap" | "qxor"
-            | "qexch" => a.op.as_str(),
+            | "qexch" | "oracle_call" => a.op.as_str(),
             _ => return false,
         };
         b.op == inverse
@@ -951,7 +929,7 @@ impl Source {
                         let mut reads = Self::references(i);
                         reads.extend(predicates.iter().map(|n| base(n)));
                         *scopes == predicates
-                            && Self::inverse_rows(i, next)
+                            && Self::inverse_rows(i, next, env)
                             && prefix[index + 1..*at].iter().all(|row| {
                                 Self::outputs(row, env)
                                     .iter()
@@ -1877,11 +1855,11 @@ impl Source {
             let Some(&prior) = occurrences.inverse.get(&index) else {
                 continue;
             };
-            if prior >= index || !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
+            if prior >= index || !matches!(i.op.as_str(), "action_call" | "oracle_call" | "adj" | "ctl") {
                 continue;
             }
             let (inverse, _control, op, args) = crate::action::normalize_call(i)?;
-            if !inverse || op != "action_call" {
+            if op != "oracle_call" && (!inverse || op != "action_call") {
                 continue;
             }
             let compute = &instructions[prior];
@@ -1893,15 +1871,12 @@ impl Source {
                 .object
                 .function(args[0].trim_start_matches('@'))
                 .ok_or_else(|| err("missing paired callee"))?;
-            let mut targets = crate::validate::list_operand(&args[1])?;
-            targets.extend(
-                crate::validate::list_operand(&args[3])?
-                    .into_iter()
-                    .zip(&f.lists[2])
-                    .filter(|(_, p)| p.role.as_deref() == Some("mut"))
-                    .map(|(n, _)| n),
-            );
-            let perm = f.kind == FnKind::PermAction;
+            let mut targets = if op == "oracle_call" { args[3..5].to_vec() } else { crate::validate::list_operand(&args[1])? };
+            if op == "action_call" {
+                targets.extend(crate::validate::list_operand(&args[3])?.into_iter()
+                    .zip(&f.lists[2]).filter(|(_, p)| p.role.as_deref() == Some("mut")).map(|(n, _)| n));
+            }
+            let perm = matches!(f.kind, FnKind::PermAction | FnKind::Oracle);
             call_pairs.insert(compute.line, (i.clone(), targets.clone(), perm));
             call_pairs.insert(i.line, (compute.clone(), targets, perm));
         }
@@ -2046,8 +2021,9 @@ impl Source {
                         body
                     }
                 } else if let Some((partner, targets, perm)) = call_pairs.get(&i.line) {
-                    let (call_inverse, control, _, _) = crate::action::normalize_call(i)?;
-                    if call_inverse ^ adjoint {
+                    let (call_inverse, control, op, _) = crate::action::normalize_call(i)?;
+                    let cleanup = if op == "oracle_call" { i.line > partner.line } else { call_inverse };
+                    if cleanup ^ adjoint {
                         let computing = self.instruction(partner, adjoint, env)?;
                         let uncomputing = self.instruction(partner, !adjoint, env)?;
                         {
@@ -2214,7 +2190,7 @@ impl Source {
             };
             let args = if ["rx", "ry", "rz"].contains(&op) {
                 let bits = match env.values.get(&operands[0]) {
-                    Some(Bound::Value(value, ty)) if ty.as_str() == Some("f64") => {
+                    Some(Bound::Value(value, ty, _)) if ty.as_str() == Some("f64") => {
                         angle(value, env)?
                     }
                     Some(_) => return Err(err("gate angle argument must have type f64")),
@@ -2289,7 +2265,7 @@ impl Source {
                 if op != "action_call" {
                     if operands.get(offset).map(String::as_str) != Some("action_call") {
                         return Err(err(
-                            "unavailable.reason: source oracle call construction staged in bennett-vm-47t",
+                            "unavailable.reason: source oracle call construction is unavailable",
                         ));
                     }
                     offset += 1;
@@ -2545,10 +2521,91 @@ impl Source {
             }
             _ => {
                 return Err(err(format!(
-                    "unavailable.reason: source {op} symbol/row formation staged in bennett-vm-47t"
+                    "unavailable.reason: source {op} symbol/row formation is unavailable"
                 )));
             }
         };
         Ok(self.allocation_metadata(i, vec![invocation(kind, args)]))
     }
+}
+
+impl Source {
+    fn new(object: &Object, f: &crate::object::Function, symbol: String) -> Result<Self, String> {
+    let points = crate::sched::points(f)
+        .into_iter()
+        .map(|(name, p)| (p.instruction.line, name))
+        .collect();
+    let mut source = Source {
+        symbol,
+        points,
+        widths: BTreeMap::new(),
+        regions: BTreeMap::new(),
+        declarations: vec![],
+        locals: vec![],
+        computations: BTreeMap::new(),
+        cleanup_sites: BTreeMap::new(),
+        history: vec![],
+        images: object.data.clone(),
+        readonly: f.lists[1].iter().map(|p| p.name.clone()).collect(),
+        history_replay: false,
+        forbidden_witnesses: BTreeSet::new(),
+    };
+
+    for p in f.lists[0].iter().chain(&f.lists[1]) {
+        let Type::Wire(width) = p.ty else {
+            return Err(err("non-wire interface"));
+        };
+        source.widths.insert(p.name.clone(), width);
+    }
+    for p in &f.lists[2] {
+        let Type::Region(address, cell) = p.ty else {
+            return Err(err("non-region interface"));
+        };
+        source.regions.insert(
+            p.name.clone(),
+            Region {
+                address,
+                cell,
+                role: p.role.clone().ok_or_else(|| err("region role missing"))?,
+                local: false,
+            },
+        );
+    }
+    let instructions = f
+        .blocks
+        .iter()
+        .flat_map(|b| b.instrs.clone())
+        .collect::<Vec<_>>();
+    source.history = instructions.clone();
+    source.collect_regions(&instructions)?;
+    source.declarations(&instructions)?;
+        Ok(source)
+    }
+    fn operand_identity(operand: &str, env: &Bindings) -> Json {
+        if let Some(Bound::Value(value, _, identity)) = env.values.get(operand) {
+            return Json::Arr(vec![value.clone(), identity.map_or(Json::Null, Json::u64)]);
+        }
+        if operand.starts_with('(') && operand.ends_with(')')
+            && let Ok(names) = crate::validate::list_operand(operand) {
+            return Json::Arr(names.iter().map(|n| Self::operand_identity(n, env)).collect());
+        }
+        text(operand)
+    }
+}
+
+pub(crate) fn token_cleanup_points(object: &Object, name: &str, aliases: &Json) -> Result<Vec<String>, String> {
+    let f = object.function(name).ok_or_else(|| err("unknown action"))?;
+    if !matches!(f.kind, FnKind::Action | FnKind::PermAction) { return Ok(vec![]); }
+    let tokens = f.lists[3].iter().filter(|p| p.ty == Type::Token).collect::<Vec<_>>();
+    let labels = crate::token_aliases::validate(aliases, tokens.len())?;
+    let mut env = Bindings::new();
+    env.link(object)?;
+    for (p, label) in tokens.into_iter().zip(labels) {
+        env.values.insert(p.name.clone(), Bound::Value(Json::Null, text("token"), Some(label as u64)));
+    }
+    let ids = crate::identity::compute(object)?;
+    let source = Source::new(object, f, ids.interface[name].clone())?;
+    let pairs = source.inverse_occurrences(&source.history, &env, false)?;
+    Ok(pairs.inverse.iter().filter(|(right,left)| right > left && source.history[**right].op == "oracle_call")
+        .map(|(right,_)| source.points[&source.history[*right].line].clone()).collect())
 }

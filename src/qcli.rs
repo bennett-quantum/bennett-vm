@@ -56,7 +56,7 @@ pub fn borrow_capacity(obj: &Object, name: &str) -> Result<usize, String> {
             let synthetic;
             if i.op == "adj" {
                 synthetic = crate::object::Instr {
-                    op: i.operands[0].clone(),
+                    op: i.operands[0].clone().into(),
                     operands: i.operands[1..].to_vec(),
                     ..i.clone()
                 };
@@ -116,13 +116,14 @@ fn parse_bits(s: &str, n: usize) -> Result<BigUint, String> {
 pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     let o = cliargs::scan_opts(
         args,
-        &["mut", "in", "mem", "basis", "state", "args", "arg"],
+        &["mut", "in", "mem", "basis", "state", "args", "arg", "token-aliases"],
         &["adjoint"],
     )?;
     if o.positional.len() != 2 {
         return Err("run-action needs <object> <action>".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let sig = crate::validate::action_sig(&obj, name)?;
     let f = obj.function(name).ok_or("§5.1: unresolved action")?;
@@ -232,12 +233,13 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     } else {
         o.all("arg")
     };
-    let av = bind_args(
+    let mut av = bind_args(
         &obj,
         &sig.args,
         &raw,
         &cliargs::default_budget(&obj, 1_000_000),
     )?;
+    crate::token_aliases::bind_cli(&obj, &mut av, None, o.one("token-aliases")?)?;
     let pool = s.alloc_wires(borrow_capacity(&obj, name)?);
     let entry = s.clone();
     let adj = o.flags.contains("adjoint");

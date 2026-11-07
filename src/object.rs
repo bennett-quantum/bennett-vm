@@ -2,6 +2,10 @@
 //! identities in `identity`; this module only gives structure plus the
 //! raw text each hash and trace line refers to.
 
+#[path = "opcode.rs"]
+mod opcode;
+pub use opcode::{Op, SizedOp};
+
 use crate::bigint::BigUint;
 use crate::json::{self, Json};
 use std::collections::BTreeMap;
@@ -119,7 +123,7 @@ pub struct Param {
 #[derive(Clone, Debug)]
 pub struct Instr {
     pub lhs: Vec<String>,
-    pub op: String,
+    pub op: Op,
     pub operands: Vec<String>,
     /// Nested instruction lists for `qif`/`qloop` (0, 1 or 2 arms).
     pub nested: Vec<Vec<Instr>>,
@@ -1245,7 +1249,7 @@ fn parse_instr(cur: &mut Cursor) -> Result<Instr, String> {
     }
     Ok(Instr {
         lhs,
-        op,
+        op: op.into(),
         operands,
         nested,
         line: line_no,

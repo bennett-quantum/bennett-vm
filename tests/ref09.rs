@@ -248,8 +248,18 @@ fn typed_templates_capture_records_and_region_shapes() {
     b.wire("a", 16);
     b.body("B", j(r#"[{"invoke":"qregion","args":[2,8,"",[{"parameters":[{"name":"cells","type":"wire","width":16}],"body":[{"invoke":"qregion","args":[1,1,"",[{"parameters":[{"name":"scratch","type":"wire","width":1}],"body":[{"gate":"cx","wires":["a[0]","scratch"]},{"gate":"cx","wires":["a[0]","scratch"]}]}],[]]}]}],[]]}]"#)).unwrap();
     let l = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
-    assert_eq!(l.iter().filter(|l| l.operation == "cx").count(), 2);
-    assert_ne!(l[0].wires, l[1].wires);
+    let gates = l.iter().filter(|l| l.operation == "cx").collect::<Vec<_>>();
+    assert_eq!(gates.len(), 2);
+    // The captured control is external a[0]; the target is the single
+    // scratch wire allocated inside the outer 16-wire region.
+    assert_eq!(l[0].operation, "alloc");
+    assert_eq!(l[0].wires.len(), 16);
+    assert_eq!(l[1].operation, "alloc");
+    assert_eq!(l[1].wires.len(), 1);
+    let expected = vec!["a[0]".to_string(), l[1].wires[0].clone()];
+    assert_eq!(gates[0].wires, expected);
+    assert_eq!(gates[1].wires, expected);
+    assert_eq!(gates[0].ordinal + 1, gates[1].ordinal);
 
     // K25 descriptor validation runs at binding, including an empty visit domain.
     let args = j(r#"[1,1,1,"pc","next","frame",[],[]]"#);
@@ -363,9 +373,8 @@ fn arithmetic_catalog_traces_preserve_full_interface_and_clean_scratch() {
 
 #[test]
 fn source_actions_lower_to_the_bound_catalog() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
-        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
     .unwrap();
     let text = text.replace(
@@ -441,9 +450,8 @@ fn source_actions_lower_to_the_bound_catalog() {
 
 #[test]
 fn source_control_order_is_stable_and_duplicates_are_unioned() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
-        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
     .unwrap();
     let text = text.replace(
@@ -507,8 +515,7 @@ fn replay_permutation(
 
 #[test]
 fn source_memory_loops_images_and_borrows_are_full_domain_maps() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects");
+    let root = crate::pins::isa().join("conformance/cases/objects");
     let c = Catalog::published().unwrap();
     for (file, name, t_width, p_width) in [
         ("actions", "flip", 2, 2),
@@ -581,8 +588,7 @@ fn source_memory_loops_images_and_borrows_are_full_domain_maps() {
 
 #[test]
 fn linked_symbols_bind_exact_interfaces_and_keep_callee_ordinals() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects/actions.bisa");
+    let root = crate::pins::isa().join("conformance/cases/objects/actions.bisa");
     let (obj, ids) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
     let hash = ids.closure["flip"].clone().unwrap();
     let mut b = Bindings::new();
@@ -620,8 +626,7 @@ fn linked_symbols_bind_exact_interfaces_and_keep_callee_ordinals() {
 
 #[test]
 fn source_controlled_callees_and_resolved_angle_adjoint() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects/control_flow.bisa");
+    let root = crate::pins::isa().join("conformance/cases/objects/control_flow.bisa");
     let (obj, _) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
     let c = Catalog::published().unwrap();
     for adjoint in [false, true] {
@@ -638,8 +643,7 @@ fn source_controlled_callees_and_resolved_angle_adjoint() {
         assert_eq!(leaves[0].invocation.len(), 1);
         assert_eq!(leaves[0].invocation[0].adjoint, adjoint);
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let root = crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa");
     let raw = std::fs::read_to_string(root)
         .unwrap()
         .replace(

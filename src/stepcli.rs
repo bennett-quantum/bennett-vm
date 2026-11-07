@@ -7,7 +7,6 @@ use crate::{
     step::Machine,
     value::{Budget, Value},
 };
-use std::collections::BTreeMap;
 struct Inputs {
     mem: Vec<Vec<BigUint>>,
     args: Vec<Value>,
@@ -16,14 +15,7 @@ struct Inputs {
 fn inputs(obj: &Object, name: &str, o: &cliargs::Opts, budget: &Budget) -> Result<Inputs, String> {
     let f = obj.function(name).ok_or("§5.2: unknown oracle")?;
     let sig = crate::validate::oracle_sig(obj, name)?;
-    let mut given = BTreeMap::new();
-    for kv in o.all("mem") {
-        let (n, hex) = kv.split_once('=').ok_or("invalid --mem")?;
-        let bytes = crate::sha256::from_hex(hex)?;
-        if given.insert(n.to_string(), bytes).is_some() {
-            return Err("duplicate --mem".into());
-        }
-    }
+    let mut given = cliargs::region_bindings(o)?;
     let mut mem = vec![];
     let mut fixed = vec![];
     for (p, (a, w, _)) in f.lists[3].iter().zip(&sig.mem) {
@@ -55,7 +47,8 @@ fn inputs(obj: &Object, name: &str, o: &cliargs::Opts, budget: &Budget) -> Resul
     if !given.is_empty() {
         return Err("§5.1: unknown interface region".into());
     }
-    let args = crate::qcli::bind_args(obj, &sig.args, &o.all("arg"), budget)?;
+    let mut args = crate::qcli::bind_args(obj, &sig.args, &o.all("arg"), budget)?;
+    crate::token_aliases::bind_cli(obj, &mut args, Some(*budget), o.one("token-aliases")?)?;
     Ok(Inputs { mem, args, fixed })
 }
 fn budget(obj: &Object, o: &cliargs::Opts, n: u64) -> Result<Budget, String> {
@@ -65,11 +58,16 @@ fn budget(obj: &Object, o: &cliargs::Opts, n: u64) -> Result<Budget, String> {
     )
 }
 pub fn reverse(args: &[String]) -> Result<(), String> {
-    let o = cliargs::scan_opts(args, &["input", "budget", "mem", "arg", "steps"], &[])?;
+    let o = cliargs::scan_opts(
+        args,
+        &["input", "budget", "mem", "mem-file", "arg", "steps", "token-aliases"],
+        &[],
+    )?;
     if o.positional.len() != 2 {
         return Err("reverse needs <object> <oracle>".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let budget = budget(&obj, &o, 1_000_000)?;
     let inp = inputs(&obj, name, &o, &budget)?;
@@ -153,7 +151,9 @@ impl Rng {
 pub fn check(args: &[String]) -> Result<(), String> {
     let o = cliargs::scan_opts(
         args,
-        &["budget", "mem", "arg", "max-bits", "samples", "seed"],
+        &[
+            "budget", "mem", "mem-file", "arg", "max-bits", "samples", "seed", "token-aliases",
+        ],
         &["exhaustive", "suite"],
     )?;
     if o.positional.len() != 2 {
@@ -167,6 +167,7 @@ pub fn check(args: &[String]) -> Result<(), String> {
         return Err("step-check needs exactly one MODE".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let f = obj.function(name).ok_or("§5.2: unknown oracle")?;
     let sig = crate::validate::oracle_sig(&obj, name)?;

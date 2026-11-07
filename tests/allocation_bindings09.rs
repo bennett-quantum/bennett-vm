@@ -1,6 +1,5 @@
 //! Reallocated linear names retain distinct source lifetimes and metadata.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::Json,
     ref_library::{Catalog, CleanupEntry, CleanupRealisation, Leaf},
@@ -278,8 +277,7 @@ fn inverse_execution_restores_each_visited_allocation_class() {
         json,
         target::Target,
     };
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json");
+    let path = crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json");
     let mut target = json::parse(std::fs::read_to_string(path).unwrap().trim_end()).unwrap();
     let Json::Obj(fields) = &mut target else {
         panic!("target object");

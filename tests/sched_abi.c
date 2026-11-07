@@ -37,7 +37,7 @@ int main(int argc,char **argv){
  /* Requests own copies; response pointers remain valid after request free. */
  memset(object,0,n);memset(target,0,tlen);free(object);free(target);
  bennett_sched_request_free(r);
- assert(strstr(bennett_sched_response_reason(response),"milestone 4"));
+ assert(strstr(bennett_sched_response_reason(response),"expansion library"));
  bennett_sched_response_free(response);bennett_sched_response_free(second);
  bennett_sched_request_free(NULL);bennett_sched_response_free(NULL);
  puts("sched ABI: all 15 published functions, explicit unsupported, copied input ownership");

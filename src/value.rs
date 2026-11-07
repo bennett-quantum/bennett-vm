@@ -145,17 +145,23 @@ impl Value {
 
 /// `op` over `width`-bit values; wraps. Shift amounts at or above the
 /// width give zero, for `ashr` too (§4.1).
-pub fn binop(op: &str, a: &BigUint, b: &BigUint, width: usize) -> BigUint {
-    if width <= 64 && std::env::var("BENNETT_VM_ENGINE").as_deref() == Ok("jit") {
+pub fn binop(op: &str, a: &BigUint, b: &BigUint, width: usize) -> Result<BigUint, String> {
+    if !matches!(
+        op,
+        "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr"
+    ) {
+        return Err(format!("unknown integer kernel {op:?}"));
+    }
+    if width <= 64 && crate::jit::selection()?.is_some_and(|(_, native)| native) {
         let a = a.mask(width).to_u64().unwrap();
         let b = b.mask(width).to_u64().unwrap();
-        return BigUint::from_u64(
-            crate::jit::native_binop(op, a, b, width).unwrap_or_else(|e| panic!("{e}")),
-        );
+        return Ok(BigUint::from_u64(crate::jit::native_binop(
+            op, a, b, width,
+        )?));
     }
     // Arbitrary-width bit-vectors are runtime values, as with an ordinary
     // compiler's bigint library calls. This helper is also the interpreter.
-    binop_reference(op, a, b, width)
+    Ok(binop_reference(op, a, b, width))
 }
 pub fn binop_reference(op: &str, a: &BigUint, b: &BigUint, width: usize) -> BigUint {
     let a = a.mask(width);

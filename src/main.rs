@@ -16,11 +16,11 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 bennett-vm check <object>
 bennett-vm hash <object>
-bennett-vm run-oracle <object> <oracle> --input <x[,y...]> [--budget B[,heap,stack,depth]] [--mem name=hex] [--arg value]
-bennett-vm step-check <object> <oracle> (--exhaustive [--max-bits N] | --suite | --samples N) [--seed a,b,c,d] [--budget B[,heap,stack,depth]] [--mem name=hex] [--arg value]
+bennett-vm run-oracle <object> <oracle> --input <x[,y...]> [--budget B[,heap,stack,depth]] [--mem name=hex | --mem-file name=path] [--arg value]
+bennett-vm step-check <object> <oracle> (--exhaustive [--max-bits N] | --suite | --samples N) [--seed a,b,c,d] [--budget B[,heap,stack,depth]] [--mem name=hex | --mem-file name=path] [--arg value]
 bennett-vm run-cc <object> <entry> [--args <a[,b...]> | --input <a[,b...]> | --arg value...] [--entropy hex] [--replies file] [--tape-out file] [--replay-tape file] [--draws <d[,e...]>] [--budget B[,heap,stack,depth]] [--mem global=hex]
 bennett-vm reverse <object> <entry> [run-cc options] [--steps N]
-bennett-vm reverse <object> <oracle> --input <x[,y...]> [--budget B[,heap,stack,depth]] [--steps N] [--mem name=hex] [--arg value]
+bennett-vm reverse <object> <oracle> --input <x[,y...]> [--budget B[,heap,stack,depth]] [--steps N] [--mem name=hex | --mem-file name=path] [--arg value]
 bennett-vm reverse <object> <action> (--mut <v[,...]> [--in <v[,...]>] [--mem name=hex] | --basis <bits> | --state <bits=re[,im];...>) [--args <a[,...]>] [--adjoint]
 bennett-vm run-action <object> <action> (--mut <v[,...]> [--in <v[,...]>] [--mem name=hex] | --basis <bits> | --state <bits=re[,im];...>) [--args <a[,...]> | --arg value...] [--adjoint]
 bennett-vm run-program <object> <cc-entry> [--args <a[,b...]> | --input <a[,b...]> | --arg value...] [--entropy hex] [--replies file] [--tape-out file] [--replay-tape file] [--draws <d[,e...]>] [--budget B[,heap,stack,depth]] [--mem global=hex] [--reverse] [--target file]";

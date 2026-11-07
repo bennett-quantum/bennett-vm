@@ -718,7 +718,7 @@ impl<'o> Exec<'o> {
                 })
                 .collect::<Result<Vec<_>, String>>()?;
             return self.emit_gate_request(crate::target::Gate {
-                op: op.clone(),
+                op: op.to_string(),
                 controls,
                 own_controls: own,
                 targets,
@@ -807,7 +807,7 @@ impl<'o> Exec<'o> {
                 self.state
                     .apply_exact(t, &pred, Exact::rotation(&ins.op, th));
             }
-            _ => return Err(format!("unimplemented: gate {} (milestone 3)", ins.op)),
+            _ => return Err(format!("unimplemented: gate {}", ins.op)),
         }
         Ok(())
     }
@@ -866,7 +866,7 @@ impl<'o> Exec<'o> {
                         n
                     });
                 }
-                _ => return Err(format!("unimplemented: implicit gate {op} (milestone 4)")),
+                _ => return Err(format!("unimplemented: implicit gate {op}")),
             }
             return Ok(());
         }
@@ -929,7 +929,7 @@ impl<'o> Exec<'o> {
             t.validate_predicate_depth(self.pred.len())?;
             let qram = crate::target::field(&t.document, "qram")?;
             if qram == &crate::json::Json::Null {
-                return Err("unimplemented: quantum-memory comparator expansion (milestone 4); unpublished ref library (bennett-vm-47t)".into());
+                return Err("unimplemented: quantum-memory comparator expansion; unpublished ref library".into());
             }
             let vars = BTreeMap::from([
                 ("a".into(), crate::target::Rational::from(region.a as u64)),
@@ -1104,7 +1104,7 @@ impl<'o> Exec<'o> {
         let locals: Vec<String> = self.local_images.keys().cloned().collect();
         for name in locals {
             let region = self.region(&name)?;
-            let image = self.local_images.get(&name).cloned().unwrap_or_default();
+            let image = self.local_images.get(&name).expect("local image key came from this map").clone();
             for (i, cell) in region.cells.iter().enumerate().rev() {
                 let want = &image[i];
                 let got = self.state.constant_value(cell);
@@ -1335,7 +1335,7 @@ impl<'o> Exec<'o> {
             "oracle_call" | "action_call" | "adj" | "ctl" => self.exec_region_call(ins),
             "qinplace" => self.exec_qinplace(ins),
             _ => Err(format!(
-                "unimplemented: Q instruction {op} in @{} (milestone 3)",
+                "unimplemented: Q instruction {op} in @{}",
                 self.func
             )),
         }
@@ -1462,7 +1462,7 @@ impl<'o> Exec<'o> {
         for (ty, name) in types.iter().zip(names.iter()) {
             match ty {
                 crate::object::Type::Token => match self.args.get(name) {
-                    Some(Value::Token(b) | Value::TokenId(_, b)) => out.push(Value::Token(*b)),
+                    Some(v @ (Value::Token(_) | Value::TokenId(..))) => out.push(v.clone()),
                     _ => {
                         return Err(diag(
                             "4.7",
@@ -1827,7 +1827,7 @@ pub fn execute_action_with_idle(
 ) -> Result<(), String> {
     let f = obj
         .function(name)
-        .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking (milestone 2)")))?;
+        .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking")))?;
     let bound = (obj.isa == "0.9").then(|| bind_allocations(f));
     let f = bound.as_ref().unwrap_or(f);
     if !matches!(
@@ -1846,7 +1846,7 @@ pub fn execute_action_with_idle(
     let certificate_budget = args
         .iter()
         .find_map(|v| {
-            if let Value::Token(b) = v {
+            if let Value::Token(b) | Value::TokenId(_, b) = v {
                 Some(*b)
             } else {
                 None
@@ -2033,7 +2033,7 @@ fn renamed(
 ) -> Instr {
     Instr {
         lhs,
-        op: op.to_string(),
+        op: op.into(),
         operands,
         nested,
         line: ins.line,
@@ -2266,7 +2266,7 @@ pub fn execute_perm_basis(
             format!("permutation action @{name} produced a superposition under basis execution"),
         ));
     }
-    let key = state.amps.keys().next().cloned().unwrap_or_default();
+    let key = state.amps.keys().next().expect("one-component permutation state").clone();
     let out_muts: Vec<BigUint> = mut_bundles
         .iter()
         .map(|b| QuantumState::extract(&key, b))
@@ -2339,7 +2339,7 @@ impl QuantumState {
         self.target = Some(std::sync::Arc::new(target));
         Ok(())
     }
-    /// Actual execution accounting, separate from the milestone-5 estimate ABI.
+    /// Actual execution accounting, separate from the estimate ABI.
     pub fn target_accounting(&self) -> Result<crate::json::Json, String> {
         let mut result = self
             .target

@@ -1,6 +1,5 @@
 //! Binary region input avoids the operating system's per-argument hex limit.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{json::{self, Json}, sha256::to_hex};
 use std::{path::{Path, PathBuf}, process::{Command, Output}, sync::atomic::{AtomicUsize, Ordering}};
 
@@ -50,7 +49,7 @@ fn binary_regions_match_hex_for_oracle_steps_and_reversal_on_both_engines_and_ve
                 let index = index.to_string();
                 let result = success(fixture.run(engine, "run-oracle", &["--input", &index, "--budget", "8", "--mem-file", &file]));
                 assert_eq!(result.get("code").and_then(Json::as_u64), Some(0));
-                assert_eq!(result.get("payload").and_then(Json::as_str), Some(expected.to_string().as_str()));
+                assert_eq!(result.get("payload").and_then(Json::as_u64), Some(expected as u64));
                 assert_eq!(result, success(fixture.run(engine, "run-oracle", &["--input", &index, "--budget", "8", "--mem", &hex])));
             }
             for (command, args) in [("step-check", vec!["--exhaustive", "--max-bits", "2"]), ("reverse", vec!["--input", "3"])] {
@@ -102,6 +101,6 @@ fn binary_region_larger_than_one_hex_argument_loads_the_actual_last_byte() {
     for engine in ["interpreter", "jit"] {
         let result = success(fixture.run(engine, "run-oracle", &["--input", "65535", "--budget", "8", "--mem-file", &file]));
         assert_eq!(result.get("code").and_then(Json::as_u64), Some(0));
-        assert_eq!(result.get("payload").and_then(Json::as_str), Some(image[65535].to_string().as_str()));
+        assert_eq!(result.get("payload").and_then(Json::as_u64), Some(image[65535] as u64));
     }
 }

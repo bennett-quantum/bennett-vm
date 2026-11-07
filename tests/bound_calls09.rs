@@ -1,6 +1,5 @@
 //! K63 checks call occurrences after the row's library has been bound.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},
@@ -221,7 +220,7 @@ fn nested_oracle_fixed_instances_belong_to_the_entered_invocation_without_lift_c
     let params = json::parse(r#"[["1","0","0","0"],"0","1"]"#).unwrap();
     let expansion = Catalog::published()
         .unwrap()
-        .lower_action_with_cleanup(&obj, "root", &params, false, 0, &[])
+        .lower_action_with_token_aliases(&obj, "root", &params, false, 0, &[], Some(&json::parse("[0]").unwrap()))
         .unwrap();
     for (instance, expected) in [
         ("[0]", true),

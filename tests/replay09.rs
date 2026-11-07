@@ -6,12 +6,9 @@ fn j(s: &str) -> Json {
     json::parse(s).unwrap()
 }
 fn object() -> bennett_vm::object::Object {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
     bennett_vm::load(
         &std::fs::read_to_string(
-            root.join("bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+            crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
         )
         .unwrap(),
         false,

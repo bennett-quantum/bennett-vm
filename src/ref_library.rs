@@ -19,6 +19,7 @@ mod oracle_source;
 pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
 pub use oracle_cleanup::OracleCleanupPair;
 mod source;
+pub(crate) use source::token_cleanup_points;
 use crate::{
     json::{self, Json},
     target::{Rational as R, arr, field, keys, string},
@@ -53,6 +54,7 @@ enum Bound {
         hash: String,
         values: Vec<Bound>,
         oracle_invocation: Option<Json>,
+        oracle_identity: Option<u64>,
     },
     Region {
         address: usize,
@@ -61,7 +63,7 @@ enum Bound {
         origin: String,
         cells: Vec<String>,
     },
-    Value(Json, Json),
+    Value(Json, Json, Option<u64>),
     Records {
         fields: Json,
         order: Json,
@@ -111,6 +113,7 @@ pub struct Bindings {
     replaying_cleanup: bool,
     oracle_address: Option<Rc<address::OracleAddress>>,
     oracle_invocation: Option<Json>,
+    oracle_identity: Option<u64>,
     row_spaces: Vec<address::RowSpace>,
     coordinate: crate::sched::Coordinate,
     cleanup: cleanup::CleanupContext,
@@ -325,598 +328,658 @@ impl Catalog {
         active: &mut Vec<String>,
     ) -> Result<(), String> {
         for c in arr(body)? {
-            if let Some(p) = c.get("$source") {
-                if env.replaying_cleanup {
-                    self.walk(field(c, "body")?, env, out, next, active)?;
-                    continue;
-                }
-                let mut local = env.clone();
-                local.source_point = Some(crate::sched::Point {
-                    symbol: string(field(p, "symbol")?)?.into(),
-                    point: string(field(p, "point")?)?.into(),
-                    ..Default::default()
-                });
-                local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
-                local.call_index = Rc::new(Cell::new(0));
-                local.source_next = Rc::new(Cell::new(0));
-                local.call_domain();
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if let Some(metadata) = c.get("$source_allocation") {
-                let name = string(field(metadata, "name")?)?;
-                let Some(Bound::Allocation(allocation)) = env.values.get(name) else {
-                    return Err(err("unbound source allocation slot"));
-                };
-                let mut allocation = allocation.borrow().clone();
-                allocation.class = string(field(metadata, "class")?)?.into();
-                allocation.state = string(field(metadata, "state")?)?.into();
-                let identity = allocation.identity.clone();
-                let mut local = env.clone();
-                local.values.insert(
-                    name.into(),
-                    Bound::Allocation(Rc::new(RefCell::new(allocation))),
-                );
-                let start = out.len();
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-                for leaf in &mut out[start..] {
-                    if leaf.allocation.as_ref() == Some(&identity) {
-                        leaf.source_allocation = true;
-                    }
-                }
-            } else if let Some(storage) = c.get("$oracle_storage") {
-                let mut local = env.clone();
-                for entry in arr(storage)? {
-                    let name = string(field(entry, "name")?)?;
-                    let width = field(entry, "width")?
-                        .as_usize()
-                        .ok_or_else(|| err("invalid source storage width"))?;
-                    let id = env.declarations.get();
-                    env.declarations.set(id + 1);
-                    local.values.insert(
-                        name.into(),
-                        Bound::Allocation(Rc::new(RefCell::new(Allocation {
-                            identity: format!("$decl{id}.{name}"),
-                            width,
-                            wires: (0..width)
-                                .map(|i| format!("$decl{id}.{name}[{i}]"))
-                                .collect(),
-                            class: "any".into(),
-                            state: "clean".into(),
-                        }))),
-                    );
-                }
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if let Some(token) = c.get("$oracle_invocation") {
-                let Some(Bound::Value(value, ty)) = env.values.get(string(token)?) else {
-                    return Err(err("unbound oracle_invocation source token"));
-                };
-                if ty.as_str() != Some("token") {
-                    return Err(err("ill-typed oracle_invocation source token"));
-                }
-                let mut local = env.clone();
-                local.oracle_invocation = Some(Json::obj(vec![("token", value.clone())]));
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if let Some(target) = c.get("$history_target") {
-                let name = string(field(target, "target")?)?;
-                let Some(value @ Bound::Allocation(_)) = env.values.get(name) else {
-                    return Err(err("history copy target is not an allocation"));
-                };
-                let mut local = env.clone();
-                // Reserved, lexical binding: nested history workspaces may
-                // shadow it without changing the enclosing target capability.
-                local.values.insert("$history.target".into(), value.clone());
-                for name in arr(field(target, "temporaries")?)? {
-                    let name = string(name)?;
-                    local.values.remove(name);
-                    local.locals.remove(name);
-                }
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if c.get("$cleanup_pending").is_some() {
-                self.walk_pending_cleanup(c, env, out, next, active)?;
-            } else if c.get("$cleanup").is_some() {
-                self.walk_cleanup(c, env, out, next, active)?;
-            } else if let Some(g) = c.get("gate") {
-                let op = string(g)?;
-                if !crate::action::is_gate_name(op) {
-                    return Err(err("unknown gate"));
-                }
-                let mut ws = vec![];
-                for w in arr(field(c, "wires")?)? {
-                    ws.extend(wires(w, env)?);
-                }
-                let controls = crate::target::own_controls(op, ws.len())?;
-                if ws.iter().collect::<BTreeSet<_>>().len() != ws.len() {
-                    return Err(err("coincident gate operands"));
-                }
-                if ws.iter().skip(controls).any(|w| env.controls.contains(w)) {
-                    return Err(err("coincident target/control"));
-                }
-                let a = if ["rx", "ry", "rz"].contains(&op) {
-                    let p = arr(field(c, "params")?)?;
-                    if p.len() != 1 {
-                        return Err(err("rotation parameter arity"));
-                    }
-                    Some(angle(&p[0], env)?)
-                } else {
-                    if c.get("params").is_some() {
-                        return Err(err("unexpected gate params"));
-                    }
-                    None
-                };
-                out.push(Leaf {
-                    ordinal: *next,
-                    address: env.address(crate::sched::OperationKind::Gate),
-                    operation: op.into(),
-                    wires: ws,
-                    controls: env.controls.clone(),
-                    angle: a,
-                    class: None,
-                    state: None,
-                    invocation: vec![],
-                    event: None,
-                    allocation: None,
-                    scratch: false,
-                    source_allocation: false,
-                });
-                *next += 1;
-            } else if let Some(n) = c.get("alloc") {
-                let name = string(n)?;
-                let width = scalar(field(c, "width")?, env)?.usize()?;
-                let state = string(field(c, "state")?)?;
-                if state != "clean" && state != "borrowed" {
-                    return Err(err("invalid allocation state"));
-                }
-                let cls = string(field(c, "class")?)?;
-                if cls.is_empty() {
-                    return Err(err("empty allocation class"));
-                }
-                // A repeated alloc in a raw inverse refers to the declaration at
-                // that restored position. Validate actual lifetimes only after
-                // inverse traversal, never by executing its forward prefix.
-                let (identity, ws) = if env.locals.contains(name) {
-                    match env.values.get(name) {
-                        Some(Bound::Allocation(a)) => {
-                            let a = a.borrow();
-                            if a.width != width || a.state != state || a.class != cls {
-                                return Err(err("allocation metadata changed"));
-                            }
-                            (a.identity.clone(), a.wires.clone())
-                        }
-                        _ => return Err(err("allocation shadows binding")),
-                    }
-                } else {
-                    let id = env.declarations.get();
-                    env.declarations.set(id + 1);
-                    let identity = format!("$decl{id}.{name}");
-                    let ws = (0..width)
-                        .map(|i| format!("{identity}[{i}]"))
-                        .collect::<Vec<_>>();
-                    (identity, ws)
-                };
-                env.locals.insert(name.into());
-                env.values.insert(
-                    name.into(),
-                    Bound::Allocation(Rc::new(RefCell::new(Allocation {
-                        identity: identity.clone(),
-                        width,
-                        wires: ws.clone(),
-                        class: cls.into(),
-                        state: state.into(),
-                    }))),
-                );
-                out.push(Leaf {
-                    ordinal: *next,
-                    address: env.address(crate::sched::OperationKind::Alloc),
-                    operation: "alloc".into(),
-                    wires: ws,
-                    controls: vec![],
-                    angle: None,
-                    class: Some(cls.into()),
-                    state: Some(state.into()),
-                    invocation: vec![],
-                    event: None,
-                    allocation: Some(identity),
-                    scratch: env.scratch.contains(name),
-                    source_allocation: false,
-                });
-                *next += 1;
-            } else if let Some(n) = c.get("release") {
-                let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
-                    return Err(err("unbound release"));
-                };
-                let a = a.borrow();
-                out.push(Leaf {
-                    ordinal: *next,
-                    address: env.address(crate::sched::OperationKind::Release),
-                    operation: "release".into(),
-                    wires: a.wires.clone(),
-                    controls: vec![],
-                    angle: None,
-                    class: Some(a.class.clone()),
-                    state: Some(a.state.clone()),
-                    invocation: vec![],
-                    event: None,
-                    allocation: Some(a.identity.clone()),
-                    scratch: false,
-                    source_allocation: false,
-                });
-                *next += 1;
-            } else if let Some(n) = c.get("image") {
-                let image = image(n, env)?;
-                let ws = wires(field(c, "wires")?, env)?;
-                if !image.is_empty() && ws.len() != image.len() * 4 {
-                    return Err(err("image width mismatch"));
-                }
-                for (byte, pair) in image.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-                    let value = u8::from_str_radix(std::str::from_utf8(pair).map_err(err)?, 16)
-                        .map_err(err)?;
-                    for bit in 0..8 {
-                        if value & (1 << bit) != 0 {
-                            out.push(Leaf {
-                                ordinal: *next,
-                                address: env.address(crate::sched::OperationKind::Gate),
-                                operation: "x".into(),
-                                wires: vec![ws[byte * 8 + bit].clone()],
-                                controls: vec![],
-                                angle: None,
-                                class: None,
-                                state: None,
-                                invocation: vec![],
-                                event: None,
-                                allocation: None,
-                                scratch: false,
-                                source_allocation: false,
-                            });
-                            *next += 1;
-                        }
-                    }
-                }
-            } else if let Some(op) = c.get("classical") {
-                let opcode = string(op)?;
-                let point = string(field(c, "point")?)?;
-                let (operation, event) = if let Some(Bound::Event(event)) = env.values.get(point) {
-                    let instruction = string(field(event, "instruction")?)?;
-                    let tokens = crate::object::split_tokens(instruction)?;
-                    let offset = tokens.iter().position(|t| t == "=").map_or(0, |i| i + 1);
-                    let actual = tokens
-                        .get(offset)
-                        .ok_or_else(|| err("empty classical event"))?;
-                    if actual != opcode
-                        && !actual.strip_prefix(opcode).is_some_and(|s| {
-                            s.strip_prefix(".i").is_some_and(|s| {
-                                !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
-                            })
-                        })
-                    {
-                        return Err(err("classical event opcode mismatch"));
-                    }
-                    (actual.clone(), event.clone())
-                } else {
-                    (
-                        opcode.into(),
-                        Json::obj(vec![
-                            ("instruction", Json::Str(opcode.into())),
-                            ("point", Json::Str(point.into())),
-                        ]),
-                    )
-                };
-                out.push(Leaf {
-                    ordinal: *next,
-                    address: env.address(crate::sched::OperationKind::Classical),
-                    operation,
-                    wires: vec![],
-                    controls: vec![],
-                    angle: None,
-                    class: None,
-                    state: None,
-                    invocation: vec![],
-                    event: Some(event),
-                    allocation: None,
-                    scratch: false,
-                    source_allocation: false,
-                });
-                *next += 1;
-            } else if let Some(n) = c.get("for") {
-                let name = string(n)?;
-                let from = scalar(field(c, "from")?, env)?.usize()?;
-                let to = scalar(field(c, "to")?, env)?.usize()?;
-                for i in from..to {
-                    let mut local = env.clone();
-                    if env.source_point.is_some()
-                        && !env.replaying_cleanup
-                        && ((active.last().map(String::as_str) == Some("qloop")
-                            && name == "iteration")
-                            || (active.last().map(String::as_str) == Some("qloop.while")
-                                && name == "i"))
-                    {
-                        local.source_iterations.push(
-                            if env.reverse_iterations
-                                && active.last().map(String::as_str) == Some("qloop")
-                            {
-                                to - 1 - i
-                            } else {
-                                i
-                            },
-                        );
-                    }
-                    local
-                        .values
-                        .insert(name.into(), Bound::Integer(R::from(i as u64)));
-                    self.walk(field(c, "body")?, &mut local, out, next, active)?;
-                }
-            } else if let Some(n) = c.get("each") {
-                for w in wires(field(c, "in")?, env)? {
-                    let mut local = env.clone();
-                    local.values.insert(string(n)?.into(), Bound::Wire(vec![w]));
-                    self.walk(field(c, "body")?, &mut local, out, next, active)?;
-                }
-            } else if let Some(n) = c.get("invoke") {
-                self.invoke(string(n)?, arr(field(c, "args")?)?, env, out, next, active)?;
-            } else if c.get("inverse").is_some() {
-                let start = out.len();
-                let first_leaf = env.source_next.get();
-                let first_call = env.call_index.get();
-                let first_carrier = env.cleanup.carriers.borrow().len();
-                let first_domain = env.call_domains.borrow().records.len();
-                self.walk(field(c, "body")?, env, out, next, active)?;
-                if out[start..].iter().any(|l| l.event.is_some()) {
-                    return Err(err("classical inverse requires retained §7.4 history"));
-                }
-                out[start..].reverse();
-                for l in &mut out[start..] {
-                    l.adjoint();
-                }
-                if env.replaying_cleanup {
-                    // K80 instantiates a fresh caller space in emitted order.
-                    // This does not change raw inverse traversal or the
-                    // independently formed source spaces inside callees.
-                    let end_leaf = env.source_next.get();
-                    let end_call = env.call_index.get();
-                    let mut domains = env.call_domains.borrow_mut();
-                    if let Some(index) = domains.index(&env.call_index) {
-                        let targets =
-                            &mut domains.records[index].domain.targets[first_call..end_call];
-                        for target in targets.iter_mut() {
-                            target.adjoint = !target.adjoint;
-                        }
-                        targets.reverse();
-                    }
-                    for domain in &mut domains.records[first_domain..] {
-                        if let Some(index) = domain
-                            .domain
-                            .path
-                            .get_mut(env.cleanup.prefix.len())
-                            .and_then(|p| p.call_index.as_mut())
-                        {
-                            *index = first_call + (end_call - 1 - *index);
-                        }
-                    }
-                    drop(domains);
-                    for l in &mut out[start..] {
-                        if let Some(a) = &mut l.address {
-                            if a.path.len() == 1 {
-                                a.generated = first_leaf + (end_leaf - 1 - a.generated);
-                            } else if let Some(index) = &mut a.path[0].call_index {
-                                *index = first_call + (end_call - 1 - *index);
-                            }
-                        }
-                        if let Some(call) = l.invocation.first_mut() {
-                            call.call_index = first_call + (end_call - 1 - call.call_index);
-                            call.adjoint = !call.adjoint;
-                        }
-                    }
-                    for c in &mut env.cleanup.carriers.borrow_mut()[first_carrier..] {
-                        if let Some(index) = c
-                            .address
-                            .path
-                            .get_mut(env.cleanup.prefix.len())
-                            .and_then(|p| p.call_index.as_mut())
-                        {
-                            *index = first_call + (end_call - 1 - *index);
-                        }
-                    }
-                }
-            } else if let Some(n) = c.get("splice") {
-                let Some(Bound::Body(b, cap)) = env.values.get(string(n)?) else {
-                    return Err(err("unbound body"));
-                };
-                let b = b.clone();
-                let mut cap = *cap.clone();
-                cap.add_controls(env.controls.clone());
-                cap.inherit_address(env);
-                cap.active_symbols = env.active_symbols.clone();
-                // Captured actual syntax is finite; repeating a higher-order
-                // recipe here is not a cycle in declared recipe dependencies.
-                self.walk(&b, &mut cap, out, next, &mut vec![])?;
-            } else if let Some(u) = c.get("under") {
-                let mut local = env.clone();
-                local.add_controls(wires(u, env)?);
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if let Some(n) = c.get("declare") {
-                let name = string(n)?;
-                if env.values.contains_key(name) {
-                    return Err(err("declaration shadows binding"));
-                }
-                let width = scalar(field(c, "width")?, env)?.usize()?;
-                let class = class(field(c, "class")?, env)?;
-                if class.is_empty() {
-                    return Err(err("empty class"));
-                }
-                let state = string(field(c, "state")?)?.to_string();
-                if !["clean", "borrowed"].contains(&state.as_str()) {
-                    return Err(err("invalid allocation state"));
-                }
-                let id = env.declarations.get();
-                env.declarations.set(id + 1);
-                let a = Rc::new(RefCell::new(Allocation {
-                    identity: format!("$decl{id}.{name}"),
-                    width,
-                    wires: (0..width)
-                        .map(|i| format!("$decl{id}.{name}[{i}]"))
-                        .collect(),
-                    class,
-                    state,
-                }));
-                let mut local = env.clone();
-                local
-                    .values
-                    .insert(name.into(), Bound::Allocation(a.clone()));
-                self.walk(field(c, "body")?, &mut local, out, next, active)?;
-            } else if let Some(n) = c.get("acquire").or_else(|| c.get("relinquish")) {
-                let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
-                    return Err(err("unbound allocation"));
-                };
-                let a = a.borrow();
-                let acquire = c.get("acquire").is_some();
-                out.push(Leaf {
-                    ordinal: *next,
-                    address: env.address(if acquire {
-                        crate::sched::OperationKind::Alloc
-                    } else {
-                        crate::sched::OperationKind::Release
-                    }),
-                    operation: if acquire { "alloc" } else { "release" }.into(),
-                    wires: a.wires.clone(),
-                    controls: vec![],
-                    angle: None,
-                    class: Some(a.class.clone()),
-                    state: Some(a.state.clone()),
-                    invocation: vec![],
-                    event: None,
-                    allocation: Some(a.identity.clone()),
-                    scratch: acquire && env.scratch.contains(string(n)?),
-                    source_allocation: false,
-                });
-                *next += 1;
-            } else if let Some(n) = c.get("call") {
-                let Some(Bound::Symbol {
-                    hash,
-                    registry,
-                    adjoint,
-                }) = env.values.get(string(n)?)
-                else {
-                    return Err(err("unbound call symbol"));
-                };
-                let hash = hash.clone();
-                let registry = registry.clone();
-                let adjoint = *adjoint;
-                let name = registry.name(&hash)?;
-                let formals = source::interface(&registry.object, name)?;
-                let args = field(c, "args")?;
-                let mut callee = if let Some(Bound::Arguments {
-                    hash: bound,
-                    values,
-                    oracle_invocation,
-                }) = args.as_str().and_then(|n| env.values.get(n))
-                {
-                    if bound != &hash {
-                        return Err(err("arguments closure mismatch"));
-                    }
-                    let mut bindings = Bindings::new();
-                    bindings.values = formals
-                        .iter()
-                        .zip(values)
-                        .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
-                        .collect::<Result<_, String>>()?;
-                    bindings.oracle_invocation = oracle_invocation.clone();
-                    bindings
-                } else {
-                    let mut bindings = bind_formals(&formals, arr(args)?, env, &Bindings::new())?;
-                    bindings.oracle_invocation = env.oracle_invocation.clone();
-                    bindings
-                };
-                callee.registry = Some(registry.clone());
-                callee.coordinate = env.coordinate.clone();
-                callee.cleanup = env.cleanup.clone();
-                callee.call_domains = env.call_domains.clone();
-                if let Some(caller) = &env.source_point {
-                    let mut edge = caller.clone();
-                    edge.iteration = env.source_iterations.clone();
-                    edge.call_index = Some(env.call_index.get());
-                    callee.cleanup.prefix.push(edge);
-                }
-                callee.declarations = env.declarations.clone();
-                callee.active_symbols = env.active_symbols.clone();
-                callee.add_controls(env.controls.clone());
-                if callee.active_symbols.borrow().contains(&hash) {
-                    return Err(err("cyclic symbol expansion"));
-                }
-                let call_index = env.call_index.get();
-                env.call_target(CallTarget {
-                    interface: registry.identities.interface[name].clone(),
-                    closure: hash.clone(),
-                    adjoint,
-                });
-                env.call_index.set(call_index + 1);
-                callee.active_symbols.borrow_mut().push(hash.clone());
-                let start = out.len();
-                let result = (|| {
-                    let body = source::action_body(&registry.object, name, adjoint, &mut callee)?;
-                    self.walk(&body, &mut callee, out, &mut 0, &mut vec![])
-                })();
-                callee.active_symbols.borrow_mut().pop();
-                result?;
-                for leaf in &mut out[start..] {
-                    if let (Some(caller), Some(address)) =
-                        (env.source_point.as_ref(), leaf.address.as_mut())
-                    {
-                        let mut edge = caller.clone();
-                        edge.iteration = env.source_iterations.clone();
-                        edge.call_index = Some(call_index);
-                        address.path.insert(0, edge);
-                    }
-                    leaf.invocation.insert(
-                        0,
-                        SemanticCall {
-                            closure_hash: hash.clone(),
-                            call_index,
-                            adjoint,
-                        },
-                    );
-                }
-            } else if let Some(n) = c.get("visit") {
-                let Some(Bound::Records { rows, .. }) = env.values.get(string(n)?) else {
-                    return Err(err("unbound records"));
-                };
-                for row in rows.clone() {
-                    let mut local = env.clone();
-                    local.values.extend(row);
-                    if n.as_str() == Some("Frames")
-                        && active.last().map(String::as_str) == Some("oracle.construct")
-                        && env.oracle_address.is_some()
-                    {
-                        local.coordinate.step =
-                            Some(scalar(&Json::Str("index".into()), &local)?.usize()? + 1);
-                    }
-                    self.walk(field(c, "body")?, &mut local, out, next, active)?;
-                }
-            } else if let Some(n) = c.get("apply") {
-                let Some(Bound::Templates(t, cap)) = env.values.get(string(n)?) else {
-                    return Err(err("unbound templates"));
-                };
-                let t = arr(t)?
-                    .get(scalar(field(c, "index")?, env)?.usize()?)
-                    .ok_or_else(|| err("template index out of range"))?
-                    .clone();
-                let fs = arr(field(&t, "parameters")?)?;
-                let args = arr(field(c, "args")?)?;
-                let mut local = bind_formals(fs, args, env, cap)?;
-                local.add_controls(env.controls.clone());
-                local.inherit_address(env);
-                if env.oracle_address.is_some()
-                    && active.last().map(String::as_str) == Some("step")
-                    && matches!(n.as_str(), Some("Rows" | "Next"))
-                {
-                    self.address_row(&mut local, scalar(field(c, "index")?, env)?.usize()?)?;
-                }
-                local.active_symbols = env.active_symbols.clone();
-                self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
-            } else {
+            if !(self.walk_metadata(c, env, out, next, active)?
+                || self.walk_leaves(c, env, out, next)?
+                || self.walk_combinators(c, env, out, next, active)?
+                || self.walk_calls(c, env, out, next, active)?)
+            {
                 return Err(err(
-                    "unavailable.reason: allocation/descriptor/template/symbol/image/classical expansion staged in bennett-vm-47t; catalog identity alone is not executable support",
+                    "unavailable.reason: unsupported catalog expansion descriptor",
                 ));
             }
         }
         Ok(())
+    }
+
+    fn walk_metadata(
+        &self,
+        c: &Json,
+        env: &mut Bindings,
+        out: &mut Vec<Leaf>,
+        next: &mut usize,
+        active: &mut Vec<String>,
+    ) -> Result<bool, String> {
+        if let Some(p) = c.get("$source") {
+            if env.replaying_cleanup {
+                self.walk(field(c, "body")?, env, out, next, active)?;
+                return Ok(true);
+            }
+            let mut local = env.clone();
+            local.source_point = Some(crate::sched::Point {
+                symbol: string(field(p, "symbol")?)?.into(),
+                point: string(field(p, "point")?)?.into(),
+                ..Default::default()
+            });
+            local.reverse_iterations = field(p, "reverse_iterations")? == &Json::Bool(true);
+            local.call_index = Rc::new(Cell::new(0));
+            local.source_next = Rc::new(Cell::new(0));
+            local.call_domain();
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if let Some(metadata) = c.get("$source_allocation") {
+            let name = string(field(metadata, "name")?)?;
+            let Some(Bound::Allocation(allocation)) = env.values.get(name) else {
+                return Err(err("unbound source allocation slot"));
+            };
+            let mut allocation = allocation.borrow().clone();
+            allocation.class = string(field(metadata, "class")?)?.into();
+            allocation.state = string(field(metadata, "state")?)?.into();
+            let identity = allocation.identity.clone();
+            let mut local = env.clone();
+            local.values.insert(
+                name.into(),
+                Bound::Allocation(Rc::new(RefCell::new(allocation))),
+            );
+            let start = out.len();
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            for leaf in &mut out[start..] {
+                if leaf.allocation.as_ref() == Some(&identity) {
+                    leaf.source_allocation = true;
+                }
+            }
+        } else if let Some(storage) = c.get("$oracle_storage") {
+            let mut local = env.clone();
+            for entry in arr(storage)? {
+                let name = string(field(entry, "name")?)?;
+                let width = field(entry, "width")?
+                    .as_usize()
+                    .ok_or_else(|| err("invalid source storage width"))?;
+                let id = env.declarations.get();
+                env.declarations.set(id + 1);
+                local.values.insert(
+                    name.into(),
+                    Bound::Allocation(Rc::new(RefCell::new(Allocation {
+                        identity: format!("$decl{id}.{name}"),
+                        width,
+                        wires: (0..width)
+                            .map(|i| format!("$decl{id}.{name}[{i}]"))
+                            .collect(),
+                        class: "any".into(),
+                        state: "clean".into(),
+                    }))),
+                );
+            }
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if let Some(token) = c.get("$oracle_invocation") {
+            let Some(Bound::Value(value, ty, identity)) = env.values.get(string(token)?) else {
+                return Err(err("unbound oracle_invocation source token"));
+            };
+            if ty.as_str() != Some("token") {
+                return Err(err("ill-typed oracle_invocation source token"));
+            }
+            let mut local = env.clone();
+            local.oracle_invocation = Some(Json::obj(vec![("token", value.clone())]));
+            local.oracle_identity = *identity;
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if let Some(target) = c.get("$history_target") {
+            let name = string(field(target, "target")?)?;
+            let Some(value @ Bound::Allocation(_)) = env.values.get(name) else {
+                return Err(err("history copy target is not an allocation"));
+            };
+            let mut local = env.clone();
+            // Reserved, lexical binding: nested history workspaces may
+            // shadow it without changing the enclosing target capability.
+            local.values.insert("$history.target".into(), value.clone());
+            for name in arr(field(target, "temporaries")?)? {
+                let name = string(name)?;
+                local.values.remove(name);
+                local.locals.remove(name);
+            }
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if c.get("$cleanup_pending").is_some() {
+            self.walk_pending_cleanup(c, env, out, next, active)?;
+        } else if c.get("$cleanup").is_some() {
+            self.walk_cleanup(c, env, out, next, active)?;
+        } else {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn walk_leaves(
+        &self,
+        c: &Json,
+        env: &mut Bindings,
+        out: &mut Vec<Leaf>,
+        next: &mut usize,
+    ) -> Result<bool, String> {
+        if let Some(g) = c.get("gate") {
+            let op = string(g)?;
+            if !crate::action::is_gate_name(op) {
+                return Err(err("unknown gate"));
+            }
+            let mut ws = vec![];
+            for w in arr(field(c, "wires")?)? {
+                ws.extend(wires(w, env)?);
+            }
+            let controls = crate::target::own_controls(op, ws.len())?;
+            if ws.iter().collect::<BTreeSet<_>>().len() != ws.len() {
+                return Err(err("coincident gate operands"));
+            }
+            if ws.iter().skip(controls).any(|w| env.controls.contains(w)) {
+                return Err(err("coincident target/control"));
+            }
+            let a = if ["rx", "ry", "rz"].contains(&op) {
+                let p = arr(field(c, "params")?)?;
+                if p.len() != 1 {
+                    return Err(err("rotation parameter arity"));
+                }
+                Some(angle(&p[0], env)?)
+            } else {
+                if c.get("params").is_some() {
+                    return Err(err("unexpected gate params"));
+                }
+                None
+            };
+            out.push(Leaf {
+                ordinal: *next,
+                address: env.address(crate::sched::OperationKind::Gate),
+                operation: op.into(),
+                wires: ws,
+                controls: env.controls.clone(),
+                angle: a,
+                class: None,
+                state: None,
+                invocation: vec![],
+                event: None,
+                allocation: None,
+                scratch: false,
+                source_allocation: false,
+            });
+            *next += 1;
+        } else if let Some(n) = c.get("alloc") {
+            let name = string(n)?;
+            let width = scalar(field(c, "width")?, env)?.usize()?;
+            let state = string(field(c, "state")?)?;
+            if state != "clean" && state != "borrowed" {
+                return Err(err("invalid allocation state"));
+            }
+            let cls = string(field(c, "class")?)?;
+            if cls.is_empty() {
+                return Err(err("empty allocation class"));
+            }
+            // A repeated alloc in a raw inverse refers to the declaration at
+            // that restored position. Validate actual lifetimes only after
+            // inverse traversal, never by executing its forward prefix.
+            let (identity, ws) = if env.locals.contains(name) {
+                match env.values.get(name) {
+                    Some(Bound::Allocation(a)) => {
+                        let a = a.borrow();
+                        if a.width != width || a.state != state || a.class != cls {
+                            return Err(err("allocation metadata changed"));
+                        }
+                        (a.identity.clone(), a.wires.clone())
+                    }
+                    _ => return Err(err("allocation shadows binding")),
+                }
+            } else {
+                let id = env.declarations.get();
+                env.declarations.set(id + 1);
+                let identity = format!("$decl{id}.{name}");
+                let ws = (0..width)
+                    .map(|i| format!("{identity}[{i}]"))
+                    .collect::<Vec<_>>();
+                (identity, ws)
+            };
+            env.locals.insert(name.into());
+            env.values.insert(
+                name.into(),
+                Bound::Allocation(Rc::new(RefCell::new(Allocation {
+                    identity: identity.clone(),
+                    width,
+                    wires: ws.clone(),
+                    class: cls.into(),
+                    state: state.into(),
+                }))),
+            );
+            out.push(Leaf {
+                ordinal: *next,
+                address: env.address(crate::sched::OperationKind::Alloc),
+                operation: "alloc".into(),
+                wires: ws,
+                controls: vec![],
+                angle: None,
+                class: Some(cls.into()),
+                state: Some(state.into()),
+                invocation: vec![],
+                event: None,
+                allocation: Some(identity),
+                scratch: env.scratch.contains(name),
+                source_allocation: false,
+            });
+            *next += 1;
+        } else if let Some(n) = c.get("release") {
+            let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
+                return Err(err("unbound release"));
+            };
+            let a = a.borrow();
+            out.push(Leaf {
+                ordinal: *next,
+                address: env.address(crate::sched::OperationKind::Release),
+                operation: "release".into(),
+                wires: a.wires.clone(),
+                controls: vec![],
+                angle: None,
+                class: Some(a.class.clone()),
+                state: Some(a.state.clone()),
+                invocation: vec![],
+                event: None,
+                allocation: Some(a.identity.clone()),
+                scratch: false,
+                source_allocation: false,
+            });
+            *next += 1;
+        } else if let Some(n) = c.get("image") {
+            let image = image(n, env)?;
+            let ws = wires(field(c, "wires")?, env)?;
+            if !image.is_empty() && ws.len() != image.len() * 4 {
+                return Err(err("image width mismatch"));
+            }
+            for (byte, pair) in image.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+                let value =
+                    u8::from_str_radix(std::str::from_utf8(pair).map_err(err)?, 16).map_err(err)?;
+                for bit in 0..8 {
+                    if value & (1 << bit) != 0 {
+                        out.push(Leaf {
+                            ordinal: *next,
+                            address: env.address(crate::sched::OperationKind::Gate),
+                            operation: "x".into(),
+                            wires: vec![ws[byte * 8 + bit].clone()],
+                            controls: vec![],
+                            angle: None,
+                            class: None,
+                            state: None,
+                            invocation: vec![],
+                            event: None,
+                            allocation: None,
+                            scratch: false,
+                            source_allocation: false,
+                        });
+                        *next += 1;
+                    }
+                }
+            }
+        } else if let Some(op) = c.get("classical") {
+            let opcode = string(op)?;
+            let point = string(field(c, "point")?)?;
+            let (operation, event) = if let Some(Bound::Event(event)) = env.values.get(point) {
+                let instruction = string(field(event, "instruction")?)?;
+                let tokens = crate::object::split_tokens(instruction)?;
+                let offset = tokens.iter().position(|t| t == "=").map_or(0, |i| i + 1);
+                let actual = tokens
+                    .get(offset)
+                    .ok_or_else(|| err("empty classical event"))?;
+                if actual != opcode
+                    && !actual.strip_prefix(opcode).is_some_and(|s| {
+                        s.strip_prefix(".i")
+                            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                    })
+                {
+                    return Err(err("classical event opcode mismatch"));
+                }
+                (actual.clone(), event.clone())
+            } else {
+                (
+                    opcode.into(),
+                    Json::obj(vec![
+                        ("instruction", Json::Str(opcode.into())),
+                        ("point", Json::Str(point.into())),
+                    ]),
+                )
+            };
+            out.push(Leaf {
+                ordinal: *next,
+                address: env.address(crate::sched::OperationKind::Classical),
+                operation,
+                wires: vec![],
+                controls: vec![],
+                angle: None,
+                class: None,
+                state: None,
+                invocation: vec![],
+                event: Some(event),
+                allocation: None,
+                scratch: false,
+                source_allocation: false,
+            });
+            *next += 1;
+        } else {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn walk_combinators(
+        &self,
+        c: &Json,
+        env: &mut Bindings,
+        out: &mut Vec<Leaf>,
+        next: &mut usize,
+        active: &mut Vec<String>,
+    ) -> Result<bool, String> {
+        if let Some(n) = c.get("for") {
+            let name = string(n)?;
+            let from = scalar(field(c, "from")?, env)?.usize()?;
+            let to = scalar(field(c, "to")?, env)?.usize()?;
+            for i in from..to {
+                let mut local = env.clone();
+                if env.source_point.is_some()
+                    && !env.replaying_cleanup
+                    && ((active.last().map(String::as_str) == Some("qloop") && name == "iteration")
+                        || (active.last().map(String::as_str) == Some("qloop.while")
+                            && name == "i"))
+                {
+                    local.source_iterations.push(
+                        if env.reverse_iterations
+                            && active.last().map(String::as_str) == Some("qloop")
+                        {
+                            to - 1 - i
+                        } else {
+                            i
+                        },
+                    );
+                }
+                local
+                    .values
+                    .insert(name.into(), Bound::Integer(R::from(i as u64)));
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            }
+        } else if let Some(n) = c.get("each") {
+            for w in wires(field(c, "in")?, env)? {
+                let mut local = env.clone();
+                local.values.insert(string(n)?.into(), Bound::Wire(vec![w]));
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            }
+        } else if let Some(n) = c.get("invoke") {
+            self.invoke(string(n)?, arr(field(c, "args")?)?, env, out, next, active)?;
+        } else if c.get("inverse").is_some() {
+            let start = out.len();
+            let first_leaf = env.source_next.get();
+            let first_call = env.call_index.get();
+            let first_carrier = env.cleanup.carriers.borrow().len();
+            let first_domain = env.call_domains.borrow().records.len();
+            self.walk(field(c, "body")?, env, out, next, active)?;
+            if out[start..].iter().any(|l| l.event.is_some()) {
+                return Err(err("classical inverse requires retained §7.4 history"));
+            }
+            out[start..].reverse();
+            for l in &mut out[start..] {
+                l.adjoint();
+            }
+            if env.replaying_cleanup {
+                // K80 instantiates a fresh caller space in emitted order.
+                // This does not change raw inverse traversal or the
+                // independently formed source spaces inside callees.
+                let end_leaf = env.source_next.get();
+                let end_call = env.call_index.get();
+                let mut domains = env.call_domains.borrow_mut();
+                if let Some(index) = domains.index(&env.call_index) {
+                    let targets = &mut domains.records[index].domain.targets[first_call..end_call];
+                    for target in targets.iter_mut() {
+                        target.adjoint = !target.adjoint;
+                    }
+                    targets.reverse();
+                }
+                for domain in &mut domains.records[first_domain..] {
+                    if let Some(index) = domain
+                        .domain
+                        .path
+                        .get_mut(env.cleanup.prefix.len())
+                        .and_then(|p| p.call_index.as_mut())
+                    {
+                        *index = first_call + (end_call - 1 - *index);
+                    }
+                }
+                drop(domains);
+                for l in &mut out[start..] {
+                    if let Some(a) = &mut l.address {
+                        if a.path.len() == 1 {
+                            a.generated = first_leaf + (end_leaf - 1 - a.generated);
+                        } else if let Some(index) = &mut a.path[0].call_index {
+                            *index = first_call + (end_call - 1 - *index);
+                        }
+                    }
+                    if let Some(call) = l.invocation.first_mut() {
+                        call.call_index = first_call + (end_call - 1 - call.call_index);
+                        call.adjoint = !call.adjoint;
+                    }
+                }
+                for c in &mut env.cleanup.carriers.borrow_mut()[first_carrier..] {
+                    if let Some(index) = c
+                        .address
+                        .path
+                        .get_mut(env.cleanup.prefix.len())
+                        .and_then(|p| p.call_index.as_mut())
+                    {
+                        *index = first_call + (end_call - 1 - *index);
+                    }
+                }
+            }
+        } else if let Some(n) = c.get("splice") {
+            let Some(Bound::Body(b, cap)) = env.values.get(string(n)?) else {
+                return Err(err("unbound body"));
+            };
+            let b = b.clone();
+            let mut cap = *cap.clone();
+            cap.add_controls(env.controls.clone());
+            cap.inherit_address(env);
+            cap.active_symbols = env.active_symbols.clone();
+            // Captured actual syntax is finite; repeating a higher-order
+            // recipe here is not a cycle in declared recipe dependencies.
+            self.walk(&b, &mut cap, out, next, &mut vec![])?;
+        } else if let Some(u) = c.get("under") {
+            let mut local = env.clone();
+            local.add_controls(wires(u, env)?);
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if let Some(n) = c.get("declare") {
+            let name = string(n)?;
+            if env.values.contains_key(name) {
+                return Err(err("declaration shadows binding"));
+            }
+            let width = scalar(field(c, "width")?, env)?.usize()?;
+            let class = class(field(c, "class")?, env)?;
+            if class.is_empty() {
+                return Err(err("empty class"));
+            }
+            let state = string(field(c, "state")?)?.to_string();
+            if !["clean", "borrowed"].contains(&state.as_str()) {
+                return Err(err("invalid allocation state"));
+            }
+            let id = env.declarations.get();
+            env.declarations.set(id + 1);
+            let a = Rc::new(RefCell::new(Allocation {
+                identity: format!("$decl{id}.{name}"),
+                width,
+                wires: (0..width)
+                    .map(|i| format!("$decl{id}.{name}[{i}]"))
+                    .collect(),
+                class,
+                state,
+            }));
+            let mut local = env.clone();
+            local
+                .values
+                .insert(name.into(), Bound::Allocation(a.clone()));
+            self.walk(field(c, "body")?, &mut local, out, next, active)?;
+        } else if let Some(n) = c.get("acquire").or_else(|| c.get("relinquish")) {
+            let Some(Bound::Allocation(a)) = env.values.get(string(n)?) else {
+                return Err(err("unbound allocation"));
+            };
+            let a = a.borrow();
+            let acquire = c.get("acquire").is_some();
+            out.push(Leaf {
+                ordinal: *next,
+                address: env.address(if acquire {
+                    crate::sched::OperationKind::Alloc
+                } else {
+                    crate::sched::OperationKind::Release
+                }),
+                operation: if acquire { "alloc" } else { "release" }.into(),
+                wires: a.wires.clone(),
+                controls: vec![],
+                angle: None,
+                class: Some(a.class.clone()),
+                state: Some(a.state.clone()),
+                invocation: vec![],
+                event: None,
+                allocation: Some(a.identity.clone()),
+                scratch: acquire && env.scratch.contains(string(n)?),
+                source_allocation: false,
+            });
+            *next += 1;
+        } else {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn walk_calls(
+        &self,
+        c: &Json,
+        env: &mut Bindings,
+        out: &mut Vec<Leaf>,
+        next: &mut usize,
+        active: &mut Vec<String>,
+    ) -> Result<bool, String> {
+        if let Some(n) = c.get("call") {
+            let Some(Bound::Symbol {
+                hash,
+                registry,
+                adjoint,
+            }) = env.values.get(string(n)?)
+            else {
+                return Err(err("unbound call symbol"));
+            };
+            let hash = hash.clone();
+            let registry = registry.clone();
+            let adjoint = *adjoint;
+            let name = registry.name(&hash)?;
+            let formals = source::interface(&registry.object, name)?;
+            let args = field(c, "args")?;
+            let mut callee = if let Some(Bound::Arguments {
+                hash: bound,
+                values,
+                oracle_invocation,
+                oracle_identity,
+            }) = args.as_str().and_then(|n| env.values.get(n))
+            {
+                if bound != &hash {
+                    return Err(err("arguments closure mismatch"));
+                }
+                let mut bindings = Bindings::new();
+                bindings.values = formals
+                    .iter()
+                    .zip(values)
+                    .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
+                    .collect::<Result<_, String>>()?;
+                bindings.oracle_invocation = oracle_invocation.clone();
+                bindings.oracle_identity = *oracle_identity;
+                bindings
+            } else {
+                let mut bindings = bind_formals(&formals, arr(args)?, env, &Bindings::new())?;
+                bindings.oracle_invocation = env.oracle_invocation.clone();
+                bindings.oracle_identity = env.oracle_identity;
+                bindings
+            };
+            callee.registry = Some(registry.clone());
+            callee.coordinate = env.coordinate.clone();
+            callee.cleanup = env.cleanup.clone();
+            callee.call_domains = env.call_domains.clone();
+            if let Some(caller) = &env.source_point {
+                let mut edge = caller.clone();
+                edge.iteration = env.source_iterations.clone();
+                edge.call_index = Some(env.call_index.get());
+                callee.cleanup.prefix.push(edge);
+            }
+            callee.declarations = env.declarations.clone();
+            callee.active_symbols = env.active_symbols.clone();
+            callee.add_controls(env.controls.clone());
+            if callee.active_symbols.borrow().contains(&hash) {
+                return Err(err("cyclic symbol expansion"));
+            }
+            let call_index = env.call_index.get();
+            env.call_target(CallTarget {
+                interface: registry.identities.interface[name].clone(),
+                closure: hash.clone(),
+                adjoint,
+            });
+            env.call_index.set(call_index + 1);
+            callee.active_symbols.borrow_mut().push(hash.clone());
+            let start = out.len();
+            let result = (|| {
+                let body = source::action_body(&registry.object, name, adjoint, &mut callee)?;
+                self.walk(&body, &mut callee, out, &mut 0, &mut vec![])
+            })();
+            callee.active_symbols.borrow_mut().pop();
+            result?;
+            for leaf in &mut out[start..] {
+                if let (Some(caller), Some(address)) =
+                    (env.source_point.as_ref(), leaf.address.as_mut())
+                {
+                    let mut edge = caller.clone();
+                    edge.iteration = env.source_iterations.clone();
+                    edge.call_index = Some(call_index);
+                    address.path.insert(0, edge);
+                }
+                leaf.invocation.insert(
+                    0,
+                    SemanticCall {
+                        closure_hash: hash.clone(),
+                        call_index,
+                        adjoint,
+                    },
+                );
+            }
+        } else if let Some(n) = c.get("visit") {
+            let Some(Bound::Records { rows, .. }) = env.values.get(string(n)?) else {
+                return Err(err("unbound records"));
+            };
+            for row in rows.clone() {
+                let mut local = env.clone();
+                local.values.extend(row);
+                if n.as_str() == Some("Frames")
+                    && active.last().map(String::as_str) == Some("oracle.construct")
+                    && env.oracle_address.is_some()
+                {
+                    local.coordinate.step =
+                        Some(scalar(&Json::Str("index".into()), &local)?.usize()? + 1);
+                }
+                self.walk(field(c, "body")?, &mut local, out, next, active)?;
+            }
+        } else if let Some(n) = c.get("apply") {
+            let Some(Bound::Templates(t, cap)) = env.values.get(string(n)?) else {
+                return Err(err("unbound templates"));
+            };
+            let t = arr(t)?
+                .get(scalar(field(c, "index")?, env)?.usize()?)
+                .ok_or_else(|| err("template index out of range"))?
+                .clone();
+            let fs = arr(field(&t, "parameters")?)?;
+            let args = arr(field(c, "args")?)?;
+            let mut local = bind_formals(fs, args, env, cap)?;
+            local.add_controls(env.controls.clone());
+            local.inherit_address(env);
+            if env.oracle_address.is_some()
+                && active.last().map(String::as_str) == Some("step")
+                && matches!(n.as_str(), Some("Rows" | "Next"))
+            {
+                self.address_row(&mut local, scalar(field(c, "index")?, env)?.usize()?)?;
+            }
+            local.active_symbols = env.active_symbols.clone();
+            self.walk(field(&t, "body")?, &mut local, out, next, &mut vec![])?;
+        } else {
+            return Ok(false);
+        }
+        Ok(true)
     }
 }
 /// Ownership before traversal direction is applied. Kind and the semantic
@@ -1218,6 +1281,7 @@ fn bind_formals(
                     hash: bound,
                     values,
                     oracle_invocation,
+                    oracle_identity,
                 }) = a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if bound != hash {
@@ -1227,6 +1291,7 @@ fn bind_formals(
                         hash: hash.clone(),
                         values: values.clone(),
                         oracle_invocation: oracle_invocation.clone(),
+                        oracle_identity: *oracle_identity,
                     }
                 } else {
                     let name = registry.name(hash)?;
@@ -1253,6 +1318,7 @@ fn bind_formals(
                         hash: hash.clone(),
                         values,
                         oracle_invocation,
+                        oracle_identity: outer.oracle_identity,
                     }
                 }
             }
@@ -1275,13 +1341,13 @@ fn bind_formals(
             "region" => bind_region(f, a, outer, &env)?,
             "value" => {
                 let ty = field(f, "isa_type")?;
-                if let Some(Bound::Value(value, source_ty)) =
+                if let Some(Bound::Value(value, source_ty, identity)) =
                     a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if source_ty != ty {
                         return Err(err("value isa_type mismatch"));
                     }
-                    Bound::Value(value.clone(), ty.clone())
+                    Bound::Value(value.clone(), ty.clone(), *identity)
                 } else {
                     let isa_ty = if let Some(ptr) = ty.get("ptr") {
                         keys(ty, &["ptr"])?;
@@ -1314,7 +1380,7 @@ fn bind_formals(
                     if let Some(t) = isa_ty {
                         crate::invocation::decode_args(&Json::Arr(vec![a.clone()]), &[t], 1)?;
                     }
-                    Bound::Value(a.clone(), ty.clone())
+                    Bound::Value(a.clone(), ty.clone(), None)
                 }
             }
             "records" => bind_records(f, a, outer, &env)?,
@@ -1347,7 +1413,7 @@ fn bind_formals(
             }
             _ => {
                 return Err(err(format!(
-                    "unavailable.reason: typed {ty} binding/linked-source formation is staged in bennett-vm-47t"
+                    "unavailable.reason: typed {ty} binding/linked-source formation is unavailable"
                 )));
             }
         };

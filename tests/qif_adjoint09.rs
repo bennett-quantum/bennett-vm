@@ -1,6 +1,5 @@
 //! The adjoint reverses unconditional lifetimes across the whole qif.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     action::{QuantumState, execute_action_inner},
     bigint::BigUint,

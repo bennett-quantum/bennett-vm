@@ -232,7 +232,7 @@ impl Source {
                     !prior.matched
                         && prior.outputs.is_empty()
                         && prior.inputs == inputs
-                        && Self::inverse_rows(&rows[prior.index], row)
+                        && Self::inverse_rows(&rows[prior.index], row, env)
                 })
             };
             let candidate = candidate.filter(|id| {
@@ -241,7 +241,7 @@ impl Source {
                     && prior.outputs == outputs
                     && prior.inputs == inputs
                     && outputs.iter().all(|n| current.get(n) == Some(&(id + 1)))
-                    && Self::inverse_rows(&rows[prior.index], row)
+                    && Self::inverse_rows(&rows[prior.index], row, env)
             });
             let next_version = occurrences.len() + 1;
             if let Some(id) = candidate {

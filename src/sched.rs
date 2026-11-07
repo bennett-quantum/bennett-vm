@@ -219,7 +219,7 @@ pub fn select(entries: &[Selector], op: &Operation) -> Result<Option<usize>, Str
         .count()
         > 1
     {
-        return Err(error("multiple maximal matching entries"));
+        return Err(error("multiple maximal matching schedule entries"));
     }
     Ok(Some(index))
 }
@@ -249,7 +249,7 @@ pub fn require_library(expansion: Option<&Json>) -> Result<(), String> {
         .and_then(Json::as_str)
         .unwrap_or("0.8");
     Err(error(format!(
-        "unimplemented: expansion library {name}@{version} (milestone 4); no published operation/ordinal/scratch/removability document is available (b-isa-spec-8r4; bennett-vm-47t)"
+        "unimplemented: expansion library {name}@{version}; no published operation/ordinal/scratch/removability document is available"
     )))
 }
 /// K57 binds an omitted expansion to the object's own ISA version.
@@ -441,6 +441,23 @@ fn validate_path(
 /// bound library's occurrence domains with `validate_bound_entries`.
 pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
     validate_entries_mode(doc, object, ids, None, false)
+}
+/// K91 ties exist only where actual token equality admits a matched pair.
+pub(crate) fn validate_token_cleanup_ties(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
+    let binding = field(doc, "bindings")?;
+    let Some(aliases) = binding.get("token_aliases") else { return Ok(()); };
+    let name = string(field(binding, "region")?)?;
+    let entries = arr(field(doc, "entries")?)?.iter()
+        .filter(|e| e.get("kind").and_then(Json::as_str) == Some("cleanup"))
+        .map(Selector::parse).collect::<Result<Vec<_>, _>>()?;
+    for point in crate::ref_library::token_cleanup_points(object, name, aliases)? {
+        select(&entries, &Operation {
+            path: vec![Point { symbol: ids.interface[name].clone(), point, ..Default::default() }],
+            kind: OperationKind::Cleanup,
+            ..Default::default()
+        })?;
+    }
+    Ok(())
 }
 /// Check embedded source structure without guessing realised call occurrences.
 /// Action-local support is fixed at entry/exit, so direct action invocation
@@ -729,6 +746,7 @@ pub struct Bindings<'a> {
     pub inherited_controls: u32,
     pub budget: [u64; 4],
     pub params: &'a Json,
+    pub token_aliases: Option<&'a Json>,
     pub epsilon: &'a R,
 }
 pub fn consume(
@@ -751,6 +769,7 @@ pub fn consume(
                 "inherited_controls",
                 "budget",
                 "params_hash",
+                "token_aliases",
                 "epsilon",
                 "expansion",
                 "scheduler",
@@ -801,7 +820,23 @@ pub fn consume(
                 string(field(expansion, k)?)?;
             }
         }
-        require_library(binding.get("expansion"))
+        if object.isa == "0.9" {
+            let invocation = Json::obj(vec![
+                ("args", b.params.clone()),
+                ("budget", Json::Arr(b.budget.iter().map(|n| Json::Str(n.to_string())).collect())),
+            ]);
+            let mut invocation = invocation;
+            if let (Some(aliases), Json::Obj(fields)) = (b.token_aliases, &mut invocation) {
+                fields.insert("token_aliases".into(), aliases.clone());
+            }
+            crate::invocation::resolve(object, b.region, &invocation)?;
+            let f = object.function(b.region).ok_or_else(|| error("unknown region"))?;
+            let default = if f.kind == crate::object::FnKind::Oracle { Json::Arr(vec![Json::u64(0)]) } else { Json::Arr(vec![]) };
+            if binding.get("token_aliases").unwrap_or(&default) != b.token_aliases.unwrap_or(&default) {
+                return Err(error("K91: binding token_aliases mismatch"));
+            }
+        }
+        require_library_version(binding.get("expansion"), &object.isa)
     };
     check().map_err(|s| {
         if s.contains("E_SCHEDULE_INFEASIBLE") {

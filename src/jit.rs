@@ -9,7 +9,7 @@ use crate::{
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -76,6 +76,10 @@ pub struct Program {
 /// Explicit opt-in selection, inherited by CLI and C ABI. Invalid selections
 /// fail before execution; there is no automatic interpreter fallback.
 pub fn selection() -> Result<Option<(Passes, bool)>, String> {
+    static ENGINE: OnceLock<Result<Option<(Passes, bool)>, String>> = OnceLock::new();
+    ENGINE.get_or_init(read_selection).clone()
+}
+fn read_selection() -> Result<Option<(Passes, bool)>, String> {
     let mode = match std::env::var("BENNETT_VM_ENGINE") {
         Ok(mode) => mode,
         Err(std::env::VarError::NotPresent) => "interpreter".into(),
@@ -118,33 +122,80 @@ pub fn selection() -> Result<Option<(Passes, bool)>, String> {
         "jit" => Some((Passes::all(), true)),
         _ => {
             return Err(format!(
-                "unimplemented: execution engine {mode} (milestone 5)"
+                "unimplemented: execution engine {mode}"
             ));
         }
     })
 }
+#[derive(PartialEq, Eq)]
+struct CacheKey {
+    object_hash: String,
+    executable_hash: [u8; 32],
+}
+struct CachedProgram {
+    key: CacheKey,
+    program: Arc<Program>,
+}
 thread_local! {
-    // One object per thread, bounded; key uses complete parsed representation,
-    // including programmatically extended functions used by library consumers.
-    static CACHE: RefCell<Option<(String, String, Arc<Program>)>> = const { RefCell::new(None) };
+    // Bounded per-thread cache: published object identity plus private executable
+    // identity, since oracle expansion and library clients can replace rows.
+    static CACHE: RefCell<Option<CachedProgram>> = const { RefCell::new(None) };
 }
 pub fn for_object(obj: &Object) -> Result<Option<Arc<Program>>, String> {
     let Some((passes, native)) = selection()? else {
         return Ok(None);
     };
-    let key = format!("{obj:?}");
-    let mode = format!("{passes:?}/{native}");
+    let key = CacheKey {
+        object_hash: crate::identity::object_hash(&obj.text),
+        executable_hash: executable_hash(obj),
+    };
     CACHE.with(|cache| {
-        if let Some((k, m, p)) = cache.borrow().as_ref()
-            && *k == key
-            && *m == mode
+        if let Some(entry) = cache.borrow().as_ref()
+            && entry.key == key
         {
-            return Ok(Some(p.clone()));
+            return Ok(Some(entry.program.clone()));
         }
         let p = Arc::new(Program::compile(obj, passes, native)?);
-        *cache.borrow_mut() = Some((key, mode, p.clone()));
+        *cache.borrow_mut() = Some(CachedProgram { key, program: p.clone() });
         Ok(Some(p))
     })
+}
+fn executable_hash(obj: &Object) -> [u8; 32] {
+    // Length-delimited fields prevent ambiguities without formatting a Debug tree.
+    let mut bytes = Vec::new();
+    let mut field = |text: &str| {
+        bytes.extend_from_slice(&(text.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(text.as_bytes());
+    };
+    for f in &obj.functions {
+        field(&f.name);
+        field(f.kind.kind_str());
+        field(&f.blocks.len().to_string());
+        for b in &f.blocks {
+            field(&b.name);
+            field(&b.instrs.len().to_string());
+        }
+        let mut rows = vec![];
+        f.flat_instrs(&mut rows);
+        for i in rows {
+            field(i.op.as_str());
+            field(&i.raw);
+            field(&i.line.to_string());
+            field(&i.lhs.len().to_string());
+            for name in &i.lhs {
+                field(name);
+            }
+            field(&i.operands.len().to_string());
+            for operand in &i.operands {
+                field(operand);
+            }
+            field(&i.nested.len().to_string());
+            for arm in &i.nested {
+                field(&arm.len().to_string());
+            }
+        }
+    }
+    crate::sha256::sha256(&bytes)
 }
 impl Program {
     pub fn stats(&self) -> &Stats {
@@ -276,7 +327,7 @@ impl Program {
                         ) {
                             match (known.get(&ins.operands[0]), known.get(&ins.operands[1])) {
                                 (Some((w, a)), Some((v, b))) if w == v => {
-                                    Some((*w, value::binop(base, a, b, *w)))
+                                    Some((*w, value::binop(base, a, b, *w)?))
                                 }
                                 _ => None,
                             }
@@ -305,7 +356,7 @@ impl Program {
                                         } else {
                                             ""
                                         }
-                                    );
+                                    ).into();
                                     node.ins.operands = vec![value.to_decimal()];
                                 }
                                 p.stats.simplified_rows += 1;
@@ -434,7 +485,7 @@ mod native {
         fn finish(mut self) -> Result<Vec<u8>, String> {
             for (at, target) in self.fixups {
                 let rel = i32::try_from(self.labels[target] as i64 - (at + 4) as i64)
-                    .map_err(|_| "unimplemented: JIT code larger than rel32 (milestone 5)")?;
+                    .map_err(|_| "unimplemented: JIT code larger than rel32")?;
                 self.bytes[at..at + 4].copy_from_slice(&rel.to_le_bytes());
             }
             Ok(self.bytes)
@@ -484,7 +535,7 @@ mod native {
                     }
                     _ => {
                         return Err(format!(
-                            "unimplemented: native integer kernel {op} (milestone 5)"
+                            "unimplemented: native integer kernel {op}"
                         ));
                     }
                 }
@@ -653,11 +704,11 @@ mod native {
     use super::*;
     pub struct Code;
     pub fn arithmetic(_: &str, _: u64, _: u64, _: usize) -> Result<u64, String> {
-        Err("unimplemented: JIT host arithmetic for this host (milestone 5)".into())
+        Err("unimplemented: JIT host arithmetic for this host".into())
     }
     impl Code {
         pub fn compile(_: &[Node], _: usize) -> Result<Self, String> {
-            Err("unimplemented: JIT host codegen for this host (milestone 5)".into())
+            Err("unimplemented: JIT host codegen for this host".into())
         }
         pub fn run(
             &self,

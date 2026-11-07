@@ -7,13 +7,7 @@ use std::{
 
 fn run_harness(cases: &Path, mode: &str) -> (Option<i32>, String) {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let harness = std::env::var_os("BENNETT_ISA_CONFORMANCE")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            repo.parent()
-                .unwrap()
-                .join("bennett-isa-spec/conformance/target/debug/bennett-isa-conformance")
-        });
+    let harness = crate::pins::isa().join("conformance/target/debug/bennett-isa-conformance");
     let output = Command::new(&harness)
         .args(["--bin", env!("CARGO_BIN_EXE_bennett-vm"), "--cases"])
         .arg(cases)
@@ -159,13 +153,11 @@ fn assert_rows(report: &str, cases: &Path) -> usize {
 }
 
 fn published_cases() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases")
+    crate::pins::isa().join("conformance/cases")
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn published_conformance_report() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     std::fs::create_dir_all(repo.join(".tmp")).unwrap();
@@ -197,6 +189,7 @@ fn copy_cases(source: &Path, destination: &Path) {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn corrupted_unavailable_reason_is_rejected() {
     let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!(".tmp/conformance-corrupt-{}", std::process::id()));
@@ -255,6 +248,7 @@ fn corrupted_unavailable_reason_is_rejected() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn metadata_unknown_fields_are_load_errors() {
     let root = published_cases().join("objects");
     for name in ["f_cert_unknown_field.bisa", "f_sched_unknown_field.bisa"] {

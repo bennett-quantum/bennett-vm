@@ -9,5 +9,7 @@ plugin commit 211f413. SHA256:
 `reference.json` records the independent reference interpreter run: status 0,
 225956 steps and exactly 54 console bytes (`iplqudez\n` six times).
 The oracle test reruns the reference binary at the VM's gate pin and checks
-these values before comparing wall times. `replies.json` supplies the single
-20-byte empty argv response; its payload is the object's zeroed argv buffer.
+these values, then checks the VM's status, rows, console and target time.
+Wall times are informational; the hang guard reports UNKNOWN if it expires.
+`replies.json` supplies the single 20-byte empty argv response; its payload is
+the object's zeroed argv buffer.

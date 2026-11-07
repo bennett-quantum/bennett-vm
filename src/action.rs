@@ -718,7 +718,7 @@ impl<'o> Exec<'o> {
                 })
                 .collect::<Result<Vec<_>, String>>()?;
             return self.emit_gate_request(crate::target::Gate {
-                op: op.clone(),
+                op: op.to_string(),
                 controls,
                 own_controls: own,
                 targets,
@@ -2033,7 +2033,7 @@ fn renamed(
 ) -> Instr {
     Instr {
         lhs,
-        op: op.to_string(),
+        op: op.into(),
         operands,
         nested,
         line: ins.line,

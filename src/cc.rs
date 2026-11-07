@@ -736,7 +736,7 @@ impl Machine {
                 ("block", Json::Str(block.name.clone())),
                 ("index", Json::u64(a.index as u64)),
                 ("line", Json::u64(ins.line as u64)),
-                ("op", Json::Str(ins.op.clone())),
+                ("op", Json::Str(ins.op.to_string())),
                 ("lhs", strs(&ins.lhs)),
                 ("operands", strs(&ins.operands)),
                 ("registers", Json::Arr(regs)),

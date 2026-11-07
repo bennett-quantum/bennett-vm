@@ -56,7 +56,7 @@ pub fn borrow_capacity(obj: &Object, name: &str) -> Result<usize, String> {
             let synthetic;
             if i.op == "adj" {
                 synthetic = crate::object::Instr {
-                    op: i.operands[0].clone(),
+                    op: i.operands[0].clone().into(),
                     operands: i.operands[1..].to_vec(),
                     ..i.clone()
                 };

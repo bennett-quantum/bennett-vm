@@ -5,7 +5,7 @@
 use crate::bigint::{BigUint, sign_extend};
 use crate::cliargs;
 use crate::json::Json;
-use crate::object::{FnKind, Function, Instr, Object, Type};
+use crate::object::{FnKind, Function, Instr, Object, Op, SizedOp, Type};
 use crate::sha256::from_hex;
 use crate::value::{
     Budget, FAULT_BUDGET_DEPTH, FAULT_BUDGET_HEAP, FAULT_BUDGET_STEPS, FAULT_UB_MEMFAULT,
@@ -440,11 +440,13 @@ impl<'o> Machine<'o> {
         let op = ins.op.as_str();
         let base = op.strip_prefix("lift.").unwrap_or(op);
         // const
-        if let Some(rest) = base.strip_prefix("const.") {
-            let width: usize = rest
-                .strip_prefix('i')
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| diag("4.8", format!("malformed {op}")))?;
+        if let Op::Sized {
+            kind: SizedOp::Const,
+            width,
+            ..
+        } = &ins.op
+        {
+            let width = *width;
             let dest = &ins.lhs[0];
             let dw = self.width_of(fname, dest)?;
             if dw != width {
@@ -457,11 +459,27 @@ impl<'o> Machine<'o> {
             self.write(fname, dest, v)?;
             return Ok(Flow::Next);
         }
-        if [
-            "add", "sub", "mul", "and", "or", "xor", "shl", "lshr", "ashr",
-        ]
-        .contains(&base)
-        {
+        if matches!(
+            ins.op,
+            Op::Add
+                | Op::Sub
+                | Op::Mul
+                | Op::And
+                | Op::Or
+                | Op::Xor
+                | Op::Shl
+                | Op::Lshr
+                | Op::Ashr
+                | Op::LiftAdd
+                | Op::LiftSub
+                | Op::LiftMul
+                | Op::LiftAnd
+                | Op::LiftOr
+                | Op::LiftXor
+                | Op::LiftShl
+                | Op::LiftLshr
+                | Op::LiftAshr
+        ) {
             let (a, aw) = self.read(fname, &ins.operands[0])?;
             let (b, bw) = self.read(fname, &ins.operands[1])?;
             let width = both_widths(aw, bw, fname, op)?;
@@ -476,7 +494,17 @@ impl<'o> Machine<'o> {
             self.write(fname, dest, v)?;
             return Ok(Flow::Next);
         }
-        if ["udiv", "urem", "sdiv", "srem"].contains(&base) {
+        if matches!(
+            ins.op,
+            Op::Udiv
+                | Op::Urem
+                | Op::Sdiv
+                | Op::Srem
+                | Op::LiftUdiv
+                | Op::LiftUrem
+                | Op::LiftSdiv
+                | Op::LiftSrem
+        ) {
             let (a, aw) = self.read(fname, &ins.operands[0])?;
             let (b, bw) = self.read(fname, &ins.operands[1])?;
             let width = both_widths(aw, bw, fname, op)?;
@@ -494,7 +522,16 @@ impl<'o> Machine<'o> {
             self.write(fname, dest, v)?;
             return Ok(Flow::Next);
         }
-        if let Some(pred) = base.strip_prefix("icmp.") {
+        let predicate = match ins.op {
+            Op::IcmpEq | Op::LiftIcmpEq => Some("eq"),
+            Op::IcmpNe | Op::LiftIcmpNe => Some("ne"),
+            Op::IcmpUlt | Op::LiftIcmpUlt => Some("ult"),
+            Op::IcmpUle | Op::LiftIcmpUle => Some("ule"),
+            Op::IcmpSlt | Op::LiftIcmpSlt => Some("slt"),
+            Op::IcmpSle | Op::LiftIcmpSle => Some("sle"),
+            _ => None,
+        };
+        if let Some(pred) = predicate {
             let (a, aw) = self.read(fname, &ins.operands[0])?;
             let (b, bw) = self.read(fname, &ins.operands[1])?;
             let width = both_widths(aw, bw, fname, op)?;
@@ -509,8 +546,8 @@ impl<'o> Machine<'o> {
             self.write(fname, dest, v)?;
             return Ok(Flow::Next);
         }
-        match op {
-            "lift.select" => {
+        match &ins.op {
+            Op::LiftSelect => {
                 let (p, _) = self.read(fname, &ins.operands[0])?;
                 let (a, aw) = self.read(fname, &ins.operands[1])?;
                 let (b, bw) = self.read(fname, &ins.operands[2])?;
@@ -525,7 +562,7 @@ impl<'o> Machine<'o> {
                 self.write(fname, dest, if p.bit(0) { a } else { b })?;
                 Ok(Flow::Next)
             }
-            "lift.mov" => {
+            Op::LiftMov => {
                 let (a, aw) = self.read(fname, &ins.operands[0])?;
                 let dest = &ins.lhs[0];
                 if self.width_of(fname, dest)? != aw.unwrap_or(0) {
@@ -537,7 +574,7 @@ impl<'o> Machine<'o> {
                 self.write(fname, dest, a)?;
                 Ok(Flow::Next)
             }
-            "lift.parmov" => {
+            Op::LiftParmov => {
                 let srcs = crate::validate::list_operand(&ins.operands[0])?;
                 let mut values = Vec::new();
                 for (s, d) in srcs.iter().zip(ins.lhs.iter()) {
@@ -555,7 +592,7 @@ impl<'o> Machine<'o> {
                 }
                 Ok(Flow::Next)
             }
-            "lift.label" => {
+            Op::LiftLabel => {
                 let (bname, _) = crate::validate::branch_target(&ins.operands[0])
                     .ok_or_else(|| diag("4.2", "malformed lift.label"))?;
                 let idx = self.canonical_block_index(fname, &bname)?;
@@ -563,7 +600,7 @@ impl<'o> Machine<'o> {
                 self.write(fname, dest, BigUint::from_u64(idx as u64))?;
                 Ok(Flow::Next)
             }
-            "lift.addr" => {
+            Op::LiftAddr => {
                 let name = crate::validate::at_name(&ins.operands[0]).unwrap_or("");
                 let dest = &ins.lhs[0];
                 if self.width_of(fname, dest)? != self.obj.ptr_width {
@@ -601,7 +638,15 @@ impl<'o> Machine<'o> {
                 self.write(fname, dest, value)?;
                 Ok(Flow::Next)
             }
-            "lift.boundscheck" => {
+            _ => self.exec_effect(func, ins),
+        }
+    }
+
+    fn exec_effect(&mut self, func: &Function, ins: &Instr) -> Result<Flow, String> {
+        let fname = &func.name;
+        let op = ins.op.as_str();
+        match &ins.op {
+            Op::LiftBoundscheck => {
                 let (p, pw) = self.read(fname, &ins.operands[0])?;
                 if pw != Some(self.obj.ptr_width) {
                     return Err(diag(
@@ -616,7 +661,7 @@ impl<'o> Machine<'o> {
                     Ok(Flow::HaltFault(BigUint::from_u64(FAULT_UB_MEMFAULT)))
                 }
             }
-            "lift.alloc" => {
+            Op::LiftAlloc => {
                 let (n, _) = self.read(fname, &ins.operands[0])?;
                 let layout = self
                     .obj
@@ -655,7 +700,7 @@ impl<'o> Machine<'o> {
                 self.write(fname, &dest, base)?;
                 Ok(Flow::Next)
             }
-            "lift.free" => {
+            Op::LiftFree => {
                 let (p, _) = self.read(fname, &ins.operands[0])?;
                 let entry = self
                     .alloctab
@@ -669,7 +714,7 @@ impl<'o> Machine<'o> {
                     None => Ok(Flow::HaltFault(BigUint::from_u64(FAULT_UB_MEMFAULT))),
                 }
             }
-            "lift.faultif" => {
+            Op::LiftFaultif => {
                 let (p, pw) = self.read(fname, &ins.operands[0])?;
                 if pw != Some(1) {
                     return Err(diag(
@@ -685,12 +730,12 @@ impl<'o> Machine<'o> {
                     Ok(Flow::Next)
                 }
             }
-            "fault" => {
+            Op::Fault => {
                 let code = BigUint::parse_int(&ins.operands[0])
                     .map_err(|_| diag("4.2", "invalid fault code"))?;
                 Ok(Flow::HaltFault(code))
             }
-            "lift.retval" => {
+            Op::LiftRetval => {
                 let (v, vw) = self.read(fname, &ins.operands[0])?;
                 if vw != Some(self.tgt_width) {
                     return Err(diag(
@@ -704,19 +749,19 @@ impl<'o> Machine<'o> {
                 self.result_val = self.result_val.bitxor(&v).mask(self.tgt_width);
                 Ok(Flow::HaltOk)
             }
-            "lift.ret" => {
+            Op::LiftRet => {
                 if self.call_stack.is_empty() {
                     return Ok(Flow::HaltFault(BigUint::from_u64(FAULT_UB_TRAP)));
                 }
                 let (v, _) = self.read(fname, &ins.operands[0])?;
                 Ok(Flow::Return(v))
             }
-            "qjump" => {
+            Op::Qjump => {
                 let (bname, _) = crate::validate::branch_target(&ins.operands[0])
                     .ok_or_else(|| diag("4.2", "malformed qjump"))?;
                 Ok(Flow::Jump(self.block_index(func, &bname)?, 0))
             }
-            "qbranch" => {
+            Op::Qbranch => {
                 let (p, pw) = self.read(fname, &ins.operands[0])?;
                 if pw != Some(1) {
                     return Err(diag(
@@ -733,7 +778,7 @@ impl<'o> Machine<'o> {
                     .ok_or_else(|| diag("4.2", "malformed qbranch"))?;
                 Ok(Flow::Jump(self.block_index(func, &bname)?, 0))
             }
-            "qjumpr" => {
+            Op::Qjumpr => {
                 let (a, _) = self.read(fname, &ins.operands[0])?;
                 let (first, end) = self.func_index_range(fname);
                 let idx = a.to_usize();
@@ -751,35 +796,26 @@ impl<'o> Machine<'o> {
                     _ => Ok(Flow::HaltFault(BigUint::from_u64(FAULT_UB_TRAP))),
                 }
             }
-            "lift.call" => {
+            Op::LiftCall => {
                 let callee = crate::validate::at_name(&ins.operands[0])
                     .ok_or_else(|| diag("4.2", "malformed lift.call"))?
                     .to_string();
                 Ok(Flow::Call(callee))
             }
-            "lift.oracle_call" | "lift.oracle_uncall" => {
+            Op::LiftOracleCall | Op::LiftOracleUncall => {
                 self.exec_oracle_call(fname, ins)?;
                 Ok(Flow::Next)
             }
-            "lift.perm_call" => {
+            Op::LiftPermCall => {
                 self.exec_perm_call(fname, ins)?;
                 Ok(Flow::Next)
             }
-            _ if base.starts_with("zext.")
-                || base.starts_with("sext.")
-                || base.starts_with("trunc.") =>
-            {
-                let (to, kind) = if let Some(r) = base.strip_prefix("zext.") {
-                    (r, "zext")
-                } else if let Some(r) = base.strip_prefix("sext.") {
-                    (r, "sext")
-                } else {
-                    (base.strip_prefix("trunc.").unwrap(), "trunc")
-                };
-                let m: usize = to
-                    .strip_prefix('i')
-                    .and_then(|s| s.parse().ok())
-                    .ok_or_else(|| diag("4.8", format!("malformed {op}")))?;
+            Op::Sized {
+                kind: kind @ (SizedOp::Zext | SizedOp::Sext | SizedOp::Trunc),
+                width,
+                ..
+            } => {
+                let m = *width;
                 let (a, aw) = self.read(fname, &ins.operands[0])?;
                 let from = aw.ok_or_else(|| diag("3.3", format!("{op} operand needs a width")))?;
                 let dest = &ins.lhs[0];
@@ -790,7 +826,7 @@ impl<'o> Machine<'o> {
                     ));
                 }
                 let valid = match kind {
-                    "trunc" => m < from,
+                    SizedOp::Trunc => m < from,
                     _ => m > from,
                 };
                 if !valid {
@@ -798,11 +834,15 @@ impl<'o> Machine<'o> {
                         "3.3",
                         format!(
                             "{op} from width {from} to {m} does not strictly {} in @{fname}",
-                            if kind == "trunc" { "narrow" } else { "widen" }
+                            if *kind == SizedOp::Trunc {
+                                "narrow"
+                            } else {
+                                "widen"
+                            }
                         ),
                     ));
                 }
-                let v = if kind == "sext" {
+                let v = if *kind == SizedOp::Sext {
                     sign_extend(&a, from, m)
                 } else {
                     a.mask(m)
@@ -810,13 +850,13 @@ impl<'o> Machine<'o> {
                 self.write(fname, dest, v)?;
                 Ok(Flow::Next)
             }
-            _ if op.starts_with("lift.load.") => {
-                let n_bits: usize = op
-                    .rsplit('.')
-                    .next()
-                    .and_then(|t| t.strip_prefix('i'))
-                    .and_then(|t| t.parse().ok())
-                    .ok_or_else(|| diag("3.3", format!("malformed {op}")))?;
+            Op::Sized {
+                kind: SizedOp::Load,
+                width,
+                lifted: true,
+                ..
+            } => {
+                let n_bits = *width;
                 let (a, aw) = self.read(fname, &ins.operands[0])?;
                 if aw != Some(self.obj.ptr_width) {
                     return Err(diag(
@@ -838,13 +878,13 @@ impl<'o> Machine<'o> {
                 self.write(fname, &dest, v)?;
                 Ok(Flow::Next)
             }
-            _ if op.starts_with("lift.store.") => {
-                let n_bits: usize = op
-                    .rsplit('.')
-                    .next()
-                    .and_then(|t| t.strip_prefix('i'))
-                    .and_then(|t| t.parse().ok())
-                    .ok_or_else(|| diag("3.3", format!("malformed {op}")))?;
+            Op::Sized {
+                kind: SizedOp::Store,
+                width,
+                lifted: true,
+                ..
+            } => {
+                let n_bits = *width;
                 let (a, aw) = self.read(fname, &ins.operands[0])?;
                 if aw != Some(self.obj.ptr_width) {
                     return Err(diag(

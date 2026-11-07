@@ -62,3 +62,23 @@ Focused `cargo test --offline -j3 --test suite -- <filter> --test-threads=4`
 runs for `huge_regions`, `transformations_change_private_graph` and
 `typed_templates_capture` passed (one test each). Binary-input tests retain
 exact bytes, explicit success/failure and both engines/versions.
+
+Structural work: the red scan measured `walk` 602, oracle constructor `body`
+501 and `exec_row` 430 lines. They are now grammar phases, storage versus row
+construction, and locations versus effects respectively; every extracted
+function is below 300 lines. `Instr.op` is a parsed `Op` enum, with widths
+stored in sized variants and original spelling preserved for identities and
+diagnostics. Oracle execution and exact-opcode validation dispatch on it.
+
+`cargo test --offline -j3 -- --test-threads=4` passed 44 unit + 311 integration
+cases after typed execution (72 ignored), and the focused coherent typing
+suite passed 13 after enum validation. The explicitly ignored
+`source_constructor_rejects_bad_pairs` test also passed. The opcode regression
+first failed to compile because the typed representation did not exist.
+
+Remaining function owners: next VM quality round, issue bennett-vm-bsj for
+protected cc.rs `exec`/`command` (415/395; split after bjm-dense merges), and
+bennett-vm-68j for qvalidate.rs `sequence`, ref_library/source.rs `instruction`
+and typing.rs `classical` (334/359/352). The protected executors retain their
+legacy spelling adapters; changing the parsed opcode's type required only
+small constructor/trace conversions there.

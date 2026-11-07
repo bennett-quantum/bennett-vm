@@ -305,7 +305,7 @@ impl Program {
                                         } else {
                                             ""
                                         }
-                                    );
+                                    ).into();
                                     node.ins.operands = vec![value.to_decimal()];
                                 }
                                 p.stats.simplified_rows += 1;

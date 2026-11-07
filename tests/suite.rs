@@ -55,4 +55,3 @@ mod source09;
 #[path = "support/device.rs"]
 mod device_fixture;
 
-mod step_scaling;

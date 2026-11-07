@@ -61,7 +61,7 @@ struct Activation {
     call_start: Option<usize>,
     args: Vec<Value>,
 }
-#[derive(Clone)]
+#[cfg_attr(not(test), derive(Clone))]
 struct Frame {
     classes_before: Map<usize, String>,
     classes_after: Map<usize, String>,
@@ -79,6 +79,8 @@ struct Frame {
     measured: bool,
     tokens_created: Vec<u64>,
 }
+#[cfg(test)]
+mod frame_work;
 #[derive(Clone)]
 struct Segment {
     start: usize,
@@ -770,6 +772,8 @@ impl Machine {
             measured: is_measure(&ins.op) && fault.is_none(),
         });
         self.steps += 1;
+        #[cfg(test)]
+        crate::execution_work::record(crate::execution_work::Operation::Step, 1);
         Ok(())
     }
     fn exec(&mut self, ins: &Instr) -> Result<Option<u64>, String> {

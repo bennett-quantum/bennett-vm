@@ -887,7 +887,8 @@ fn subscript(w: &str) -> Result<(&str, Json), String> {
     Ok((name, e))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[cfg_attr(not(test), derive(Clone))]
 pub struct Event {
     pub start: R,
     pub duration: R,
@@ -934,6 +935,8 @@ impl Target {
                 }
             }
             for (_, other) in wire_events.iter().take_while(|(index, _)| *index < i) {
+                #[cfg(test)]
+                crate::execution_work::record(crate::execution_work::Operation::AccountingComparison, 1);
                 if e.start < other.start.add(&other.duration)
                     && other.start < e.start.add(&e.duration)
                     && e.wires.iter().any(|w| other.wires.contains(w))

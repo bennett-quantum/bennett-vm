@@ -3,7 +3,8 @@
 use std::{borrow::Borrow, rc::Rc};
 
 type Link<K, V> = Option<Rc<Node<K, V>>>;
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[cfg_attr(not(test), derive(Clone))]
 struct Node<K, V> {
     key: K,
     value: Rc<V>,
@@ -11,6 +12,8 @@ struct Node<K, V> {
     right: Link<K, V>,
     height: usize,
 }
+#[cfg(test)]
+mod node_work;
 #[derive(Clone, Debug)]
 pub(crate) struct Map<K, V> {
     root: Link<K, V>,
@@ -93,6 +96,8 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
     {
         let mut p = self.root.as_deref();
         while let Some(n) = p {
+            #[cfg(test)]
+            crate::execution_work::record(crate::execution_work::Operation::MapNode, 1);
             match key.cmp(n.key.borrow()) {
                 std::cmp::Ordering::Less => p = n.left.as_deref(),
                 std::cmp::Ordering::Greater => p = n.right.as_deref(),
@@ -129,6 +134,8 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
             value: V,
             added: &mut bool,
         ) -> Rc<Node<K, V>> {
+            #[cfg(test)]
+            crate::execution_work::record(crate::execution_work::Operation::MapNode, 1);
             let Some(mut n) = p else {
                 *added = true;
                 return Rc::new(Node {

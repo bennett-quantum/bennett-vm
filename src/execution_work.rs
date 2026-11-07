@@ -1,0 +1,84 @@
+//! Test-only deterministic work probes; each thread owns its measurement scope.
+use std::cell::Cell;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Snapshot {
+    pub steps: u64,
+    pub map_nodes: u64,
+    pub path_copies: u64,
+    pub target_history_copies: u64,
+    pub accounting_comparisons: u64,
+    pub payload_clones: u64,
+    pub lock_scans: u64,
+}
+pub(crate) enum Operation {
+    Step,
+    MapNode,
+    PathCopy,
+    TargetHistoryCopy,
+    AccountingComparison,
+    PayloadClone,
+    LockScan,
+}
+thread_local! {
+    static ENABLED: Cell<bool> = const { Cell::new(false) };
+    static WORK: Cell<Snapshot> = Cell::new(Snapshot::default());
+}
+pub(crate) fn record(operation: Operation, amount: u64) {
+    if ENABLED.with(Cell::get) {
+        WORK.with(|cell| {
+            let mut work = cell.get();
+            let count = match operation {
+                Operation::Step => &mut work.steps,
+                Operation::MapNode => &mut work.map_nodes,
+                Operation::PathCopy => &mut work.path_copies,
+                Operation::TargetHistoryCopy => &mut work.target_history_copies,
+                Operation::AccountingComparison => &mut work.accounting_comparisons,
+                Operation::PayloadClone => &mut work.payload_clones,
+                Operation::LockScan => &mut work.lock_scans,
+            };
+            *count += amount;
+            cell.set(work);
+        });
+    }
+}
+pub(crate) struct Probe;
+impl Probe {
+    pub(crate) fn start() -> Self {
+        ENABLED.with(|enabled| assert!(!enabled.replace(true), "nested work probe"));
+        WORK.with(|work| work.set(Snapshot::default()));
+        Self
+    }
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        WORK.with(Cell::get)
+    }
+}
+impl Drop for Probe {
+    fn drop(&mut self) {
+        ENABLED.with(|enabled| enabled.set(false));
+    }
+}
+impl Clone for crate::json::Json {
+    fn clone(&self) -> Self {
+        record(Operation::PayloadClone, 1);
+        match self {
+            Self::Null => Self::Null,
+            Self::Bool(value) => Self::Bool(*value),
+            Self::Num(value) => Self::Num(value.clone()),
+            Self::Str(value) => Self::Str(value.clone()),
+            Self::Arr(value) => Self::Arr(value.clone()),
+            Self::Obj(value) => Self::Obj(value.clone()),
+        }
+    }
+}
+impl Clone for crate::target::Event {
+    fn clone(&self) -> Self {
+        record(Operation::TargetHistoryCopy, 1);
+        Self {
+            start: self.start.clone(),
+            duration: self.duration.clone(),
+            wires: self.wires.clone(),
+            cost: self.cost.clone(),
+        }
+    }
+}

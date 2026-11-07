@@ -188,7 +188,11 @@ impl bennett_program_t {
         if memory.iter().any(|key| {
             self.memory_locks
                 .iter()
-                .any(|(other, owner)| *owner != r && key.overlaps(other))
+                .any(|(other, owner)| {
+                    #[cfg(test)]
+                    crate::execution_work::record(crate::execution_work::Operation::LockScan, 1);
+                    *owner != r && key.overlaps(other)
+                })
         }) || regs
             .iter()
             .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
@@ -202,7 +206,11 @@ impl bennett_program_t {
             if !self
                 .memory_locks
                 .iter()
-                .any(|(k, owner)| *owner == r && *k == key)
+                .any(|(k, owner)| {
+                    #[cfg(test)]
+                    crate::execution_work::record(crate::execution_work::Operation::LockScan, 1);
+                    *owner == r && *k == key
+                })
             {
                 self.memory_locks.push((key, r));
             }

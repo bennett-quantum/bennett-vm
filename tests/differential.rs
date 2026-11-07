@@ -593,6 +593,19 @@ fn temp_object(label: &str, text: &str) -> String {
     let mut lines = text.lines().map(String::from).collect::<Vec<_>>();
     let index = lines.iter().position(|l| l == "section symbols").unwrap() + 1;
     lines[index] = bennett_vm::json::Json::Obj(symbols).to_jcs();
+    // §9.2/§12.3: adding a CC wrapper changes source bytes and object_hash.
+    // Rebind this generated object's certificate instead of retaining a stale binding.
+    if let Some(index) = lines.iter().position(|l| l == "section certificate") {
+        use bennett_vm::json::Json;
+        let object = bennett_vm::object::parse(&(lines.join("\n") + "\n")).unwrap();
+        let ids = bennett_vm::identity::compute(&object).unwrap();
+        let mut certificate = bennett_vm::json::parse(&lines[index + 1]).unwrap();
+        if let Json::Obj(doc) = &mut certificate {
+            let Some(Json::Obj(binding)) = doc.get_mut("bindings") else { panic!("certificate bindings"); };
+            binding.insert("object_hash".into(), Json::Str(ids.object_hash));
+        }
+        lines[index + 1] = certificate.to_jcs();
+    }
     std::fs::write(&path, lines.join("\n") + "\n").unwrap();
     let path = path.display().to_string();
     assert_bytes(label, &s(&["check", &path]));
@@ -2469,7 +2482,7 @@ fn coherent_corpus(path: &Path) {
                         },
                     ]));
                 }
-                assert_coherent(&tuple_fixture_args(args));
+                assert_coherent_fixture(&tuple_fixture_args(args), obj.imports.is_empty());
             }
             let mut args = s(&[
                 "step-check",
@@ -2492,7 +2505,7 @@ fn coherent_corpus(path: &Path) {
                     },
                 ]));
             }
-            assert_coherent(&tuple_fixture_args(args));
+            assert_coherent_fixture(&tuple_fixture_args(args), obj.imports.is_empty());
         } else if matches!(f.kind, FnKind::Action | FnKind::PermAction) {
             let mut n = 0;
             for list in &f.lists[..3] {
@@ -2529,7 +2542,7 @@ fn coherent_corpus(path: &Path) {
                         },
                     ]));
                 }
-                assert_coherent(&tuple_fixture_args(args));
+                assert_coherent_fixture(&tuple_fixture_args(args), obj.imports.is_empty());
             }
             for basis in [
                 "0".repeat(n),
@@ -2553,7 +2566,7 @@ fn coherent_corpus(path: &Path) {
                                 },
                             ]));
                         }
-                        assert_coherent(&tuple_fixture_args(args));
+                        assert_coherent_fixture(&tuple_fixture_args(args), obj.imports.is_empty());
                     }
                 }
             }
@@ -2787,4 +2800,18 @@ fn tuple_fixture_args(mut args: Vec<String>) -> Vec<String> {
         }
     }
     args
+}
+
+fn assert_coherent_fixture(args: &[String], linked: bool) {
+    if linked {
+        assert_coherent(args);
+    } else {
+        // §9.3: retain unresolved published sources as negative execution witnesses.
+        for binary in [reference(), PathBuf::from(vm())] {
+            let out = run(&binary, args);
+            assert_eq!(out.status.code(), Some(1), "{args:?}: {}", show(&out));
+            assert!(out.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&out.stderr).contains("§9.3"), "{args:?}: {}", show(&out));
+        }
+    }
 }

@@ -1490,6 +1490,7 @@ pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
     }
     let text = cliargs::read_object(&opts.positional[0])?;
     let (obj, _) = crate::load(&text, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&opts.positional[1]).to_string();
     let func = obj.function(&name);
     match func {
@@ -1578,10 +1579,7 @@ pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
         };
         arg_values.push(value);
     }
-    if obj.isa == "0.9" {
-        let aliases = crate::token_aliases::parse(opts.one("token-aliases")?)?;
-        crate::token_aliases::bind(&mut arg_values, Some(budget), aliases.as_ref())?;
-    }
+    crate::token_aliases::bind_cli(&obj, &mut arg_values, Some(budget), opts.one("token-aliases")?)?;
     let outcome = run_oracle(&obj, &name, &inputs, &mut mem, &arg_values, budget)?;
     println!(
         "{}",

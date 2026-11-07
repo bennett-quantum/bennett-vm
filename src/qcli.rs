@@ -123,6 +123,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
         return Err("run-action needs <object> <action>".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let sig = crate::validate::action_sig(&obj, name)?;
     let f = obj.function(name).ok_or("§5.1: unresolved action")?;
@@ -238,10 +239,7 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
         &raw,
         &cliargs::default_budget(&obj, 1_000_000),
     )?;
-    if obj.isa == "0.9" {
-        let aliases = crate::token_aliases::parse(o.one("token-aliases")?)?;
-        crate::token_aliases::bind(&mut av, None, aliases.as_ref())?;
-    }
+    crate::token_aliases::bind_cli(&obj, &mut av, None, o.one("token-aliases")?)?;
     let pool = s.alloc_wires(borrow_capacity(&obj, name)?);
     let entry = s.clone();
     let adj = o.flags.contains("adjoint");

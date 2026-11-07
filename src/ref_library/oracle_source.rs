@@ -67,6 +67,13 @@ impl Catalog {
         inherited_controls: usize,
         entries: &[CleanupEntry],
     ) -> Result<ActionExpansion, String> {
+        self.lower_oracle_with_token_aliases(object, name, params, oracle_invocation, inherited_controls, entries, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn lower_oracle_with_token_aliases(
+        &self, object: &Object, name: &str, params: &Json, oracle_invocation: &Json,
+        inherited_controls: usize, entries: &[CleanupEntry], aliases: Option<&Json>,
+    ) -> Result<ActionExpansion, String> {
         let mut env = Bindings::new();
         env.link(object)?;
         let registry = env.registry.clone().unwrap();
@@ -78,10 +85,13 @@ impl Catalog {
             return Err(err("source is not an oracle"));
         }
         let types = f.lists[4].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
-        let values = crate::invocation::decode_args(params, &types, object.ptr_width)?;
-        for value in values {
+        let mut values = crate::invocation::decode_args(params, &types, object.ptr_width)?;
+        let budget = invocation_budget(object, Some(oracle_invocation))?;
+        let primary = crate::token_aliases::bind(&mut values, Some(budget), aliases)?;
+        env.oracle_identity = match primary { Some(crate::value::Value::TokenId(id, _)) => Some(id), _ => return Err(err("missing primary token identity")) };
+        for value in &values {
             if let crate::value::Value::Token(b) = value {
-                crate::cliargs::validate_budget(object, &b)?;
+                crate::cliargs::validate_budget(object, b)?;
             }
         }
         for p in f.lists[0].iter().chain(&f.lists[1]).chain(&f.lists[2]) {
@@ -90,14 +100,14 @@ impl Catalog {
             };
             env.wire(&p.name, width);
         }
-        for (p, value) in f.lists[4].iter().zip(arr(params)?) {
+        for ((p, value), resolved) in f.lists[4].iter().zip(arr(params)?).zip(&values) {
             let ty = if p.ty == Type::Ptr {
                 Json::obj(vec![("ptr", n(object.ptr_width))])
             } else {
                 s(p.ty.signature_text())
             };
             env.values
-                .insert(p.name.clone(), Bound::Value(value.clone(), ty, None));
+                .insert(p.name.clone(), Bound::Value(value.clone(), ty, match resolved { crate::value::Value::TokenId(id, _) => Some(*id), _ => None }));
         }
         for p in &f.lists[3] {
             let Type::Region(address, cell) = p.ty else {

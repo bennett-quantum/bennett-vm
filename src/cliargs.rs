@@ -120,37 +120,11 @@ pub fn parse_token(text: &str, defaults: &Budget) -> Result<Budget, String> {
 
 /// Canonical equality classes for tuple-only token arguments (ISA 0.9 K91).
 pub fn parse_token_aliases(raw: Option<&str>, count: usize) -> Result<Vec<usize>, String> {
-    let invalid = || "§10: E_ARG: invalid token_aliases partition".to_string();
-    let Some(raw) = raw else {
-        return if count == 0 {
-            Ok(vec![])
-        } else {
-            Err("§10: E_ARG: tuple-only token arguments require token_aliases".into())
-        };
-    };
-    let crate::json::Json::Arr(labels) = crate::json::parse(raw).map_err(|_| invalid())? else {
-        return Err(invalid());
-    };
-    if labels.len() != count {
-        return Err(invalid());
+    match crate::token_aliases::parse(raw)? {
+        Some(labels) => crate::token_aliases::validate(&labels, count),
+        None if count == 0 => Ok(vec![]),
+        None => Err("§10: E_ARG: tuple-only token arguments require token_aliases".into()),
     }
-    let mut next = 0;
-    labels
-        .into_iter()
-        .map(|label| {
-            let crate::json::Json::Num(number) = label else {
-                return Err(invalid());
-            };
-            let label: usize = number.parse().map_err(|_| invalid())?;
-            if label > next {
-                return Err(invalid());
-            }
-            if label == next {
-                next += 1;
-            }
-            Ok(label)
-        })
-        .collect()
 }
 
 pub enum RawArg {

@@ -54,6 +54,7 @@ enum Bound {
         hash: String,
         values: Vec<Bound>,
         oracle_invocation: Option<Json>,
+        oracle_identity: Option<u64>,
     },
     Region {
         address: usize,
@@ -112,6 +113,7 @@ pub struct Bindings {
     replaying_cleanup: bool,
     oracle_address: Option<Rc<address::OracleAddress>>,
     oracle_invocation: Option<Json>,
+    oracle_identity: Option<u64>,
     row_spaces: Vec<address::RowSpace>,
     coordinate: crate::sched::Coordinate,
     cleanup: cleanup::CleanupContext,
@@ -408,7 +410,7 @@ impl Catalog {
             }
             self.walk(field(c, "body")?, &mut local, out, next, active)?;
         } else if let Some(token) = c.get("$oracle_invocation") {
-            let Some(Bound::Value(value, ty, _)) = env.values.get(string(token)?) else {
+            let Some(Bound::Value(value, ty, identity)) = env.values.get(string(token)?) else {
                 return Err(err("unbound oracle_invocation source token"));
             };
             if ty.as_str() != Some("token") {
@@ -416,6 +418,7 @@ impl Catalog {
             }
             let mut local = env.clone();
             local.oracle_invocation = Some(Json::obj(vec![("token", value.clone())]));
+            local.oracle_identity = *identity;
             self.walk(field(c, "body")?, &mut local, out, next, active)?;
         } else if let Some(target) = c.get("$history_target") {
             let name = string(field(target, "target")?)?;
@@ -866,6 +869,7 @@ impl Catalog {
                 hash: bound,
                 values,
                 oracle_invocation,
+                oracle_identity,
             }) = args.as_str().and_then(|n| env.values.get(n))
             {
                 if bound != &hash {
@@ -878,10 +882,12 @@ impl Catalog {
                     .map(|(f, v)| Ok((string(field(f, "name")?)?.into(), v.clone())))
                     .collect::<Result<_, String>>()?;
                 bindings.oracle_invocation = oracle_invocation.clone();
+                bindings.oracle_identity = *oracle_identity;
                 bindings
             } else {
                 let mut bindings = bind_formals(&formals, arr(args)?, env, &Bindings::new())?;
                 bindings.oracle_invocation = env.oracle_invocation.clone();
+                bindings.oracle_identity = env.oracle_identity;
                 bindings
             };
             callee.registry = Some(registry.clone());
@@ -1275,6 +1281,7 @@ fn bind_formals(
                     hash: bound,
                     values,
                     oracle_invocation,
+                    oracle_identity,
                 }) = a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if bound != hash {
@@ -1284,6 +1291,7 @@ fn bind_formals(
                         hash: hash.clone(),
                         values: values.clone(),
                         oracle_invocation: oracle_invocation.clone(),
+                        oracle_identity: *oracle_identity,
                     }
                 } else {
                     let name = registry.name(hash)?;
@@ -1310,6 +1318,7 @@ fn bind_formals(
                         hash: hash.clone(),
                         values,
                         oracle_invocation,
+                        oracle_identity: outer.oracle_identity,
                     }
                 }
             }

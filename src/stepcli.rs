@@ -48,10 +48,7 @@ fn inputs(obj: &Object, name: &str, o: &cliargs::Opts, budget: &Budget) -> Resul
         return Err("§5.1: unknown interface region".into());
     }
     let mut args = crate::qcli::bind_args(obj, &sig.args, &o.all("arg"), budget)?;
-    if obj.isa == "0.9" {
-        let aliases = crate::token_aliases::parse(o.one("token-aliases")?)?;
-        crate::token_aliases::bind(&mut args, Some(*budget), aliases.as_ref())?;
-    }
+    crate::token_aliases::bind_cli(obj, &mut args, Some(*budget), o.one("token-aliases")?)?;
     Ok(Inputs { mem, args, fixed })
 }
 fn budget(obj: &Object, o: &cliargs::Opts, n: u64) -> Result<Budget, String> {
@@ -70,6 +67,7 @@ pub fn reverse(args: &[String]) -> Result<(), String> {
         return Err("reverse needs <object> <oracle>".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let budget = budget(&obj, &o, 1_000_000)?;
     let inp = inputs(&obj, name, &o, &budget)?;
@@ -169,6 +167,7 @@ pub fn check(args: &[String]) -> Result<(), String> {
         return Err("step-check needs exactly one MODE".into());
     }
     let (obj, _) = crate::load(&cliargs::read_object(&o.positional[0])?, false)?;
+    crate::require_linked(&obj)?;
     let name = cliargs::entry_name(&o.positional[1]);
     let f = obj.function(name).ok_or("§5.2: unknown oracle")?;
     let sig = crate::validate::oracle_sig(&obj, name)?;

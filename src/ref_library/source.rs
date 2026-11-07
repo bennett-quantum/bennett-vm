@@ -104,6 +104,7 @@ impl Catalog {
     ) -> Result<ActionExpansion, String> {
         self.lower_action_with_token_aliases(object, name, params, adjoint, inherited_controls, entries, None)
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn lower_action_with_token_aliases(
         &self,
         object: &Object,
@@ -128,6 +129,11 @@ impl Catalog {
         }
         let types = f.lists[3].iter().map(|p| p.ty.clone()).collect::<Vec<_>>();
         let mut values = crate::invocation::decode_args(params, &types, object.ptr_width)?;
+        for value in &values {
+            if let crate::value::Value::Token(budget) = value {
+                crate::cliargs::validate_budget(object, budget)?;
+            }
+        }
         crate::token_aliases::bind(&mut values, None, aliases)?;
         env.cleanup.entries = Rc::new(entries.to_vec());
         for p in f.lists[0].iter().chain(&f.lists[1]) {
@@ -2579,10 +2585,9 @@ impl Source {
         if let Some(Bound::Value(value, _, identity)) = env.values.get(operand) {
             return Json::Arr(vec![value.clone(), identity.map_or(Json::Null, Json::u64)]);
         }
-        if operand.starts_with('(') && operand.ends_with(')') {
-            if let Ok(names) = crate::validate::list_operand(operand) {
-                return Json::Arr(names.iter().map(|n| Self::operand_identity(n, env)).collect());
-            }
+        if operand.starts_with('(') && operand.ends_with(')')
+            && let Ok(names) = crate::validate::list_operand(operand) {
+            return Json::Arr(names.iter().map(|n| Self::operand_identity(n, env)).collect());
         }
         text(operand)
     }

@@ -47,6 +47,13 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+pub fn require_linked(obj: &object::Object) -> Result<(), String> {
+    if !obj.imports.is_empty() {
+        return Err("§9.3: object has unresolved imports; link before execution".into());
+    }
+    Ok(())
+}
+
 /// Parse, validate and (unless `hash_only`) verify stored hashes.
 /// This is the `bennett_load` front half used by every CLI command.
 pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Identities), String> {

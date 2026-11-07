@@ -1,5 +1,6 @@
 //! Source-formed K64 constructors and K65 lifted cleanup choices.
 use crate::source09 as support;
+use bennett_vm::json::Json;
 use bennett_vm::{
     json::{self},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},
@@ -17,7 +18,7 @@ fn source_constructor_lifted_pair_has_one_nonemitting_carrier_per_step_phase() {
     for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
         let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
         let e = catalog
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
@@ -96,7 +97,7 @@ fn controlled_reverse_and_recompute_constructors_restore_every_private_bit() {
         for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
             let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:2","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
             let e = catalog
-                .lower_oracle_with_cleanup(
+                .lower_oracle_fixture(
                     &obj,
                     "root",
                     &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
@@ -158,7 +159,7 @@ fn source_constructor_rejects_bad_pairs_and_invalid_context_before_selection() {
             let ids = bennett_vm::identity::compute(&obj).unwrap();
             let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"*","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
             let error = catalog
-                .lower_oracle_with_cleanup(
+                .lower_oracle_fixture(
                     &obj,
                     "root",
                     &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
@@ -189,7 +190,7 @@ fn source_constructor_rejects_bad_pairs_and_invalid_context_before_selection() {
     ] {
         assert!(
             catalog
-                .lower_oracle_with_cleanup(
+                .lower_oracle_fixture(
                     &obj,
                     "root",
                     &json::parse("[]").unwrap(),
@@ -213,7 +214,7 @@ fn nested_oracle_carriers_keep_last_oracle_step_and_fresh_call_ownership() {
         // The middle's uncall still has an explicit predicated carrier.
         let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"])).unwrap();
         let e = catalog
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
@@ -292,7 +293,7 @@ fn source_rows_preserve_assignment_capture_widths_and_branch_successors() {
     for rows in programs {
         let (obj, _) = bennett_vm::load(&support::source(&format!("oracle @root (x:wire[2] in, y:wire[2] in, p:wire in) (t:wire[2]) (f:wire[4]) () ()\nregs {{ a:reg[2], b:reg[1], c:reg[2], d:reg[2], r:reg[2] }}\n^entry():\n{rows}")), false).unwrap();
         let e = catalog
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse("[]").unwrap(),
@@ -351,7 +352,7 @@ fn nested_constructor_keeps_fixed_classical_values_separate_from_readable_bits()
     let catalog = Catalog::published().unwrap();
     for a in 0..2 {
         let e = catalog
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse(&format!(r#"[["1","0","0","0"],"{a}"]"#)).unwrap(),
@@ -385,7 +386,7 @@ fn action_oracle_calls_capture_each_source_token_under_controls_and_adjoints() {
         for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
             let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:1","iteration":"*","call_index":0}},{{"symbol":"{}","point":"entry:1","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#, ids.interface["root"], ids.interface["outer"])).unwrap();
             let e = catalog
-                .lower_action_with_cleanup(
+                .lower_action_with_token_aliases(
                     &obj,
                     "root",
                     &json::parse(r#"[["0","0","0","0"],["3","0","0","0"]]"#).unwrap(),
@@ -395,6 +396,7 @@ fn action_oracle_calls_capture_each_source_token_under_controls_and_adjoints() {
                         selector: Selector::parse(&selector).unwrap(),
                         realisation: choice,
                     }],
+                    Some(&json::parse("[0,1]").unwrap()),
                 )
                 .unwrap();
             // B=0 emits no steps/carriers, B=3 emits one carrier per step/phase.
@@ -451,7 +453,7 @@ fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
     let catalog = Catalog::published().unwrap();
     let params = json::parse(r#"[["1","0","0","0"]]"#).unwrap();
     let reverse = catalog
-        .lower_action_with_cleanup(&obj, "root", &params, false, 0, &[])
+        .lower_action_with_token_aliases(&obj, "root", &params, false, 0, &[], Some(&json::parse("[0]").unwrap()))
         .unwrap();
     assert!(reverse.cleanup_pairing_complete);
     for bits in 0..256 {
@@ -468,7 +470,7 @@ fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
         assert_eq!(replay(&reverse.leaves, state.clone()), state);
     }
     let selector = json::parse(&format!(r#"{{"path":[{{"symbol":"{}","point":"entry:3","iteration":"*"}}],"step":"*","phase":"*","generated":0}}"#,ids.interface["root"])).unwrap();
-    let error = match catalog.lower_action_with_cleanup(
+    let error = match catalog.lower_action_with_token_aliases(
         &obj,
         "root",
         &params,
@@ -478,6 +480,7 @@ fn action_oracle_outputs_invalidate_earlier_external_input_versions() {
             selector: Selector::parse(&selector).unwrap(),
             realisation: CleanupRealisation::Recompute,
         }],
+        Some(&json::parse("[0]").unwrap()),
     ) {
         Err(error) => error,
         Ok(_) => panic!("recompute silently substituted a later external input version"),
@@ -528,7 +531,7 @@ fn assert_map_choice(
         })
         .collect::<Vec<_>>();
     let e = catalog
-        .lower_oracle_with_cleanup(&obj, "root", &parameters, &context, 0, &entries)
+        .lower_oracle_fixture(&obj, "root", &parameters, &context, 0, &entries)
         .unwrap();
     if let Some(choice) = choice {
         assert!(e.cleanup_pairing_complete);
@@ -615,7 +618,7 @@ fn mapped_memory_lifted_cleanup_preserves_interface_cells_for_both_choices() {
     for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
         let e = Catalog::published()
             .unwrap()
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse(r#"[["3","0","0","0"]]"#).unwrap(),
@@ -689,7 +692,7 @@ fn lproc_lifted_uncall_carriers_keep_fixed_instance_keys_for_both_choices() {
     for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
         let e = Catalog::published()
             .unwrap()
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &obj,
                 "root",
                 &json::parse(r#"[["1","0","0","0"],"1","0"]"#).unwrap(),
@@ -829,7 +832,7 @@ fn indirect_pair_carriers_execute_computed_cycles_under_controls_and_adjoints() 
         for choice in [CleanupRealisation::Reverse, CleanupRealisation::Recompute] {
             let e = Catalog::published()
                 .unwrap()
-                .lower_oracle_with_cleanup(
+                .lower_oracle_fixture(
                     &obj,
                     "outer",
                     &json::parse(r#"[["1","0","0","0"]]"#).unwrap(),
@@ -1088,7 +1091,7 @@ fn value_row_descriptors_match_the_reference_over_complete_small_inputs() {
             std::env::temp_dir().join(format!("oracle-row-{name}-{}.bisa", std::process::id()));
         std::fs::write(&path, reference_text).unwrap();
         let expanded = catalog
-            .lower_oracle_with_cleanup(
+            .lower_oracle_fixture(
                 &object,
                 "root",
                 &json::parse("[]").unwrap(),
@@ -1218,5 +1221,23 @@ fn fixed_pseudo_values_preserve_complete_integer_pointer_and_f64_bits() {
         );
         assert!(outcome.code.is_zero());
         assert_map(&text, &parameters, [2, 0, 0, 0], &[("x", 1)], 2);
+    }
+}
+
+// §12.3 K91: generated tuple-only fixtures choose distinct primary/argument identities.
+trait OracleFixture {
+    #[allow(clippy::too_many_arguments)]
+    fn lower_oracle_fixture(&self, object: &bennett_vm::object::Object, name: &str,
+        params: &Json, context: &Json, controls: usize, entries: &[CleanupEntry])
+        -> Result<bennett_vm::ref_library::ActionExpansion, String>;
+}
+impl OracleFixture for Catalog {
+    fn lower_oracle_fixture(&self, object: &bennett_vm::object::Object, name: &str,
+        params: &Json, context: &Json, controls: usize, entries: &[CleanupEntry])
+        -> Result<bennett_vm::ref_library::ActionExpansion, String> {
+        let count = object.function(name).unwrap().lists[4].iter()
+            .filter(|p| p.ty == bennett_vm::object::Type::Token).count() + 1;
+        let aliases = Json::Arr((0..count).map(|n| Json::u64(n as u64)).collect());
+        self.lower_oracle_with_token_aliases(object, name, params, context, controls, entries, Some(&aliases))
     }
 }

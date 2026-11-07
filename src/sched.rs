@@ -746,6 +746,7 @@ pub struct Bindings<'a> {
     pub inherited_controls: u32,
     pub budget: [u64; 4],
     pub params: &'a Json,
+    pub token_aliases: Option<&'a Json>,
     pub epsilon: &'a R,
 }
 pub fn consume(
@@ -768,6 +769,7 @@ pub fn consume(
                 "inherited_controls",
                 "budget",
                 "params_hash",
+                "token_aliases",
                 "epsilon",
                 "expansion",
                 "scheduler",
@@ -818,7 +820,23 @@ pub fn consume(
                 string(field(expansion, k)?)?;
             }
         }
-        require_library(binding.get("expansion"))
+        if object.isa == "0.9" {
+            let invocation = Json::obj(vec![
+                ("args", b.params.clone()),
+                ("budget", Json::Arr(b.budget.iter().map(|n| Json::Str(n.to_string())).collect())),
+            ]);
+            let mut invocation = invocation;
+            if let (Some(aliases), Json::Obj(fields)) = (b.token_aliases, &mut invocation) {
+                fields.insert("token_aliases".into(), aliases.clone());
+            }
+            crate::invocation::resolve(object, b.region, &invocation)?;
+            let f = object.function(b.region).ok_or_else(|| error("unknown region"))?;
+            let default = if f.kind == crate::object::FnKind::Oracle { Json::Arr(vec![Json::u64(0)]) } else { Json::Arr(vec![]) };
+            if binding.get("token_aliases").unwrap_or(&default) != b.token_aliases.unwrap_or(&default) {
+                return Err(error("K91: binding token_aliases mismatch"));
+            }
+        }
+        require_library_version(binding.get("expansion"), &object.isa)
     };
     check().map_err(|s| {
         if s.contains("E_SCHEDULE_INFEASIBLE") {

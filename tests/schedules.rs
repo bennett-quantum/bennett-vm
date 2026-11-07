@@ -168,6 +168,7 @@ fn all_schedule_bindings_are_checked_before_consumption() {
         inherited_controls: 0,
         budget: [3, 0, 0, 0],
         params: &params,
+        token_aliases: None,
         epsilon: &epsilon,
     };
     let binding = Json::obj(vec![

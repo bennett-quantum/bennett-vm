@@ -2,7 +2,7 @@ use super::Frame;
 
 impl Clone for Frame {
     fn clone(&self) -> Self {
-        crate::execution_work::record(crate::execution_work::Operation::PayloadClone, 1);
+        crate::execution_work::payload_clone();
         Self {
             classes_before: self.classes_before.clone(),
             classes_after: self.classes_after.clone(),

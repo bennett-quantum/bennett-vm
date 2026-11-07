@@ -168,6 +168,11 @@ fn installed_target_prefix_work_stays_within_twice_the_initial_work() {
         // Measured 15 retained-value clones per append at 20k rows on the
         // same machine/date; immutable retained Frame/Json values now need zero.
         assert_eq!(work.payload_clones, 0, "retained Frame/Json payload copies");
+        // Forward checkpoints only share the immutable event history.
+        assert_eq!(
+            work.target_history_copies, 0,
+            "retained target event copies"
+        );
         let first = *initial.get_or_insert(work);
         for (name, before, after) in [
             ("map nodes", first.map_nodes, work.map_nodes),
@@ -342,6 +347,11 @@ fn classical_accounting_comparisons_stay_within_twice_the_initial_work() {
                 .unwrap()
                 .as_str(),
             Some("0")
+        );
+        // Empty wire sets have no possible wire-dependency predecessor.
+        assert_eq!(
+            work.accounting_comparisons, 0,
+            "wire-free predecessor comparisons"
         );
         let first = *initial.get_or_insert(work.accounting_comparisons);
         assert_flat(

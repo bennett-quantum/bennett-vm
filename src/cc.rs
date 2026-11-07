@@ -2051,7 +2051,7 @@ impl Data {
         // Handle IDs are never recycled across host-visible calls.
     }
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ResourceKey {
     Allocator,
     Entry(BigUint),
@@ -2059,6 +2059,7 @@ pub(crate) enum ResourceKey {
     Device(String),
 }
 impl ResourceKey {
+    #[cfg(test)]
     pub(crate) fn overlaps(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Memory(a, b), Self::Memory(c, d)) => a < d && c < b,

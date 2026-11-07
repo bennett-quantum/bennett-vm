@@ -117,3 +117,500 @@ patterns. This job cannot edit those paths. README now documents the actual
 pinned test layout and gate rather than the obsolete live-sibling overrides
 or earlier release-gate procedure. The remaining tracked files are counted
 as baseline exceptions, not described as removed.
+
+The local ratchet is one small stdlib-only script, `scripts/quality.py`.
+It scans Rust functions after blanking strings and nested comments, records
+cumulative function-length buckets (>25, >100, >300) and maximum length per
+file, and pairs them with a count of trivial call wrappers (at most three
+nonblank body lines, a call, no control-flow keyword). `branch_mass` is the
+repository's cognitive-complexity proxy: each if/else/for/while/loop/match,
+logical conjunction/disjunction and match arm scores one plus its enclosing
+brace depth beyond the outer scope. It is a structural estimate, not a claim
+of an external analyser's score. Definitions stay fixed across measurements.
+
+The one gate check runs the script's parser/mutation tests and rejects any
+per-file increase, new wrapper, new litter path or increased source identifier
+count. It compares only against this repository's recorded baseline. The
+mutation tests independently add a branch, a trivial wrapper and hygiene
+litter, and require each regression to be detected. Raw-string braces and
+nested comments have parser tests. Intentional future baseline changes need
+review alongside their source changes; `--record` writes the snapshot below.
+
+Reproducible hygiene searches:
+
+~~~sh
+rg -n 'bennett-vm-|b-isa-spec-|milestone[ -][0-9]|shift [0-9]|quality-vm' src
+git ls-files | rg '(__pycache__|[.]pyc$|[.]log$|LOCK$|[.]backup$|[.]darc$|PROGRESS|LAST-RUN)'
+~~~
+
+The first search has no matches; the second lists only the two scoped
+exceptions above. Full machine-readable per-file distribution/mass follows.
+
+<!-- quality-baseline -->
+```json
+{
+  "files": {
+    "src/action.rs": {
+      "branch_mass": 1220,
+      "max_lines": 202,
+      "over_100": 5,
+      "over_25": 27,
+      "over_300": 0,
+      "trivial_wrappers": 9
+    },
+    "src/action/allocation_bindings.rs": {
+      "branch_mass": 200,
+      "max_lines": 91,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/bigint.rs": {
+      "branch_mass": 148,
+      "max_lines": 23,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 11
+    },
+    "src/call_matching.rs": {
+      "branch_mass": 69,
+      "max_lines": 71,
+      "over_100": 0,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/cc.rs": {
+      "branch_mass": 1342,
+      "max_lines": 415,
+      "over_100": 5,
+      "over_25": 25,
+      "over_300": 2,
+      "trivial_wrappers": 28
+    },
+    "src/certificate.rs": {
+      "branch_mass": 485,
+      "max_lines": 164,
+      "over_100": 3,
+      "over_25": 13,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/cleanup_discipline.rs": {
+      "branch_mass": 449,
+      "max_lines": 151,
+      "over_100": 1,
+      "over_25": 9,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/cliargs.rs": {
+      "branch_mass": 157,
+      "max_lines": 33,
+      "over_100": 0,
+      "over_25": 5,
+      "over_300": 0,
+      "trivial_wrappers": 4
+    },
+    "src/coherent_typing.rs": {
+      "branch_mass": 367,
+      "max_lines": 211,
+      "over_100": 1,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/device.rs": {
+      "branch_mass": 4,
+      "max_lines": 12,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/estimate.rs": {
+      "branch_mass": 19,
+      "max_lines": 36,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/exact.rs": {
+      "branch_mass": 236,
+      "max_lines": 76,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 11
+    },
+    "src/identity.rs": {
+      "branch_mass": 330,
+      "max_lines": 88,
+      "over_100": 0,
+      "over_25": 12,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/instances.rs": {
+      "branch_mass": 393,
+      "max_lines": 99,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/interval.rs": {
+      "branch_mass": 107,
+      "max_lines": 66,
+      "over_100": 0,
+      "over_25": 7,
+      "over_300": 0,
+      "trivial_wrappers": 4
+    },
+    "src/invocation.rs": {
+      "branch_mass": 52,
+      "max_lines": 42,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/jit.rs": {
+      "branch_mass": 481,
+      "max_lines": 176,
+      "over_100": 1,
+      "over_25": 8,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/json.rs": {
+      "branch_mass": 481,
+      "max_lines": 76,
+      "over_100": 0,
+      "over_25": 5,
+      "over_300": 0,
+      "trivial_wrappers": 5
+    },
+    "src/launch.rs": {
+      "branch_mass": 348,
+      "max_lines": 71,
+      "over_100": 0,
+      "over_25": 12,
+      "over_300": 0,
+      "trivial_wrappers": 18
+    },
+    "src/lib.rs": {
+      "branch_mass": 9,
+      "max_lines": 18,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/lifted_typing.rs": {
+      "branch_mass": 259,
+      "max_lines": 128,
+      "over_100": 1,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/link.rs": {
+      "branch_mass": 151,
+      "max_lines": 125,
+      "over_100": 2,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/main.rs": {
+      "branch_mass": 31,
+      "max_lines": 33,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/object.rs": {
+      "branch_mass": 680,
+      "max_lines": 170,
+      "over_100": 3,
+      "over_25": 13,
+      "over_300": 0,
+      "trivial_wrappers": 6
+    },
+    "src/opcode.rs": {
+      "branch_mass": 228,
+      "max_lines": 33,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/oracle.rs": {
+      "branch_mass": 890,
+      "max_lines": 263,
+      "over_100": 5,
+      "over_25": 13,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/persistent.rs": {
+      "branch_mass": 257,
+      "max_lines": 68,
+      "over_100": 0,
+      "over_25": 6,
+      "over_300": 0,
+      "trivial_wrappers": 30
+    },
+    "src/qcli.rs": {
+      "branch_mass": 133,
+      "max_lines": 200,
+      "over_100": 1,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/qreg_typing.rs": {
+      "branch_mass": 154,
+      "max_lines": 72,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/qvalidate.rs": {
+      "branch_mass": 974,
+      "max_lines": 334,
+      "over_100": 4,
+      "over_25": 13,
+      "over_300": 1,
+      "trivial_wrappers": 1
+    },
+    "src/rational.rs": {
+      "branch_mass": 157,
+      "max_lines": 33,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/ref_library.rs": {
+      "branch_mass": 1238,
+      "max_lines": 220,
+      "over_100": 8,
+      "over_25": 15,
+      "over_300": 0,
+      "trivial_wrappers": 10
+    },
+    "src/ref_library/action_support.rs": {
+      "branch_mass": 53,
+      "max_lines": 55,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/ref_library/address.rs": {
+      "branch_mass": 27,
+      "max_lines": 33,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/ref_library/call_domains_tests.rs": {
+      "branch_mass": 18,
+      "max_lines": 175,
+      "over_100": 1,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 2
+    },
+    "src/ref_library/calls.rs": {
+      "branch_mass": 13,
+      "max_lines": 51,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 2
+    },
+    "src/ref_library/cleanup.rs": {
+      "branch_mass": 66,
+      "max_lines": 108,
+      "over_100": 2,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/ref_library/named_interface.rs": {
+      "branch_mass": 197,
+      "max_lines": 132,
+      "over_100": 1,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/ref_library/named_interface_tests.rs": {
+      "branch_mass": 31,
+      "max_lines": 36,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/ref_library/oracle_bindings_tests.rs": {
+      "branch_mass": 85,
+      "max_lines": 56,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 6
+    },
+    "src/ref_library/oracle_cleanup.rs": {
+      "branch_mass": 146,
+      "max_lines": 124,
+      "over_100": 1,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/ref_library/oracle_direct.rs": {
+      "branch_mass": 25,
+      "max_lines": 150,
+      "over_100": 1,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/ref_library/oracle_memory.rs": {
+      "branch_mass": 107,
+      "max_lines": 138,
+      "over_100": 2,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/ref_library/oracle_paths.rs": {
+      "branch_mass": 211,
+      "max_lines": 227,
+      "over_100": 1,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/ref_library/oracle_procedures.rs": {
+      "branch_mass": 197,
+      "max_lines": 136,
+      "over_100": 2,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/ref_library/oracle_source.rs": {
+      "branch_mass": 337,
+      "max_lines": 273,
+      "over_100": 2,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/ref_library/source.rs": {
+      "branch_mass": 2012,
+      "max_lines": 359,
+      "over_100": 8,
+      "over_25": 19,
+      "over_300": 1,
+      "trivial_wrappers": 5
+    },
+    "src/ref_library/source/partition.rs": {
+      "branch_mass": 254,
+      "max_lines": 166,
+      "over_100": 1,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/sched.rs": {
+      "branch_mass": 362,
+      "max_lines": 95,
+      "over_100": 0,
+      "over_25": 9,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/sched_abi.rs": {
+      "branch_mass": 38,
+      "max_lines": 62,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 5
+    },
+    "src/sha256.rs": {
+      "branch_mass": 21,
+      "max_lines": 15,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
+    "src/step.rs": {
+      "branch_mass": 699,
+      "max_lines": 197,
+      "over_100": 4,
+      "over_25": 8,
+      "over_300": 0,
+      "trivial_wrappers": 9
+    },
+    "src/stepcli.rs": {
+      "branch_mass": 70,
+      "max_lines": 129,
+      "over_100": 1,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/target.rs": {
+      "branch_mass": 730,
+      "max_lines": 185,
+      "over_100": 3,
+      "over_25": 12,
+      "over_300": 0,
+      "trivial_wrappers": 4
+    },
+    "src/typing.rs": {
+      "branch_mass": 640,
+      "max_lines": 352,
+      "over_100": 1,
+      "over_25": 1,
+      "over_300": 1,
+      "trivial_wrappers": 2
+    },
+    "src/validate.rs": {
+      "branch_mass": 1136,
+      "max_lines": 260,
+      "over_100": 7,
+      "over_25": 21,
+      "over_300": 0,
+      "trivial_wrappers": 7
+    },
+    "src/value.rs": {
+      "branch_mass": 224,
+      "max_lines": 55,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    }
+  },
+  "litter": [
+    ".beads/hooks/pre-push.backup",
+    "docs/PROGRESS.md"
+  ],
+  "process_identifiers": {}
+}
+```

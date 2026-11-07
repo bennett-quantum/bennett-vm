@@ -16,6 +16,10 @@ argv = ["cargo", "test", "--offline", "-j3", "--", "--test-threads=4"]
 name = "slow and published-oracle tests"
 argv = ["cargo", "test", "--offline", "-j3", "--", "--ignored", "--test-threads=4"]
 
+[[check]]
+name = "quality baseline"
+argv = ["python3", "scripts/quality.py"]
+
 [siblings."bennett-isa-spec"]
 sha = "fd626d37aba1f719c3b7b2059be46cbfaf462886"
 note = "ISA main with published K83 fixtures and accepted ISA 0.9 repairs (shift 4)"
@@ -25,12 +29,12 @@ name = "reference interpreter (debug)"
 cwd = "reference-interpreter"
 argv = ["cargo", "build", "--offline"]
 outputs = ["reference-interpreter/target/debug/bennett-isa-ref"]
-env = { CARGO_BUILD_JOBS = "4" }
+env = { CARGO_BUILD_JOBS = "3" }
 
 [[siblings."bennett-isa-spec".build]]
 name = "published conformance harness (debug)"
 cwd = "conformance"
 argv = ["cargo", "build", "--offline"]
 outputs = ["conformance/target/debug/bennett-isa-conformance"]
-env = { CARGO_BUILD_JOBS = "4" }
+env = { CARGO_BUILD_JOBS = "3" }
 

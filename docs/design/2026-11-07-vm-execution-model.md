@@ -9,8 +9,17 @@ source citations below mean **d68eb76** unless another SHA is given. `REF` means
 **62a0cf0**. The latter adds K94 after the VM's gate pin; its relevant CC/R memory,
 history and launch rules are unchanged apart from line offsets. These versions
 must remain explicit: `gate.toml:23-32` pins the oracle to 3b10907, not sibling
-HEAD. The proposal is authorized by R37, recorded in
-`bennett/.tmp/orchestrator/advisor-notes.md:442-456`.
+HEAD. The proposal is authorized by R37 and amended by R40: acceptance counts
+deterministic work; elapsed time cannot make a performance test red
+(`bennett/.tmp/orchestrator/advisor-notes.md:442-456,476-481`;
+`bennett/.tmp/orchestrator/briefs/COMMON.md`, final bullet).
+
+Evidence comments use `job/r3-vm-stepping/<file>` for supplied files under
+`/home/tobias/Projects/bennett-workspace/bennett-vm-job-r3/.tmp/r3-vm-stepping/`.
+Their head, host and date identify the reported measurement, not a measurement
+performed by this research job. Source line numbers, ISA widths and review-round
+policy counts are citations/semantic or policy units, not fitted performance
+constants (`briefs/COMMON.md`, final bullet).
 
 The reference's important distinction is **current execution state versus retained
 undo records**. `ClassicalMachine` owns its current snapshot, a `Vec<HistoryFrame>`,
@@ -109,30 +118,38 @@ the event list; this is not a general proof that all quantum accounting is linea
 (`8a68da4:src/persistent.rs:5-18,104-150`;
 `8a68da4:src/target.rs:915-943,963-978`).
 
-Use the supplied measurements, without re-measuring them here. The fix job reports
-prefix per-step growth of 1.314× from 500 to 15,000 rows and a final same-CPU
-release pair: **225,956 steps**, reference **1.418830 s**, VM process
-**6.948585 s** (4.897404×), VM execution **3.010474 s**, snapshot **2.891278 s**.
-Execution/reference wall is about 2.12×, but its timing boundaries differ from the
-process comparison. These are one supplied pair, not a distribution or a new
-result from this document
-(`bennett-vm-job-r3/.tmp/r3-vm-stepping/PROGRESS.md:13-20`, head **8a68da4**).
-
-R37's “~100×” and “200 us vs 8 us” are advisor hypotheses, not mutually consistent
-arithmetic: those two per-step numbers imply about **25×**. Do not use either as
-the post-fix baseline. Its candidate list remains useful for investigation
-(`bennett/.tmp/orchestrator/advisor-notes.md:442-456`). The earlier profiles show
+Use the supplied measurements, without re-measuring them here. The unchanged
+object executes **225,956 logical rows**. <!-- Measurement: job/r3-vm-stepping/PROGRESS.md:18, head 8a68da4; machine: this 12-core host; date: 2026-11-07. -->
+One supplied same-CPU release pair has an **informational process-time ratio of
+4.897404×**. <!-- Measurement: job/r3-vm-stepping/PROGRESS.md:18, head 8a68da4; machine: this 12-core host; date: 2026-11-07. -->
+This is neither a work ratio nor a performance acceptance result under R40; it
+cannot calibrate a work ceiling. Prefix timing, CPU timing and profile percentages
+likewise do not count map operations, allocations or bytes. The earlier profiles show
 event-vector/Rational copying and allocator work; the later debug profile includes
 JSON subtree cloning. They precede the final shared-payload change and cannot rank
 the residual costs at 8a68da4
 (`bennett-vm-job-r3/.tmp/r3-vm-stepping/perf-report.txt:13-78`,
 `full-debug-perf.txt:13-38`; **8a68da4**).
 
+The deterministic retained-payload counter is relevant work evidence: appending
+behind the retained root made **15 payload clones** before the fix and
+**zero** afterward at the measured retained-prefix sizes.
+<!-- Measurement: job/r3-vm-stepping/value-sharing-red.txt at head 4b67661 and value-fix.txt at head 8a68da4; machine: this 12-core host; date: 2026-11-07. -->
+This proves the measured collection invariant, not a whole-VM/reference work bound
+(`8a68da4:src/persistent.rs:474-495`; fix-job `PROGRESS.md:9,16`).
+
 In particular the strike-force README's “no target” premise is refuted by the
 reported original harness `tests/varargs.py:140-144` and the target-installed
 fixture at **8a68da4**, `tests/step_scaling.rs:38-48`. The static reports disagree
-on locks; the fix job says locks were below its 1% profile threshold and unchanged.
-Treat all three reports as hypotheses rather than fresh measurements
+on locks. Later diagnostic instrumentation at unchanged head **8a68da4** counts
+**31,334,051 conflict-owner entry visits** and **1,625,740 duplicate-key entry
+visits** over that same complete object; the candidate overlap function is never
+called in the single-owner run.
+<!-- Measurement: job/r3-vm-stepping/r37/locks.txt and PROGRESS.md:27-31, production head 8a68da4 with temporary diagnostic instrumentation; machine: this 12-core host; date: 2026-11-07. -->
+Those counts are an actual work baseline. They refute a history-proportional lock
+cardinality claim for this object; they do not measure multi-owner contention or
+make the vector scan a dominant cost. Treat all three static reports as hypotheses
+rather than fresh measurements
 (`bennett/.tmp/orchestrator/vm-8f3/README.md:1-20`,
 `step-engine.md:9-19`; fix-job `PROGRESS.md:7-10`).
 
@@ -195,9 +212,12 @@ its helper validates a returned successor by scanning nodes. The latter scan is
 on continuing `drive` calls, not the one-row callback returning `None`. Re-entering
 native dispatch for every ABI row can still be expensive. These source paths do
 not justify claiming that enabling JIT solves memory/history/launch overhead
-(`src/jit.rs:389-425,613-625,643-658`). No paired JIT measurement was supplied with
-the final 8a68da4 evidence; R37 requests one from the fix lane, and this research
-job does not manufacture it (`advisor-notes.md:453-456`; fix-job `PROGRESS.md:10`).
+(`src/jit.rs:389-425,613-625,643-658`). Later supplied paired runs in
+`job/r3-vm-stepping/r37/engine-results.json`, production head **8a68da4**, on this
+12-core host, dated **2026-11-07**, report matching completion, results, console,
+row count and target charges for interpreter and JIT. Their elapsed timings are
+informational; no JIT dispatch-operation or reference work ratio was measured.
+Those missing counters remain in §6 (`advisor-notes.md:453-456`).
 
 ## 5. Proposed slices, in dependency order
 
@@ -215,6 +235,8 @@ reversal; deterministic replay**, plus existing VM API behavior. For every slice
 
 - Compare status, values, exact fault code/point, logical rows/instances, host
   transcript, active tape, devices and target time using the same object and inputs.
+  Target time is the ISA's counted classical-step/scheduled-event charge, not
+  measured host duration (`ISA:1905-1928`).
   Run both engines in fresh processes because selection is cached. Current
   differential checks compare every JSON field except implementation-specific
   digest encodings (`tests/differential.rs:479-527`; `src/jit.rs:78-80`).
@@ -229,28 +251,69 @@ reversal; deterministic replay**, plus existing VM API behavior. For every slice
   during reversal or history reconstruction (`tests/saved_tape.rs:135-229,268-290`;
   `REF/src/main.rs:626-660`; `ISA:1784-1795`).
 
-### Ratios, timing boundaries and complexity
+### Work ratios, evidence and complexity
 
-The final target is **VM/reference <=5× per executed row** on the unchanged
-225,956-row, target-installed 8f3 object. Retain both an execution-only ratio and
-the conservative whole-worker ratio including the requested final snapshot;
-neither may hide work by omitting output. Reuse **8a68da4**'s same-permitted-CPU,
-fresh-oracle-then-worker process method, but require matched release/release
-profiles for the 5× comparison. Its checked-in test uses a debug oracle and a
-10× timeout: merely changing its constant is neither a fair release comparison
-nor an assured red test (`8a68da4:tests/step_scaling.rs:38-48,83-128,147-231`;
-fix-job `PROGRESS.md:17-18`).
+The final target is a **bounded VM/reference work ratio per logical row** on the
+unchanged target-installed object. This replaces the former elapsed-time ceiling;
+it does not reinterpret an observed time multiple as measured operations. No
+numerical VM/reference work ceiling is asserted before the missing paired
+counter measurement in §6. The previous numerical factor cannot be asserted in
+work units from timings alone. Existing timing tests at **8a68da4** are historical
+evidence, not the proposed R40 acceptance mechanism
+(`8a68da4:tests/step_scaling.rs:38-48,83-128,147-231`;
+`advisor-notes.md:476-481`).
 
-Define `Rscale = (T(15000)/15000)/(T(500)/500)` on equal-work rows, keeping the
-5,000-row midpoint, and require `Rscale <=2` throughout. Also use 10× history
-growth on a fixed-operation microfixture; growth of the *retained prefix* must
-not raise ordinary-step bookkeeping work. Repeated same-CPU pairs and medians
-reduce noise; output/type/target assertions run in every timed worker. For a
-count ratio with a possibly empty denominator use `max(1, denominator)`.
-These are proposed tests; none was executed for this note. The existing 5×
-whole-worker target already passed once at 4.897404×, so a slice's red-first test
-must expose its own cost rather than claiming that existing passing bound is red
-(`8a68da4:tests/step_scaling.rs:119-128,147-231`; fix-job `PROGRESS.md:18`).
+Define a vector `W` of named, separately counted work units: allocation requests,
+allocated payload bytes, key/node comparisons, path-copy nodes, payload clone
+calls and copied bytes, memory bytes read/written, journal entries, lock entries
+visited, and trace nodes constructed. Count before each operation; include failed
+preparation work. Publish each phase's counters separately: load, execution,
+reversal/replay, snapshot/export and teardown. Do not hide a cost by moving it
+from stepping to export, and do not sum unlike counters with invented weights
+(`src/cc.rs:343-389,689-771,1984-2048,2426-2545`;
+`REF/src/classical.rs:1200-1281,1409-1448`).
+
+For metric `k`, define `Rwork[k] = (Wvm[k]/N)/(Wref[k]/N)` on the same object,
+inputs and complete logical-row count `N`, with comparable event definitions in
+both independently instrumented executors. VM tree probes/path copies must be
+compared with the reference's sparse lookup/shift/COW and journal work, not called
+equivalent merely because both expose a method named `write`. Keep the metric
+vector visible. If the reference counter is absent or zero, report that metric
+as VM-only excess work rather than dividing by an arbitrary epsilon. Cross-VM
+lock ownership is such a VM-only metric; the reference has no shared launch lock
+manager (`src/cc.rs:351-359`; `REF/src/retained.rs:76-131`;
+`REF/src/classical.rs:380-390`). Independent reference instrumentation is a
+follow-up measurement job, not a source edit authorized by this design job.
+
+For retained-prefix scaling, define
+`Rprefix[k] = (W[k, long]/rows(long))/(W[k, short]/rows(short))` using two runs in
+the same process, fixed engine/settings and equal instruction footprints. The
+supplied object's checkpoints are **500**, **5,000** and **15,000** post-reply
+cooperative steps. <!-- Measurement: job/r3-vm-stepping/r37/locks.txt and PROGRESS.md:27-31, production head 8a68da4 with temporary diagnostic instrumentation; machine: this 12-core host; date: 2026-11-07. -->
+Use them for same-object work observations, not an assumption that their different
+row mixes cost equal work. For a flat-work assertion, use a repeated identical
+operation after pre-seeding the same resident state and compare counters per
+committed row; synthetic history, event and program-size parameters and nontrivial
+ratio bounds need calibration in §6. Exact absence/equality assertions below are
+design invariants, not fitted tolerance constants; their source-based red
+candidates must still be demonstrated before implementing the slice.
+
+Every numerical performance constant in a future test must carry a comment with
+its evidence file under `job/r3-vm-stepping`, measured head, machine (**this
+12-core host**) and measurement date. The same provenance is attached to retained
+numbers in this note; policy review counts and ISA-defined units remain governed
+by their cited policy/specification. Missing measurements stay in §6 without
+guessed numerical values (`briefs/COMMON.md`, final bullet).
+
+Wall time may only guard a hang: `guard >= 10 * measured_duration` for that phase,
+input, instrumentation and engine, with the same provenance comment.
+<!-- Policy multiplier: R40, advisor-notes.md:476-481 and COMMON.md final bullet, 2026-11-07; measured-duration source: job/r3-vm-stepping/PROGRESS.md:18, head 8a68da4, this 12-core host, 2026-11-07, only for its documented uninstrumented full-run phase. -->
+A guard trip reports **UNKNOWN: incomplete work measurement**, never red, a
+failed ratio, or implicit PASS. Counters and semantic comparisons from incomplete
+runs are not acceptance evidence. Counter-instrumented/new fixtures need their
+own duration measurement before setting a guard (§6); neither the old ratio-test
+timeout nor a newly guessed duration is a permitted substitute. No build, test
+or re-measurement was run for this amendment.
 
 “O(1) amortised step” means ordinary fixed-width, fixed-footprint **execution and
 append bookkeeping independent of retained H**, with amortised buffer growth.
@@ -277,12 +340,16 @@ than return a misleading empty trace. Do not change object identity or the
 existing ABI signatures to smuggle configuration through an object field
 (`src/cc.rs:64-118,689-748,2188-2190,2475-2545`; **87b1887**).
 
-**Red-first ratio test:** `trace_off_builds_no_step_json`: assert
-`step_trace_json_builds(off)/max(1, step_trace_json_builds(on)) ==0` with equal
-logical steps and identical full trace projection. Current launch always-on
-construction should expose the red. Record the timing ratio `T(off)/T(on)` and
-keep `Rscale <=2`; the work-count ratio is the deterministic required perf
-assertion, not a guessed wall-time speedup (`src/cc.rs:689-748,2190`).
+**Red-first work test:** `trace_off_builds_no_step_json` runs the same object in
+trace-off and trace-on modes in one process and reports
+`Rtrace = step_trace_json_builds(off)/step_trace_json_builds(on)`, after asserting
+that the observed-mode denominator is positive. The deterministic assertion is
+`trace_builds_after_step(off) == trace_builds_before_step(off)`, with equal
+logical rows and identical complete trace projection. The exact absence of
+construction is the design invariant; no unmeasured tolerance is introduced.
+Current launch always-on construction is the red candidate. Observe and cite its
+counter measurement before production changes; additional allocation/byte ratios
+await §6 calibration (`src/cc.rs:689-748,2190`).
 
 **Differential/risk/rounds:** Apply all three common differential checks with trace
 off/on, exact NaN/negative-zero trace encodings and hostcall reply deltas. Risk:
@@ -315,13 +382,18 @@ over the same logical/audit suffix as today, not only active frames. Reversed
 records and markers cannot disappear from the logical audit merely to satisfy
 the performance test (`src/cc.rs:988-1015`; `ISA:1784-1839`).
 
-**Red-first ratio tests:** `history_lookup_does_not_walk_its_prefix` uses identical
-fixed-size uncall targets behind H and 10H pure frames and asserts lookup work
-`W(10H)/W(H) <=2`; exclude the actual undo payload from that counter.
-`effect_export_work_is_linear` requires `T(10E)/T(E) <=15` on E and 10E effect
-entries and `visited_entries/output_entries <=2`. Current suffix scans and
-`iter().skip(prefix)` provide source-based red candidates; the implementer must
-record the actual failing run before changing production code
+**Red-first work tests:** `history_lookup_does_not_walk_its_prefix` uses identical
+fixed-size uncall targets behind short and long pure prefixes in one process.
+Assert `prefix_frame_visits_after_query == prefix_frame_visits_before_query`;
+count index probes separately and report `Rprefix[index_probes]`. Actual undo
+payload stays in its own counter rather than disappearing from total work.
+`effect_export_work_is_linear` asserts that emitted event references are visited
+exactly once and that visits to skipped tape-prefix entries do not increase;
+report `visited_event_refs/published_event_refs` on the same-object runs. These
+are exact traversal invariants. Prefix sizes and numerical index-probe/allocation
+ceilings lack measurements and remain in §6. Current suffix scans and
+`iter().skip(prefix)` provide source-based red candidates; record the failing
+counters before changing production code
 (`src/cc.rs:1002-1008,2213-2229`; `src/persistent.rs:374-375`).
 
 **Differential/risk/rounds:** Common forward/reversal/replay checks, plus repeated
@@ -345,14 +417,18 @@ sorted export; preserve the complete pointer range without narrowing to native
 `usize` or `u64` (`src/cc.rs:35-53,316-389,1984-2024`;
 `ISA:1672-1691`; `src/oracle.rs` remains outside this slice).
 
-**Red-first ratio test:** `memory_journal_retention_tracks_changed_bytes`: on
-repeated eight-byte writes across a fixed resident page set, assert retained
-memory metadata allocations per step relative to the byte-node implementation
-`A(new)/A(8a68da4) <=0.5`; capture the pre-change counter baseline and observe
-red before the new representation. Also require normalized late/early
-same-footprint step time <=2 across 10× history. Count allocator calls and
-retained bytes separately so larger pages cannot hide a memory regression
-(`src/cc.rs:351-359`; **8a68da4**).
+**Red-first work test:** `memory_journal_retention_tracks_changed_bytes` repeats
+the same validated nonzero store footprint in short- and long-history runs in
+one process. Assert `byte_key_tree_operations_after == before` and
+`journaled_original_bytes == committed_write_span_bytes`: the page replacement
+must eliminate per-byte tree operations while retaining the displaced bytes.
+Report `Rprefix[memory_metadata_probes]`, `allocations/committed_write_bytes`
+and `copied_bytes/committed_write_bytes`, also accounting for page creation and
+retained memory. Compare the same byte/probe/allocation metrics with the pinned
+reference on the unchanged full object. Page size, synthetic history sizes and
+numerical allocation-ratio ceilings have no supplied measurement; they remain
+in §6. The current per-byte write loop is the red candidate, not a measured
+promise to halve allocations (`src/cc.rs:351-359`; **8a68da4**).
 
 **Differential/risk/rounds:** Common checks, explicit readback of every changed
 byte, i80/i128 unaligned cross-page stores, large sparse addresses, pinned/empty
@@ -394,13 +470,18 @@ with explicit migration coverage and the existing semantic path retained for
 each unmigrated family, not an automatic error fallback
 (`ISA:1173-1212,1784-1795,4978-4991`; `src/cc.rs:643-659,1266-1268,2439-2444`).
 
-**Red-first ratio tests:** `prepared_pure_steps_copy_no_machine_payload` asserts
-`machine_checkpoints/committed_pure_rows ==0` and
-`instance_tree_updates/defined_instances ==0`; both current operations are
-visible in the cited implementation. `fixed_row_cost_is_independent_of_history`
-requires `work_per_row(10H)/work_per_row(H) <=1.1` for metadata visits/copies
-and timing `Rscale <=2`. The full paired object remains <=5×, with complete
-snapshot, oracle outputs and target charges checked
+**Red-first work tests:** `prepared_pure_steps_copy_no_machine_payload` asserts
+that neither the machine-checkpoint counter nor the instance-tree-update counter
+increases while committing ordinary pure rows; report each counter per committed
+row. Both current operations are visible in the cited implementation.
+`fixed_row_cost_is_independent_of_history` compares metadata-probe work per row
+for identical pre-seeded footprints in short and long runs in one process and
+asserts equality, with append growth/allocations reported separately. Preserve
+the already measured **zero retained-payload clones** invariant.
+<!-- Measurement: job/r3-vm-stepping/value-fix.txt, head 8a68da4, contrasted with value-sharing-red.txt at head 4b67661; machine: this 12-core host; date: 2026-11-07. -->
+Counter calibration, synthetic history sizes and numerical aggregate
+VM/reference work ceilings remain in §6. Full-object work reports must keep
+snapshot, oracle outputs and ISA target charges intact
 (`src/cc.rs:486-492,2439`; **8a68da4**).
 
 **Differential/risk/rounds:** Common checks plus diagnostic injection at every
@@ -424,13 +505,22 @@ gaps or let one same-owner interval hide a different-owner conflict. A query
 costs O(log L + overlaps), and close costs the run's owned keys
 (`src/launch.rs:118,187-211,690-708`; `src/cc.rs:2050-2063,2315-2395`).
 
-**Red-first ratio test:** `lock_acquisition_is_sublinear_in_distinct_ranges`:
-execute equal-size touches with L and 10L retained disjoint ownership intervals;
-assert overlap/dedupe comparisons per touch `C(10L)/C(L) <=2`, then normalized
-timing `Tstep(10L)/Tstep(L) <=2`. Use separate allocations where needed to keep
-entry-key behavior equivalent. The vector scan is the red candidate even though
-it was not the measured 8f3 bottleneck (`src/launch.rs:187-208`; fix-job
-`PROGRESS.md:10`).
+**Red-first work tests:** `lock_acquisition_is_sublinear_in_distinct_ranges`
+counts comparisons for equal-size touches with short and long disjoint interval
+sets in one process; assert that unrelated intervals outside the lookup search
+path are never linearly visited. Report comparisons per touch and
+`Rprefix[lock_comparisons]`; synthetic sizes and numerical scaling ceilings await
+§6 measurements. Use separate allocations where needed to keep entry-key
+behavior equivalent. `full_object_reduces_lock_scan_work` compares total
+conflict-owner plus dedupe-entry visits with the measured baseline in §2;
+assert `candidate_visits < measured_baseline_visits` and report
+`candidate_visits/measured_baseline_visits`. The baseline is the exact sum of
+the supplied separate scan counters, not a time-derived estimate.
+<!-- Measurement: job/r3-vm-stepping/r37/locks.txt and PROGRESS.md:27-31, production head 8a68da4 with temporary diagnostic instrumentation; machine: this 12-core host; date: 2026-11-07. -->
+Before changing the vector, repeat that instrumentation and record the red:
+unchanged scan work does not satisfy strict reduction. No reduction is claimed
+yet. This is a candidate scaling slice, not a claim that locks caused the 8f3
+slowdown (`src/launch.rs:187-208`; fix-job `PROGRESS.md:27-31`).
 
 **Differential/risk/rounds:** Common checks on each run plus shared-program
 interleavings: overlap denied, disjoint use accepted, empty allocation touched,
@@ -453,14 +543,18 @@ same host-request/suspend/fault/terminal boundaries. Preserve original source
 metadata and logical frames even when private instructions are simplified
 (`src/object.rs:262-264`; `src/cc.rs:597-670`; `src/jit.rs:204-208,389-425,613-658`).
 
-**Red-first ratio test:** `compiled_step_dispatch_is_independent_of_unused_rows`
-keeps the executed trace identical while growing unreachable program rows P to
-10P; assert dispatch probes per executed row `C(10P)/C(P) <=2` for both native
-and non-native compiled modes and timing ratio <=2. Exercise high canonical ids
-as well as the first row, so native linear dispatch is observable. Retain
-`paired_full_object_within_five_times_reference` for **both engines** with
-matched release profiles and same-CPU pairing. The former isolates the red;
-the latter is the final acceptance target, not asserted to fail today
+**Red-first work test:** `compiled_step_dispatch_is_independent_of_unused_rows`
+keeps the executed trace identical while varying unreachable program rows in
+short- and long-program runs in one process. Assert equality of dispatch probes
+per executed row for each engine; report their in-process work ratio. Also
+assert that per-step dispatch-table initialization visits do not increase.
+Exercise high canonical ids and interior rows so native linear dispatch is
+observable. Program sizes and numerical nontrivial bounds await §6 calibration.
+Replace the elapsed-time full-object test with
+`full_object_reports_reference_work_ratios`: compare the metric-wise `Rwork`
+vector with measured ceilings only after §6 supplies the common reference/VM
+counter definitions and values. Source scans provide the slice's red candidate;
+the full-object work bound is not claimed measured or red today
 (`src/jit.rs:404-409,613-625`; **8a68da4:tests/step_scaling.rs:165-231**).
 
 **Differential/risk/rounds:** Common checks, every existing transformation mode,
@@ -472,52 +566,83 @@ native code generation and scheduler semantics do not otherwise change
 
 ## 6. Measurements needed before sizing each slice
 
-These are implementation-lane measurements to request, not claims that this
-research job ran a build, test or profile. Existing supplied evidence is the
-8a68da4 fix-job report and profiles cited in §2.
+These are implementation-lane measurement requests, not tests or profiles run by
+this research job. **Missing measurements have no numerical thresholds here.**
+The source-based exact invariants in §5 can define a red-first test, but their
+actual failing counter transcripts must precede production changes. Beyond
+logical-row/checkpoint counts, the supplied per-operation measurements used
+numerically are the retained-payload and lock
+counters cited in §2; historical timings cannot fill the remaining gaps.
 
-1. **Residual cost at 8a68da4:** repeat matched release/release pairs, separate
-   execution, result extraction, JSON construction/serialization, parsing and
-   teardown, then profile each. The supplied 4.897404× whole-process ratio is
-   close to 5× and one pair is insufficient to size savings. Snapshot cost is
-   already comparable to execution cost (`PROGRESS.md:17-18`, **8a68da4**).
-2. **Observation demand:** count actual trace/snapshot consumers and measure
-   trace off/on, retained metadata bytes per row and full reconstruction time.
-   Which pre-values cannot be recovered without new typed metadata? This sizes
-   slice 1 while protecting the current snapshot contract
-   (`src/cc.rs:689-748,2475-2545`).
-3. **History query distribution:** measure append/index/suffix/tape-export work
-   separately, with many effects, frequent uncall, nested cancellation and
-   repeated prefix reversal. The 8f3 fixture does not by itself stress all these
-   scans; their source existence is not their measured contribution
-   (`src/cc.rs:988-1015,2213-2229,2446-2469`; **887f49f**).
-4. **Page and journal shape:** resident/nonzero bytes, touched spans, address
-   widths, cross-page transfers, write density and allocator counts versus
-   retained bytes. Compare candidate page sizes and directory types before
-   promising slice 3's allocation ratio; reject a page scheme that silently
-   narrows BigUint addresses or explodes sparse memory
-   (`src/cc.rs:35-53,343-389`; **8a68da4**).
-5. **Transactions with quantum state:** profile Machine checkpoint fields with
-   idle live qregs, exact/approximate region calls and failures; inventory every
-   fallible operation and measurement-input publication point. The target-history
-   fix does not make amplitudes, emitted leaves and every other quantum field
-   persistent. This determines the number of slice-4 row-family jobs and the
-   cost of migrating target append streams to meet the H-independent bound
-   (`src/action.rs:43-60`; `src/cc.rs:2426-2444`; **12cf12d**, **8a68da4**).
-6. **Lock cardinality and ABI contention:** measure distinct ranges per owner,
-   duplicate frequency and merging opportunities on streaming stores and multiple
-   open runs. The supplied report does not establish locks as an 8f3 cost; the
-   synthetic ratio test sizes the actual interval work and close-time cost
-   (`src/launch.rs:187-208,690-708`; fix-job `PROGRESS.md:10`).
-7. **JIT pair and program-size sensitivity:** obtain the R37-requested JIT
-   measurement on the same installed target, object, CPU and release profile;
-   separately measure compilation, one-row ABI dispatch and multi-row CLI drive.
-   A native-kernel audit counter alone cannot demonstrate a speedup
-   (`advisor-notes.md:453-456`; `src/jit.rs:47-67,389-425`; `src/cc.rs:597-641`).
-8. **Acceptance margin:** record multiple paired ratios and RSS/retained bytes
-   across the full object and equal-work scaling fixtures before setting a tighter
-   improvement objective. Keep <=5×, `Rscale <=2`, exact outputs and the structural
-   ratio tests as the stated targets; do not invent an unmeasured 2× or 3× promise,
-   relax ratios after seeing a red, or count a mixed-profile comparison as matched
-   release evidence (`8a68da4:tests/step_scaling.rs:147-231`; fix-job
-   `PROGRESS.md:17-18`).
+1. **Same-object reference/VM work vector and ceiling:** instrument both
+   executors independently on the unchanged complete object, preserving the
+   published reference semantics. Measure allocations, allocated bytes, metadata
+   comparisons/path copies, clone calls/copied bytes, memory accesses and journal
+   entries by the same definitions. Record metric-wise `Rwork` for execution and
+   separately for snapshot/export, replay/reversal and teardown. The replacement
+   for the old elapsed-time ceiling is `Rwork[k] <= measured_work_ceiling[k]`;
+   those ceilings are uncalibrated, so this note supplies no numeric factor.
+   Publish the observations and choose the ceiling before implementing a slice,
+   with evidence file, head, machine and date comments. Do not weight unlike
+   counters into a synthetic total or turn an elapsed-time ratio into an operation
+   multiplier (`src/cc.rs:343-389,2426-2545`;
+   `REF/src/retained.rs:50-131`; `REF/src/classical.rs:1200-1281,1409-1448`).
+2. **Trace demand and typed reconstruction:** count constructor calls,
+   allocations and bytes for equal logical prefixes with observation off/on;
+   preserve the positive observed-mode denominator and assert no trace
+   constructors run during unobserved steps. Measure lazy full-snapshot work and
+   retained pre-value metadata, including NaNs and host replies, before setting
+   any allocation/retention ceiling. Source construction is known, its full-run
+   count is not supplied (`src/cc.rs:689-748,2475-2545`).
+3. **History/query calibration:** measure frame visits, index probes and emitted
+   event-reference visits for append, suffix/segment lookup, export and repeated
+   tail rewind. Calibrate short/long histories and event-set sizes using identical
+   operation footprints in one process; derive numerical ratio ceilings only
+   from those counts. Preserve exact no-prefix-scan and event-visit invariants.
+   The full object alone does not exercise every nested-cancellation or repeated
+   export case (`src/cc.rs:988-1015,2213-2229,2446-2469`; **887f49f**).
+4. **Pages and displaced-byte journal:** measure resident/nonzero bytes, store
+   spans, actual pointer widths, cross-page traffic, metadata probes, page
+   allocations, allocator requests and copied/retained bytes. Calibrate page size,
+   synthetic histories and allocation-ratio ceilings, comparing the same workload
+   with the reference's journal and sparse-vector operations. No halving target
+   or synthetic expansion factor is justified by the supplied evidence. Retain
+   complete addresses and allocation/sector presence semantics
+   (`src/cc.rs:35-53,343-389`; `REF/src/retained.rs:76-131`; **8a68da4**).
+5. **Prepared transactions and quantum helpers:** count checkpoint field clones,
+   instance tree updates, target-log append work, bytes and metadata visits with
+   idle qregs and exact/approximate region calls; inject preparation failures and
+   check publication/cursor invariants. The measured retained-value sharing fix
+   is not a measurement of the remaining Machine fields. Calibrate row-family
+   scope and any nontrivial prefix-work bound before removing their transaction
+   paths (`src/action.rs:43-60`; `src/cc.rs:2426-2444`; **12cf12d**, **8a68da4**).
+6. **Locks: retain supplied baseline; measure missing ownership shapes.** The
+   supplied single-owner run retains **20**, **91**, **179** lock keys at the
+   short, middle and long checkpoints defined in §5, and **398** at completion.
+   <!-- Measurement: job/r3-vm-stepping/r37/locks.txt and PROGRESS.md:27-31, production head 8a68da4 with temporary diagnostic instrumentation; machine: this 12-core host; date: 2026-11-07. -->
+   Its exact scan counts are already in §2; this incorporates the later evidence
+   requested by review bead `bennett-vm-544`. Multi-owner conflicts, duplicate
+   distributions, interval merging, streaming stores across allocations and
+   close-time visits still need counts. Calibrate interval-set sizes and numerical
+   scaling bounds from these measurements, preserving §10 acceptance of disjoint
+   use. The supplied single-owner data does not justify sizing a lock rewrite as
+   the main 8f3 fix (`src/launch.rs:187-208,690-708`).
+7. **Compiled execution work:** the supplied
+   `job/r3-vm-stepping/r37/engine-results.json` at production head **8a68da4**
+   records equivalent interpreter/JIT outputs on this 12-core host, dated
+   **2026-11-07**. Still missing: compile-time probes, per-step dispatch setup,
+   canonical comparisons, successor checks, helper calls and native arithmetic
+   versus runtime-helper work. Count one-row cooperative and continuing-drive
+   paths separately, then calibrate short/long unused-program shapes and any
+   numerical work bounds (`src/jit.rs:47-67,389-425,613-658`;
+   `src/cc.rs:597-641`; `src/value.rs:149-164`).
+8. **Guards and reproducibility:** obtain a duration measurement for each new
+   counter-instrumented fixture/phase before choosing its hang guard by the R40
+   rule in §5. Do not reuse an uninstrumented release duration for debug,
+   instrumentation or a different phase. Record counter definitions and whether
+   instrumentation was enabled in every evidence file, together with head,
+   this host and the actual measurement date. Repeated deterministic counts must
+   agree; load-sensitive elapsed differences do not change the work verdict.
+   An interrupted measurement is UNKNOWN and leaves the work obligation open;
+   exact semantic mismatches and completed counter-assertion failures remain red
+   (`advisor-notes.md:476-481`; `briefs/COMMON.md`, final bullet).

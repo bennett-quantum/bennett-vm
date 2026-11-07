@@ -168,9 +168,20 @@ fn full_object_matches_reference_output_within_ten_times_its_walltime() {
         return;
     }
     let reference = crate::pins::isa().join("reference-interpreter/target/debug/bennett-isa-ref");
+    // Compare on the same permitted CPU, including on hybrid-core hosts.
+    let status = std::fs::read_to_string("/proc/self/status").unwrap();
+    let allowed = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+        .expect("allowed CPU list")
+        .trim();
+    let cpu = allowed
+        .split([',', '-'])
+        .next()
+        .expect("first permitted CPU");
     let start = Instant::now();
-    let output = Command::new("timeout")
-        .args(["180s"])
+    let output = Command::new("taskset")
+        .args(["-c", cpu, "timeout", "180s"])
         .arg(&reference)
         .arg("run-program")
         .arg(fixture("launch.bennett"))
@@ -192,7 +203,8 @@ fn full_object_matches_reference_output_within_ten_times_its_walltime() {
         assert_eq!(report.get(field), oracle.get(field), "reference {field}");
     }
     let start = Instant::now();
-    let output = Command::new("timeout")
+    let output = Command::new("taskset")
+        .args(["-c", cpu, "timeout"])
         .arg(format!("{:.6}s", reference_time.as_secs_f64() * 10.0))
         .arg(std::env::current_exe().unwrap())
         .args([

@@ -485,7 +485,7 @@ mod tests {
                 let root = history.clone();
                 assert_eq!(count.get(), 0, "checkpoint must not clone retained values");
                 history.push(Counted(count.clone()));
-                assert!(count.get() < 40, "one append copies only the balanced path");
+                assert_eq!(count.get(), 0, "append must share retained values");
                 assert_eq!(root.len(), n + 1);
                 history.truncate(n + 1);
             }

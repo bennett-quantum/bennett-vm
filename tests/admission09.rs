@@ -1,5 +1,4 @@
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use support::source;
 #[test]
 fn cc_result_and_block_types_obey_the_source_type_bounds() {

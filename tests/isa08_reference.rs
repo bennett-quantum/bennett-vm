@@ -9,9 +9,7 @@ use std::{
     process::{Command, Output},
 };
 
-#[path = "support/source09.rs"]
-#[allow(dead_code)]
-mod source09;
+use crate::source09;
 
 const ENGINES: [&str; 2] = ["interpreter", "jit"];
 

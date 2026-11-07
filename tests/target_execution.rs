@@ -442,8 +442,7 @@ fn direct_target_actions_refuse_unpublished_row_expansion() {
     );
 }
 
-#[path = "support/device.rs"]
-mod device_fixture;
+use crate::device_fixture;
 #[test]
 fn classical_and_effect_leaves_are_accounted_once_including_inverse_execution() {
     // §8.2: "Classical instructions and effects take classical_step_time".

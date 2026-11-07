@@ -1,6 +1,5 @@
 //! K63 checks call occurrences after the row's library has been bound.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},

@@ -127,27 +127,36 @@ fn read_selection() -> Result<Option<(Passes, bool)>, String> {
         }
     })
 }
+#[derive(PartialEq, Eq)]
+struct CacheKey {
+    object_hash: String,
+    executable_hash: [u8; 32],
+}
+struct CachedProgram {
+    key: CacheKey,
+    program: Arc<Program>,
+}
 thread_local! {
     // Bounded per-thread cache: published object identity plus private executable
     // identity, since oracle expansion and library clients can replace rows.
-    static CACHE: RefCell<Option<((String, [u8; 32]), Arc<Program>)>> = const { RefCell::new(None) };
+    static CACHE: RefCell<Option<CachedProgram>> = const { RefCell::new(None) };
 }
 pub fn for_object(obj: &Object) -> Result<Option<Arc<Program>>, String> {
     let Some((passes, native)) = selection()? else {
         return Ok(None);
     };
-    let key = (
-        crate::identity::object_hash(&obj.text),
-        executable_hash(obj),
-    );
+    let key = CacheKey {
+        object_hash: crate::identity::object_hash(&obj.text),
+        executable_hash: executable_hash(obj),
+    };
     CACHE.with(|cache| {
-        if let Some((k, p)) = cache.borrow().as_ref()
-            && *k == key
+        if let Some(entry) = cache.borrow().as_ref()
+            && entry.key == key
         {
-            return Ok(Some(p.clone()));
+            return Ok(Some(entry.program.clone()));
         }
         let p = Arc::new(Program::compile(obj, passes, native)?);
-        *cache.borrow_mut() = Some((key, p.clone()));
+        *cache.borrow_mut() = Some(CachedProgram { key, program: p.clone() });
         Ok(Some(p))
     })
 }

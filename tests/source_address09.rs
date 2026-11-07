@@ -1,6 +1,5 @@
 //! Source-derived leaf addresses, never private call/step coordinates.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{json::Json, ref_library::Catalog};
 fn lower(body: &str, adjoint: bool) -> Vec<bennett_vm::ref_library::Leaf> {
     let bounds = body

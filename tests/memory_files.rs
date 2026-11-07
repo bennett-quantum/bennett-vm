@@ -1,6 +1,5 @@
 //! Binary region input avoids the operating system's per-argument hex limit.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{json::{self, Json}, sha256::to_hex};
 use std::{path::{Path, PathBuf}, process::{Command, Output}, sync::atomic::{AtomicUsize, Ordering}};
 

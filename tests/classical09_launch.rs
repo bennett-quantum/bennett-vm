@@ -1,6 +1,5 @@
 //! Run ownership and token lifetimes through the published launch entry points.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::launch::*;
 use std::{ffi::CString, ptr};
 

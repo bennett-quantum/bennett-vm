@@ -139,7 +139,7 @@ fn c11_launch_contract() {
     std::fs::write(&object, fixture()).unwrap();
     // Separate target directory avoids recursively taking cargo test's lock.
     let build = Command::new("cargo")
-        .args(["build", "--offline", "--lib", "--manifest-path"])
+        .args(["build", "--offline", "-j3", "--lib", "--manifest-path"])
         .arg(repo.join("Cargo.toml"))
         .arg("--target-dir")
         .arg(tmp.join("target"))
@@ -199,7 +199,7 @@ fn c11_sched_contract() {
     )
     .unwrap();
     let out = Command::new("cargo")
-        .args(["build", "--offline", "--lib", "--manifest-path"])
+        .args(["build", "--offline", "-j3", "--lib", "--manifest-path"])
         .arg(repo.join("Cargo.toml"))
         .arg("--target-dir")
         .arg(tmp.join("target"))

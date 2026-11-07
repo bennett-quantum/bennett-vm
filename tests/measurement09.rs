@@ -1,6 +1,5 @@
 //! Typed measurement has the same irreversible boundary as plain measurement.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::json::{self, Json};
 use std::{
     path::Path,

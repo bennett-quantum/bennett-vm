@@ -1,6 +1,5 @@
 //! ISA0.9 classical rows use runtime widths and reversible resource identities.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::json::{self, Json};
 use std::{
     process::Command,

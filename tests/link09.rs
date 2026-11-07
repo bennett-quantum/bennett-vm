@@ -1,6 +1,5 @@
 //! Admission after external name resolution must repeat the complete checks.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{json::Json, link};
 use support::{sign, source};
 const LAYOUT: &str = "\nsection layout\n{\"A_tab\":2,\"H\":6,\"S_cells\":4,\"globals\":{},\"heap_base\":32,\"heap_limit_max\":32,\"interface_regions\":{},\"null_size\":16,\"ptr_width\":32}\n";

@@ -1,6 +1,5 @@
 //! Fresh cleanup traversal owns contiguous caller spaces (ISA pass X/K80).
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},

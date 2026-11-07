@@ -1,6 +1,5 @@
 //! Reallocated linear names retain distinct source lifetimes and metadata.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::Json,
     ref_library::{Catalog, CleanupEntry, CleanupRealisation, Leaf},

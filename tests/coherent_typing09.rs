@@ -1,6 +1,5 @@
 //! Typed coherent source admission, independent of execution.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use support::source;
 
 fn actions() -> String {

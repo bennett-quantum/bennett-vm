@@ -1,8 +1,7 @@
 //! Hand-derived §7.3 device-sector boundary test (not reference code).
 use bennett_vm::json::{self, Json};
 use std::{path::Path, process::Command};
-#[path = "support/device.rs"]
-mod device_fixture;
+use crate::device_fixture;
 use device_fixture::block_object;
 #[test]
 fn block_image_reads_a_whole_sector_and_reverses() {

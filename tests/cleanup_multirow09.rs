@@ -1,6 +1,5 @@
 //! Explicit multirow inverse sequences bind before their first cleanup leaf.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{ActionExpansion, Catalog, CleanupEntry, CleanupRealisation},

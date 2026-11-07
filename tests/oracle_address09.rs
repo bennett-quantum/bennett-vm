@@ -1,6 +1,5 @@
 //! K64 annotates the authenticated stream; raw descriptors are not source admission.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{Bindings, Catalog, Leaf},

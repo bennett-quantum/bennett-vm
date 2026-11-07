@@ -461,14 +461,14 @@ impl RowTemplates<'_> {
             let flag = range("$frame", q - p - 1, 1);
             if let Some((effect, next)) = direct::row(
                 object,
-                &program,
+                program,
                 i,
                 k,
                 p,
                 count,
                 fault,
-                &widths,
-                &frame_slots,
+                widths,
+                frame_slots,
                 flag.clone(),
                 succ.clone(),
                 env,
@@ -478,14 +478,14 @@ impl RowTemplates<'_> {
                 continue;
             }
             if let Some((effect, success)) = stack.row(
-                &program,
+                program,
                 i,
                 k,
                 p,
                 fault,
-                &frame_slots,
-                &slots,
-                &widths,
+                frame_slots,
+                slots,
+                widths,
                 flag.clone(),
                 succ.clone(),
             )? {
@@ -505,7 +505,7 @@ impl RowTemplates<'_> {
             }
             if let Some(memory) = &memory
                 && let Some(effect) =
-                    memory.row(i, &widths, &frame_slots, flag.clone(), fault, env)?
+                    memory.row(i, widths, frame_slots, flag.clone(), fault, env)?
             {
                 templates.push(template(q, effect));
                 successors.push(next_template(q, p, fault_next(p, count, k + 1, flag)));

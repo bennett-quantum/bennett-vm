@@ -1,6 +1,5 @@
 //! K65 whole-pair selection happens before any cleanup leaves are expanded.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self, Json},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},

@@ -1,6 +1,5 @@
 //! Address-only () and indexed scalar addresses retain their exact wire sets.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     action::{QuantumState, RegionWires, execute_action_inner},
     bigint::BigUint,

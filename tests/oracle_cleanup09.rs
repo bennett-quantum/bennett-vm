@@ -1,6 +1,5 @@
 //! Source-formed K64 constructors and K65 lifted cleanup choices.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::{
     json::{self},
     ref_library::{Catalog, CleanupEntry, CleanupRealisation},

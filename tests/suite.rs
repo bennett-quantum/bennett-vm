@@ -48,3 +48,8 @@ mod target_execution;
 mod targets;
 mod validation_order;
 mod opcodes;
+
+#[path = "support/source09.rs"]
+mod source09;
+#[path = "support/device.rs"]
+mod device_fixture;

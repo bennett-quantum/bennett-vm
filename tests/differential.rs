@@ -4,8 +4,7 @@
 //! A missing oracle is a failure, never a skip.
 
 #[allow(dead_code)]
-#[path = "support/source09.rs"]
-mod source09;
+use crate::source09;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -2615,8 +2614,7 @@ fn published_d_and_g_cli_cases_differential() {
     assert_eq!(compared, 17, "all 7 D and 10 G CLI cases must participate");
 }
 
-#[path = "support/device.rs"]
-mod device_fixture;
+use crate::device_fixture;
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn block_image_boundaries_differential() {

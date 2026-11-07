@@ -1,6 +1,5 @@
 //! Dynamic region-call bindings must fault before touching wires or views.
-#[path = "support/source09.rs"]
-mod support;
+use crate::source09 as support;
 use bennett_vm::json::{self, Json};
 use std::{path::Path, process::Command};
 

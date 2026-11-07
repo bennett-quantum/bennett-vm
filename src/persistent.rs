@@ -6,7 +6,7 @@ type Link<K, V> = Option<Rc<Node<K, V>>>;
 #[derive(Clone, Debug)]
 struct Node<K, V> {
     key: K,
-    value: V,
+    value: Rc<V>,
     left: Link<K, V>,
     right: Link<K, V>,
     height: usize,
@@ -85,7 +85,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
         while let Some(right) = node.right.as_deref() {
             node = right;
         }
-        Some((&node.key, &node.value))
+        Some((&node.key, node.value.as_ref()))
     }
     pub(crate) fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
@@ -96,7 +96,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
             match key.cmp(n.key.borrow()) {
                 std::cmp::Ordering::Less => p = n.left.as_deref(),
                 std::cmp::Ordering::Greater => p = n.right.as_deref(),
-                std::cmp::Ordering::Equal => return Some(&n.value),
+                std::cmp::Ordering::Equal => return Some(n.value.as_ref()),
             }
         }
         None
@@ -111,7 +111,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
             match key.cmp(n.key.borrow()) {
                 std::cmp::Ordering::Less => p = &mut n.left,
                 std::cmp::Ordering::Greater => p = &mut n.right,
-                std::cmp::Ordering::Equal => return Some(&mut n.value),
+                std::cmp::Ordering::Equal => return Some(Rc::make_mut(&mut n.value)),
             }
         }
         None
@@ -133,7 +133,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
                 *added = true;
                 return Rc::new(Node {
                     key,
-                    value,
+                    value: Rc::new(value),
                     left: None,
                     right: None,
                     height: 1,
@@ -145,7 +145,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
                 std::cmp::Ordering::Greater => {
                     m.right = Some(put(m.right.take(), key, value, added))
                 }
-                std::cmp::Ordering::Equal => m.value = value,
+                std::cmp::Ordering::Equal => m.value = Rc::new(value),
             }
             balance(n)
         }
@@ -210,7 +210,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
                 if let Some(r) = &n.right {
                     s.push(Part::Tree(r));
                 }
-                s.push(Part::Entry(&n.key, &n.value));
+                s.push(Part::Entry(&n.key, n.value.as_ref()));
                 if let Some(l) = &n.left {
                     s.push(Part::Tree(l));
                 }
@@ -275,7 +275,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
             if n.key > *key {
                 p = n.left.as_deref();
             } else {
-                found = Some((&n.key, &n.value));
+                found = Some((&n.key, n.value.as_ref()));
                 p = n.right.as_deref();
             }
         }
@@ -318,7 +318,7 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
     fn next(&mut self) -> Option<Self::Item> {
         let n = self.stack.pop()?;
         self.descend(n.right.as_deref());
-        Some((&n.key, &n.value))
+        Some((&n.key, n.value.as_ref()))
     }
 }
 
@@ -442,6 +442,11 @@ mod tests {
                 .collect();
             assert_eq!(root.changed_keys(&map), want);
         }
+        let checkpoint = map.clone();
+        let key = *map.keys().next().unwrap();
+        let previous = *map.get(&key).unwrap();
+        *map.get_mut(&key).unwrap() += 1;
+        assert_eq!(checkpoint.get(&key), Some(&previous));
     }
     #[test]
     fn local_differences_skip_shared_subtrees_even_across_root_rotations() {

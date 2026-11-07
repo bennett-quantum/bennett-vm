@@ -286,6 +286,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_300": 2,
       "trivial_wrappers": 28
     },
+    "src/cc/frame_work.rs": {
+      "branch_mass": 1,
+      "max_lines": 20,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
     "src/certificate.rs": {
       "branch_mass": 485,
       "max_lines": 164,
@@ -350,6 +358,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_300": 0,
       "trivial_wrappers": 11
     },
+    "src/execution_work.rs": {
+      "branch_mass": 62,
+      "max_lines": 19,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 5
+    },
     "src/identity.rs": {
       "branch_mass": 330,
       "max_lines": 88,
@@ -405,6 +421,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_25": 13,
       "over_300": 0,
       "trivial_wrappers": 18
+    },
+    "src/launch_locks.rs": {
+      "branch_mass": 88,
+      "max_lines": 62,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 5
     },
     "src/lib.rs": {
       "branch_mass": 12,
@@ -469,6 +493,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_25": 6,
       "over_300": 0,
       "trivial_wrappers": 30
+    },
+    "src/persistent/node_work.rs": {
+      "branch_mass": 1,
+      "max_lines": 11,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 0
     },
     "src/qcli.rs": {
       "branch_mass": 133,

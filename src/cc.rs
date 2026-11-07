@@ -61,7 +61,7 @@ struct Activation {
     call_start: Option<usize>,
     args: Vec<Value>,
 }
-#[derive(Clone)]
+#[cfg_attr(not(test), derive(Clone))]
 struct Frame {
     classes_before: Map<usize, String>,
     classes_after: Map<usize, String>,
@@ -79,6 +79,8 @@ struct Frame {
     measured: bool,
     tokens_created: Vec<u64>,
 }
+#[cfg(test)]
+mod frame_work;
 #[derive(Clone)]
 struct Segment {
     start: usize,
@@ -770,6 +772,8 @@ impl Machine {
             measured: is_measure(&ins.op) && fault.is_none(),
         });
         self.steps += 1;
+        #[cfg(test)]
+        crate::execution_work::record(crate::execution_work::Operation::Step, 1);
         Ok(())
     }
     fn exec(&mut self, ins: &Instr) -> Result<Option<u64>, String> {
@@ -2047,7 +2051,7 @@ impl Data {
         // Handle IDs are never recycled across host-visible calls.
     }
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ResourceKey {
     Allocator,
     Entry(BigUint),
@@ -2055,6 +2059,7 @@ pub(crate) enum ResourceKey {
     Device(String),
 }
 impl ResourceKey {
+    #[cfg(test)]
     pub(crate) fn overlaps(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Memory(a, b), Self::Memory(c, d)) => a < d && c < b,

@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(not(test), derive(Clone))]
 pub enum Json {
     Null,
     Bool(bool),

@@ -22,6 +22,7 @@ pub mod invocation;
 pub mod jit;
 pub mod json;
 pub mod launch;
+mod launch_locks;
 mod lifted_typing;
 pub mod link;
 pub mod object;
@@ -99,3 +100,15 @@ mod tests {
 }
 
 mod persistent;
+
+// Private work probes need cfg(test); integration libraries do not receive it.
+#[cfg(test)]
+extern crate self as bennett_vm;
+#[cfg(test)]
+mod execution_work;
+#[cfg(test)]
+#[path = "../tests/support/pins.rs"]
+mod pins;
+#[cfg(test)]
+#[path = "../tests/step_scaling.rs"]
+mod step_scaling;

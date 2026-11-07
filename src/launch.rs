@@ -7,8 +7,9 @@
 )]
 use crate::{
     bigint::BigUint,
-    cc::{ResourceKey, Resources, RuntimeRun},
+    cc::{Resources, RuntimeRun},
     json::Json,
+    launch_locks::MemoryLocks,
     object::{FnKind, Object, Type},
     value::{Budget, Value, fresh_identity as id},
 };
@@ -115,7 +116,7 @@ pub struct bennett_program_t {
     resources: Resources,
     runs: BTreeMap<u64, Run>,
     locks: BTreeMap<u64, u64>,
-    memory_locks: Vec<(ResourceKey, u64)>,
+    memory_locks: MemoryLocks,
 }
 struct Encoded {
     kind: i32,
@@ -185,11 +186,7 @@ impl bennett_program_t {
             .filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
         run.runtime.unavailable_handle(unavailable);
         let (memory, regs) = self.runs[&r].runtime.touches().map_err(|s| error(INVALID, s))?;
-        if memory.iter().any(|key| {
-            self.memory_locks
-                .iter()
-                .any(|(other, owner)| *owner != r && key.overlaps(other))
-        }) || regs
+        if memory.iter().any(|key| self.memory_locks.conflicts(r, key)) || regs
             .iter()
             .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
         {
@@ -199,13 +196,7 @@ impl bennett_program_t {
             ));
         }
         for key in memory {
-            if !self
-                .memory_locks
-                .iter()
-                .any(|(k, owner)| *owner == r && *k == key)
-            {
-                self.memory_locks.push((key, r));
-            }
+            self.memory_locks.acquire(r, key);
         }
         for q in regs {
             self.locks.insert(q, r);
@@ -294,7 +285,7 @@ pub unsafe extern "C" fn bennett_load(
                 resources,
                 runs: BTreeMap::new(),
                 locks: BTreeMap::new(),
-                memory_locks: vec![],
+                memory_locks: MemoryLocks::default(),
             },
         )
     })
@@ -705,7 +696,7 @@ pub unsafe extern "C" fn bennett_run_close(p: *mut bennett_program_t, r: u64) ->
         p.runs.remove(&r);
         p.resources.revoke_tokens(&tokens);
         p.locks.retain(|_, owner| *owner != r);
-        p.memory_locks.retain(|(_, owner)| *owner != r);
+        p.memory_locks.release(r);
         Ok(())
     })
 }

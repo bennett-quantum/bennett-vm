@@ -887,7 +887,8 @@ fn subscript(w: &str) -> Result<(&str, Json), String> {
     Ok((name, e))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[cfg_attr(not(test), derive(Clone))]
 pub struct Event {
     pub start: R,
     pub duration: R,
@@ -912,6 +913,12 @@ impl Target {
             .map(|(k, _)| (k.clone(), R::zero()))
             .collect();
         let mut end = R::zero();
+        // Classical events consume time but cannot conflict on a wire.
+        let wire_events: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| !event.wires.is_empty())
+            .collect();
         for (i, e) in events.iter().enumerate() {
             nonnegative(e.start.clone())?;
             nonnegative(e.duration.clone())?;
@@ -927,7 +934,9 @@ impl Target {
                     return Err("§8.2: gate outside wire live interval".into());
                 }
             }
-            for other in &events[..i] {
+            for (_, other) in wire_events.iter().take_while(|(index, _)| *index < i) {
+                #[cfg(test)]
+                crate::execution_work::record(crate::execution_work::Operation::AccountingComparison, 1);
                 if e.start < other.start.add(&other.duration)
                     && other.start < e.start.add(&e.duration)
                     && e.wires.iter().any(|w| other.wires.contains(w))

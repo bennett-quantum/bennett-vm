@@ -41,6 +41,7 @@ pub mod token_aliases;
 mod typing;
 pub mod validate;
 pub mod value;
+pub mod work;
 
 /// Crate version string.
 pub fn version() -> &'static str {

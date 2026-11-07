@@ -717,6 +717,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_25": 2,
       "over_300": 0,
       "trivial_wrappers": 0
+    },
+    "src/work.rs": {
+      "branch_mass": 1,
+      "max_lines": 9,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 0
     }
   },
   "litter": [

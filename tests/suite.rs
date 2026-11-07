@@ -44,6 +44,7 @@ mod saved_tape;
 mod schedules;
 mod segment_instances09;
 mod source_address09;
+mod step_scaling;
 mod target_execution;
 mod targets;
 mod validation_order;

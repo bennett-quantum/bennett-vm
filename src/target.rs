@@ -887,13 +887,14 @@ fn subscript(w: &str) -> Result<(&str, Json), String> {
     Ok((name, e))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Event {
     pub start: R,
     pub duration: R,
     pub wires: Vec<usize>,
     pub cost: BTreeMap<String, R>,
 }
+// `Clone` for `Event` is implemented in `crate::work`, which counts it.
 #[derive(Clone, Debug)]
 pub struct LiveInterval {
     pub wire: usize,

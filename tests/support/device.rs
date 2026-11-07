@@ -1,7 +1,5 @@
 use bennett_vm::json::{self, Json};
-use std::path::Path;
 pub fn block_object(full: bool) -> String {
-    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read_to_string(
         crate::pins::isa().join("reference-interpreter/tests/fixtures/classical.bisa"),
     )

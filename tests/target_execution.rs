@@ -617,7 +617,6 @@ fn native_qram_store_exchange_and_load_obey_address_and_inherited_control() {
     // §4.6: for each selected cell, XOR or exchange under a==i. §3.5
     // additionally predicates every operation. Exercise all two-cell contents,
     // both addresses, all target values and both predicate values.
-    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read_to_string(
         crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa"),
     )
@@ -728,7 +727,6 @@ fn launch_snapshot_exposes_actual_accounting_and_keeps_old_snapshots_immutable()
     // §10 snapshots are a VM extension; §8.2 dictates the five classical steps
     // and wire liveness (occupancy 1+2+2=5, peak 2) in @allocation.
     use bennett_vm::launch::*;
-    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read(
         crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )

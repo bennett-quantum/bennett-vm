@@ -34,7 +34,7 @@ passed in **51.54 s** (warm test build, line tables only). All sibling fixtures,
 specs and binaries resolve through `tests/support/pins.rs` to the full SHA in
 `gate.toml`; a wrong checkout is an explicit failure reporting both heads.
 The pin was materialised with the pinned gate tool's `verify` command against
-the main checkout. It is unchanged and currently not reachable from origin/main;
+the main checkout. At materialisation it was not reachable from origin/main; the pin is unchanged and
 publication remains orchestrator work.
 
 Coverage (default suite, before the structural refactors):
@@ -149,6 +149,23 @@ exceptions above. Full machine-readable per-file distribution/mass follows.
 Repository HANDOFF.md is retired; README points to the workspace handoff.
 The red presence/pointer check now passes. Dated review and quality evidence
 remain available; transient job progress stays outside tracked files.
+
+Final verification at the completed branch:
+
+- Headless job-local environment; ISA fixture root set to the verified cache checkout for fd626d37aba1f719c3b7b2059be46cbfaf462886.
+- /usr/bin/time -p timeout 180s cargo test --offline -j3 -- --test-threads=4: **46 unit + 313 integration passed**, 72 mandatory gate cases ignored, **52.72 s** (warm build).
+- timeout 600s cargo llvm-cov --offline -j3 --lcov --output-path .tmp/quality-vm/coverage-final.lcov -- --test-threads=4: same default suite passed; refreshed source line coverage **81.98% (24,057 / 29,346)**.
+- Least-covered module counts remain sched_abi 0/226, oracle_direct 42/139, oracle_memory 113/264, qcli 159/275, launch 568/963; the reasons above still apply.
+- timeout 180s cargo clippy --offline -j3 --all-targets -- -D warnings: passed.
+- Focused ignored C11 launch and scheduler consumers: one test each passed. Full slow/push gate is deliberately left to the orchestrator.
+- python3 scripts/quality.py: **five parser/mutation tests passed**, no baseline regression. A quote inside a block comment first reproduced a false function boundary; advancing lexical search past the complete comment fixed it without changing this source baseline.
+- git diff --check: passed. Obsolete fixture-root bindings were deleted after pin conversion.
+
+Current function distribution is 1,124 functions: 792 at most 25 lines,
+254 at 26–100, 73 at 101–300, five over 300 with owners listed above.
+The round's explicit follow-ups are bennett-vm-bsj, bennett-vm-68j,
+bennett-vm-bai and bennett-vm-dhx. Internal process labels in source remain
+zero. No full-gate, fresh review, merge or upstream pin publication is claimed.
 
 <!-- quality-baseline -->
 ```json

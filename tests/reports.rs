@@ -2,7 +2,6 @@
 use bennett_vm::{json, launch::*};
 use std::{
     ffi::{CStr, CString},
-    path::Path,
     ptr,
 };
 fn object() -> String {
@@ -94,7 +93,6 @@ fn target_estimate_refusal_and_empty_coverage_have_exact_contracts() {
     unsafe {
         // §8.2 demands per-class occupancy/peak; §10 estimate_get exposes only one
         // decimal per resource, no class encoding. Do not sum classes or add quantities.
-        let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let target = std::fs::read_to_string(
             crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json"),
         )

@@ -81,7 +81,6 @@ fn unknown_expansion_is_rejected_even_without_explicit_binding() {
 }
 #[test]
 fn schedule_validates_paths_and_cleanup_before_library_rejection() {
-    let _repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
         crate::pins::isa().join("conformance/cases/objects/sched_inc8.bisa"),
     )
@@ -226,9 +225,6 @@ fn all_schedule_bindings_are_checked_before_consumption() {
 #[test]
 fn data_symbol_is_not_an_instruction_path() {
     // §11 path is a chain of program points, never a data entry.
-    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
     let (obj, ids) = bennett_vm::load(
         &std::fs::read_to_string(
             crate::pins::isa().join("conformance/cases/objects/actions.bisa"),

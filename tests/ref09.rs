@@ -373,7 +373,6 @@ fn arithmetic_catalog_traces_preserve_full_interface_and_clean_scratch() {
 
 #[test]
 fn source_actions_lower_to_the_bound_catalog() {
-    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
         crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
@@ -451,7 +450,6 @@ fn source_actions_lower_to_the_bound_catalog() {
 
 #[test]
 fn source_control_order_is_stable_and_duplicates_are_unioned() {
-    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
         crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )

@@ -368,7 +368,6 @@ fn jcs_class_order_uses_utf16_not_utf8() {
 #[test]
 fn targeted_c_launch_capacity_and_reverse_metadata() {
     use bennett_vm::launch::*;
-    let _repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let raw = std::fs::read(
         crate::pins::isa().join("conformance/cases/objects/registers.bisa"),
     )

@@ -55,9 +55,6 @@ fn exact_decimal_bucket_boundaries_and_domain() {
 }
 #[test]
 fn exact_entry_prohibits_eps_decade_even_in_nested_cost() {
-    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
     let raw = std::fs::read_to_string(
         crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json"),
     )

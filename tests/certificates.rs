@@ -4,7 +4,6 @@ use bennett_vm::{
     json::{self, Json},
     value::Budget,
 };
-use std::path::Path;
 fn j(s: &str) -> Json {
     json::parse(s).unwrap()
 }
@@ -152,7 +151,6 @@ fn executable_claims_require_real_bound_schedule() {
 fn oracle_tuple_and_inverse_pair_totality() {
     // §12.1 table replay is independent of target scheduling. §4.5 requires both
     // compositions, with FAULT_NONE on every input (not only the current basis).
-    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read_to_string(
         crate::pins::isa().join("conformance/cases/objects/t3_domains.bisa"),
     )
@@ -450,7 +448,6 @@ fn sampler_word_order_singletons_and_unbound_sampled_relation() {
 fn qinplace_checks_unobserved_inputs_before_mutating_state() {
     // §4.5 every input is required. A zero step budget faults universally; the
     // checker rejects before even allocating the instruction's target workspace.
-    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let o = bennett_vm::load(
         &std::fs::read_to_string(
             crate::pins::isa().join("conformance/cases/objects/qinplace.bisa"),

@@ -18,9 +18,7 @@ TOKEN = re.compile(r'//[^\n]*|/\*|r(#+)"[\s\S]*?"\1|r"[^"]*"|"(?:\\[\s\S]|[^"\\]
 def scrub(text):
     pieces = []
     pos = 0
-    for match in TOKEN.finditer(text):
-        if match.start() < pos:
-            continue
+    while (match := TOKEN.search(text, pos)) is not None:
         end = match.end()
         if match[0] == "/*":
             depth = 1
@@ -124,6 +122,10 @@ class MetricTests(unittest.TestCase):
     def test_raw_strings_and_nested_comments(self):
         text = 'fn f() {\n let x = r###" } "###; /* outer /* } */ } */\n run();\n}'
         self.assertEqual([(n, l) for n, l, _ in functions(text)], [("f", 4)])
+
+    def test_quote_inside_comment_cannot_consume_a_following_literal(self):
+        text = 'fn f() { /* " */ let x = "}";\n work();\n}'
+        self.assertEqual([(n, l) for n, l, _ in functions(text)], [("f", 3)])
 
     def test_branch_and_wrapper_regressions_are_independent(self):
         before = {"files": {"src/a.rs": structural("fn f() { work(); }")}, "litter": [], "process_identifiers": {}}

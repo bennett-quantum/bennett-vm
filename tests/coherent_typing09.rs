@@ -72,6 +72,9 @@ fn huge_regions_are_type_checked_by_shape_without_enumerating_cells() {
         "action @callee () () (db:region[63,1] in) () ()\n^entry():\ntmp = qalloc any 1\nqfree tmp\naction @caller () () (m:region[63,1] in) () ()\n^entry():\naction_call @callee () () (m) ()",
     );
     bennett_vm::load(&valid, true).unwrap();
+    // Equal cell width cannot hide a different address domain.
+    let invalid = valid.replace("m:region[63,1]", "m:region[62,1]");
+    assert!(bennett_vm::load(&invalid, true).is_err());
 }
 
 #[test]

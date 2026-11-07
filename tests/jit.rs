@@ -31,6 +31,18 @@ fn transformations_change_private_graph_without_changing_reference_body() {
         before,
         bennett_vm::identity::compute(&obj).unwrap().object_hash
     );
+    // Four recursive reads add 1 + 3 + 7 + 11 = 22, modulo 256.
+    // This observes transformed execution, rather than statistics alone.
+    let path = crate::pins::isa().join("reference-interpreter/tests/fixtures/sum_db.bisa");
+    for mode in ["interpreter", "baseline", "inline", "structure", "reindex", "simplify", "optimised", "jit"] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
+            .arg("run-oracle").arg(&path).args(["sum_db", "--input", "4", "--budget", "128", "--mem", "db=0103070b000000000000000000000000"])
+            .env("BENNETT_VM_ENGINE", mode).output().unwrap();
+        assert!(out.status.success(), "{mode}: {}", String::from_utf8_lossy(&out.stderr));
+        let json = bennett_vm::json::parse(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+        assert_eq!(json.get("code").and_then(bennett_vm::json::Json::as_u64), Some(0), "{mode}");
+        assert_eq!(json.get("payload").and_then(bennett_vm::json::Json::as_u64), Some(22), "{mode}");
+    }
 }
 #[test]
 fn native_graph_executes_every_row_and_stops_at_callback_boundary() {

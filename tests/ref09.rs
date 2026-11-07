@@ -248,8 +248,18 @@ fn typed_templates_capture_records_and_region_shapes() {
     b.wire("a", 16);
     b.body("B", j(r#"[{"invoke":"qregion","args":[2,8,"",[{"parameters":[{"name":"cells","type":"wire","width":16}],"body":[{"invoke":"qregion","args":[1,1,"",[{"parameters":[{"name":"scratch","type":"wire","width":1}],"body":[{"gate":"cx","wires":["a[0]","scratch"]},{"gate":"cx","wires":["a[0]","scratch"]}]}],[]]}]}],[]]}]"#)).unwrap();
     let l = c.expand("adj", &[j(r#""B""#)], &b).unwrap();
-    assert_eq!(l.iter().filter(|l| l.operation == "cx").count(), 2);
-    assert_ne!(l[0].wires, l[1].wires);
+    let gates = l.iter().filter(|l| l.operation == "cx").collect::<Vec<_>>();
+    assert_eq!(gates.len(), 2);
+    // The captured control is external a[0]; the target is the single
+    // scratch wire allocated inside the outer 16-wire region.
+    assert_eq!(l[0].operation, "alloc");
+    assert_eq!(l[0].wires.len(), 16);
+    assert_eq!(l[1].operation, "alloc");
+    assert_eq!(l[1].wires.len(), 1);
+    let expected = vec!["a[0]".to_string(), l[1].wires[0].clone()];
+    assert_eq!(gates[0].wires, expected);
+    assert_eq!(gates[1].wires, expected);
+    assert_eq!(gates[0].ordinal + 1, gates[1].ordinal);
 
     // K25 descriptor validation runs at binding, including an empty visit domain.
     let args = j(r#"[1,1,1,"pc","next","frame",[],[]]"#);

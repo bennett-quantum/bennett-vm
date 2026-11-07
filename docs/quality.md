@@ -54,3 +54,11 @@ The five least-covered modules and reasons for the remaining gaps:
 | ref_library/oracle_memory.rs | 113 / 264 | exhaustive memory-carrier reversal belongs to the same slow suite |
 | qcli.rs | 159 / 275 | malformed CLI combinations and state display branches are incompletely covered; the larger differential suite adds command coverage |
 | launch.rs | 568 / 961 | static-library C ABI consumers and oracle differentials run in the slow gate |
+
+Test-quality pass: the three audit weak witnesses now check a negative large
+region shape, the exact hand-derived recursive sum 1+3+7+11=22 through all
+engines, and the captured external control/single nested scratch identities.
+Focused `cargo test --offline -j3 --test suite -- <filter> --test-threads=4`
+runs for `huge_regions`, `transformations_change_private_graph` and
+`typed_templates_capture` passed (one test each). Binary-input tests retain
+exact bytes, explicit success/failure and both engines/versions.

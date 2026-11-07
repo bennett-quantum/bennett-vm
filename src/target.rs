@@ -1145,7 +1145,7 @@ impl Target {
                 continue;
             }
             return Err(format!(
-                "§8/§11: unimplemented: gate-level expansion for {} (milestone 4); required ref library is unpublished (bennett-vm-47t)",
+                "§8/§11: unimplemented: gate-level expansion for {}; required ref library is unpublished",
                 ins.op
             ));
         }

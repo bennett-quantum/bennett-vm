@@ -502,7 +502,7 @@ impl<'a> Machine<'a> {
             }
             "retval" => r.succ = self.rows.len(),
             "oracle_call" | "oracle_uncall" | "perm_call" => {}
-            _ => return Err(format!("unimplemented: lifted row {} (milestone 3)", i.op)),
+            _ => return Err(format!("unimplemented: lifted row {}", i.op)),
         }
         if let Some(v) = value {
             r.assign.push((Self::loc(f, &i.lhs[0]), v));

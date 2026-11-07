@@ -902,7 +902,7 @@ impl<'o> Machine<'o> {
                 self.store_bytes(&a, &v, n_bits / 8);
                 Ok(Flow::Next)
             }
-            _ => Err(format!("unimplemented: lifted row {op} (milestone 3)")),
+            _ => Err(format!("unimplemented: lifted row {op}")),
         }
     }
 
@@ -1102,7 +1102,7 @@ pub fn run_oracle(
     let func = obj.function(name).ok_or_else(|| {
         diag(
             "5.2",
-            format!("oracle @{name} is unresolved; executing it needs linking (milestone 2)"),
+            format!("oracle @{name} is unresolved; executing it needs linking"),
         )
     })?;
     if func.kind != FnKind::Oracle {
@@ -1137,7 +1137,7 @@ pub fn run_oracle(
             diag(
                 "5.2",
                 format!(
-                    "lproc @{fname} in the closure of @{name} is unresolved; linking is milestone 2"
+                    "lproc @{fname} in the closure of @{name} is unresolved; linking is required"
                 ),
             )
         })?;
@@ -1388,7 +1388,7 @@ impl<'o> Machine<'o> {
                         diag(
                             "3.7",
                             format!(
-                                "lift.call to unresolved lproc @{callee}; linking is milestone 2"
+                                "lift.call to unresolved lproc @{callee}; linking is required"
                             ),
                         )
                     })?;

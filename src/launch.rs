@@ -892,12 +892,12 @@ pub unsafe extern "C" fn bennett_estimate_run(
         if f.kind == FnKind::Oracle {
             return Err(error(
                 10,
-                "§8.2/§11: E_SCHEDULE_INFEASIBLE: unimplemented: padded oracle resource estimate requires ref@0.8 (b-isa-spec-8r4; bennett-vm-47t); request scheduling from bennett-estimate",
+                "§8.2/§11: E_SCHEDULE_INFEASIBLE: unimplemented: padded oracle resource estimate requires ref@0.8; request scheduling from bennett-estimate",
             ));
         }
         Err(error(
             5,
-            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding (bennett-vm-hsd, isa-0.9); no simulator run is substituted for an estimate",
+            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding; no simulator run is substituted for an estimate",
         ))
     })
 }

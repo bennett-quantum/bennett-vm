@@ -1,4 +1,4 @@
-//! 47t-a: typed coherent source admission, independent of execution.
+//! Typed coherent source admission, independent of execution.
 #[path = "support/source09.rs"]
 mod support;
 use support::source;

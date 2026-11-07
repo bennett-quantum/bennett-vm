@@ -1403,7 +1403,7 @@ fn bind_formals(
             }
             _ => {
                 return Err(err(format!(
-                    "unavailable.reason: typed {ty} binding/linked-source formation is staged in bennett-vm-47t"
+                    "unavailable.reason: typed {ty} binding/linked-source formation is unavailable"
                 )));
             }
         };

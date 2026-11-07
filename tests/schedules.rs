@@ -301,7 +301,7 @@ fn every_published_h_scenario_is_retained_with_loud_library_refusal() {
             }
         } else {
             let refusal = sched::require_library(None).unwrap_err();
-            assert!(refusal.contains("b-isa-spec-8r4"), "{sentence}: {refusal}");
+            assert!(refusal.contains("no published operation/ordinal/scratch/removability document"), "{sentence}: {refusal}");
         }
         checked += 1;
     }

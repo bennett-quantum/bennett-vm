@@ -941,7 +941,7 @@ impl Machine {
             "call" => {
                 let name = xs[0].trim_start_matches('@');
                 let f = obj.function(name).ok_or_else(|| {
-                    format!("unimplemented: unresolved call @{name} (milestone 2 linking)")
+                    format!("unimplemented: unresolved call @{name}")
                 })?;
                 let values = get!(self.operands(&xs[1..]));
                 get!(self.transfer(&values, &f.lists[0]));
@@ -1140,7 +1140,7 @@ impl Machine {
                     }
                     result = Some(Value::Qreg(id));
                 }
-                _ => return Err(format!("unimplemented: {op} (milestone 2)")),
+                _ => return Err(format!("unimplemented: {op}")),
             },
             "measure" => {
                 let id = get!(self.id(&xs[0]));
@@ -1176,7 +1176,7 @@ impl Machine {
                 result = Some(Value::int(ws.len(), v));
             }
             "action_call" | "oracle_call" | "adj" | "ctl" => return self.region(ins),
-            _ => return Err(format!("unimplemented: {op} (milestone 2)")),
+            _ => return Err(format!("unimplemented: {op}")),
         }
         if let Some(v) = result {
             self.define(&ins.lhs[0], v);
@@ -1570,7 +1570,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     }
     if !matches!(f.kind, FnKind::Cc | FnKind::R) {
         return Err(format!(
-            "unimplemented: reverse {} (§3.6 / exact action reversal) (milestone 3)",
+            "unimplemented: reverse {} (§3.6 / exact action reversal)",
             f.kind.kind_str()
         ));
     }
@@ -2754,7 +2754,7 @@ mod scaling_tests {
 
     #[test]
     fn launch_measure_with_width_suffix_draws_like_measure() {
-        // bennett-vm-4ke: Runtime::step supplies the draw for both spellings.
+        // Runtime::step supplies the draw for both spellings.
         for op in ["measure", "measure.i1"] {
             let mut run = run_for(&format!("q = qreg.new any 1\nr = {op} q\nret r"));
             run.step().unwrap();

@@ -416,7 +416,7 @@ fn bound_executable_claim_refuses_unpublished_library() {
         ));
         let e =
             certificate::verify_claim(&o, "toggle", &c, &[], &Budget::default(), &[]).unwrap_err();
-        assert!(e.contains("b-isa-spec-8r4") && e.contains("§11"), "{e}");
+        assert!(e.contains("expansion library ref@0.8") && e.contains("§11"), "{e}");
     }
 }
 
@@ -443,7 +443,7 @@ fn sampler_word_order_singletons_and_unbound_sampled_relation() {
     }
     let e =
         certificate::verify_claim(&obj(), "toggle", &c, &[], &Budget::default(), &[]).unwrap_err();
-    assert!(e.contains("bennett-vm-clw") && e.contains("§12.1"));
+    assert!(e.contains("sampled payload does not define an expected relation") && e.contains("§12.1"));
 }
 
 #[test]

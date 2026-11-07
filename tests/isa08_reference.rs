@@ -2,7 +2,7 @@
 //! the oracle (advisor ruling R1, 2026-11-02): each behaviour below is the reference's,
 //! observed at 0.8 and 0.9 alike, and differs from the pre-vm-fixes VM (d9cb684) at
 //! 0.8. The 0.9 sentence that states it is cited. The 0.8 text defect for draw ties is
-//! b-isa-spec-0h4. Evidence: docs/reviews/2026-11-02-vm-fixes-review.md.
+//! Evidence: docs/reviews/2026-11-02-vm-fixes-review.md.
 use bennett_vm::json::{self, Json};
 use std::{
     path::Path,

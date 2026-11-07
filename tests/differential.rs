@@ -1455,8 +1455,8 @@ fn signed_object(label: &str, version: &str, functions: &str) -> String {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, text).unwrap();
     let path = path.display().to_string();
-    // The reference has neither measure.iN nor qreg[*] yet (b-isa-spec-fuk.7) and
-    // miscomputes 0.9 layout identities (b-isa-spec-7fd): such objects are judged
+    // The reference has neither measure.iN nor qreg[*] yet and
+    // miscomputes 0.9 layout identities: such objects are judged
     // by the 0.9 text.
     if !functions.contains("measure.i")
         && !functions.contains("qreg[*]")
@@ -1480,7 +1480,7 @@ const ENGINES: [&str; 2] = ["interpreter", "jit"];
 
 const SPINNING_ORACLE: &str = "perm_action @perm (t:wire mut) () () () ()\n^entry():\nx t\noracle @orc (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nqjump ^entry\n";
 
-/// bennett-vm-erb: §5.2 writes survive a later action_call on another register.
+/// §5.2 writes survive a later action_call on another register.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn oracle_fault_code_survives_a_later_action_call() {
@@ -1544,7 +1544,7 @@ const ALIAS_CALLS: [(&str, &str); 6] = [
     ("adj-ctl-target", "ctl a adj action_call @flip (b) () () ()"),
 ];
 
-/// bennett-vm-3tx: §3.3 region-call ledger row and "Registers, handles and
+/// §3.3 region-call ledger row and "Registers, handles and
 /// aliases": overlap is a trap before any effect, a read-only control overlap
 /// is legal.
 #[test]
@@ -1651,7 +1651,7 @@ fn region_call_overlaps_trap_before_any_effect() {
                 }
             ),
         );
-        // A 0.9 layout defeats the reference's identity check (b-isa-spec-7fd):
+        // A 0.9 layout defeats the reference's identity check:
         // those shapes are judged by the §3.3 text alone.
         for command in ["run-cc", "reverse", "run-program"] {
             let mut args = s(&[
@@ -1727,12 +1727,12 @@ fn bell_measure_program(measure: &str) -> String {
     )
 }
 
-/// bennett-vm-4ke: measure.iN is a measure for §7.4 uncall and §10 reversal.
+/// measure.iN is a measure for §7.4 uncall and §10 reversal.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn measure_with_width_suffix_blocks_uncall_and_reversal() {
     let path = signed_object("4ke", "0.9", &bell_measure_program("measure.i2"));
-    // The reference has no measure.iN yet (b-isa-spec-fuk.7): the 0.9 text is the
+    // The reference has no measure.iN yet: the 0.9 text is the
     // oracle here, and the plain-measure twin of the same program is differential.
     let plain = signed_object("4ke-plain", "0.8", &bell_measure_program("measure"));
     for entry in ["measurement", "measuring", "bad_uncall"] {
@@ -1773,7 +1773,7 @@ fn measure_with_width_suffix_blocks_uncall_and_reversal() {
     }
 }
 
-/// bennett-vm-w63: 0.9 §10 FAILED -> REVERSED through run-program; 0.8's
+/// 0.9 §10 FAILED -> REVERSED through run-program; 0.8's
 /// eligibility is COMPLETED only and stays.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
@@ -1858,7 +1858,7 @@ fn launch_reverse_accepts_failed_runs_at_0_9() {
     }
 }
 
-/// bennett-vm-h6j: a transfer no host can allocate is a diagnostic (exit 1),
+/// a transfer no host can allocate is a diagnostic (exit 1),
 /// never a panic.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
@@ -1884,7 +1884,7 @@ fn unallocatable_transfers_are_diagnostics_not_panics() {
     }
 }
 
-/// bennett-vm-dwj: §4.1 K17, the first outcome whose cumulative weight is
+/// §4.1 K17, the first outcome whose cumulative weight is
 /// strictly greater than draw x total, judged exactly at a CDF tie.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
@@ -1937,7 +1937,7 @@ fn measurement_draws_compare_exact_born_weights() {
     }
 }
 
-/// bennett-vm-ffj: ill-formed under the text at both versions. Each is rejected
+/// ill-formed under the text at both versions. Each is rejected
 /// at load by every command that loads an object.
 const ILL_FORMED: [(&str, &str, &str); 23] = [
     (
@@ -2147,7 +2147,7 @@ const UNCALL_PRELUDE: &str = "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () 
 
 /// §5.5's admitted pairs: nested LIFO, one path each, and an intervening store,
 /// "an intervening `lift.store` is not ill-formed". A 0.9 layout defeats the
-/// reference's identity check (b-isa-spec-7fd), so the store is judged by the text.
+/// reference's identity check, so the store is judged by the text.
 #[test]
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn matched_oracle_uncalls_are_admitted() {

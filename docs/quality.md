@@ -103,3 +103,17 @@ passed 46 unit + 313 integration tests (72 ignored); it includes absent-operand,
 partial-snapshot, invalid-kernel and cache-mutation cases. Remaining legacy
 opcode spelling adapters in dense-owned executors have owner/bead
 bennett-vm-bai for integration after bjm-dense.
+
+Source hygiene: the source grep for full internal issue IDs, shift/job labels
+and numbered milestone references is now empty. User-facing refusals retain
+published sections and concrete missing capabilities. Two old assertions
+still depended on issue labels; they now check the corresponding expansion
+library/qload refusal. Both focused tests pass. The ignored C11 scheduler
+consumer also passed after updating its semantic diagnostic assertion.
+
+Out-of-scope tracked litter is owned by the orchestrator under bennett-vm-dhx:
+`.beads/hooks/pre-push.backup` and `docs/PROGRESS.md`, plus missing ignore
+patterns. This job cannot edit those paths. README now documents the actual
+pinned test layout and gate rather than the obsolete live-sibling overrides
+or earlier release-gate procedure. The remaining tracked files are counted
+as baseline exceptions, not described as removed.

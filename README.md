@@ -1,92 +1,70 @@
 # bennett-vm
 
-Independent, std-only Rust implementation of the accepted Bennett ISA 0.8 (ISA 0.9 partially consumed; see below).
-Milestones 1–3 provide object loading/validation and identities, the bounded
-oracle interpreter, CC/R execution with retained history and tapes, region
-calls, one-shot launch, and a stateful C library. It consumes published specs, never the reference
-interpreter's code.
+Independent, std-only Rust device runtime for Bennett ISA 0.8, with partial
+ISA 0.9 consumption recorded in [SPEC_VERSIONS.toml](SPEC_VERSIONS.toml).
+The published specs define the contracts; the reference interpreter is an
+external CLI oracle in tests.
 
-Implemented commands use the reference interpreter's names and JSON shapes:
-`check`, `hash`, `run-oracle`, `step-check`, `run-action`, `run-cc`,
-`reverse` (all tiers), and `run-program`.
-Run `bennett-vm help` for options. Errors go to stderr and exit 1; a program
-fault is a JSON `FAILED` run with no results. Unsupported later milestones
-fail explicitly with their plan item. Memory-digest serialization is local;
-see [verification and comparison limits](docs/PROGRESS.md).
+Commands: check, hash, run-oracle, step-check, run-action, run-cc, reverse
+(all tiers), and run-program. Run bennett-vm help for options. Diagnostics go
+to stderr and exit 1; program faults produce a FAILED JSON run.
 
-CC/R `run-cc`, `reverse`, and `run-program` accept `--tape-out file` and
-`--replay-tape file` (each once). The former saves a canonical JSON effect
-journal plus LF, including effects subsequently cancelled by segment `uncall`.
-Replay consumes and checks dev/op/integer args/transferred bytes before each
-effect commits, using the supplied entropy. Missing, changed or extra entries
-fail with a `replay mismatch` diagnostic (exit 1, no stdout or tape-output write).
-Malformed tapes and file errors also fail loudly. Use identical inputs, budgets,
-entropy, replies and prefix length; valid replay produces byte-identical stdout.
-`reverse --steps N` saves/checks that forward prefix; whole-run reversal retains
-the saved journal while restoring the active tape and device state to entry.
-Program faults can save their successful effect prefix; a failing effect adds
-no entry. The output JSON schema is unchanged, including its active `tape`.
+Oracle input accepts --mem name=hex and --mem-file name=path. The latter
+reads binary bytes directly, including images too large for a hex argument.
+It is supported by run-oracle, step-check and oracle reversal; duplicate
+region bindings and invalid region sizes fail before execution.
 
-Build/test headlessly, without network or dependencies:
+CC/R run-cc, reverse and run-program accept --tape-out file and
+--replay-tape file, each once. Replay checks device, operation, integer
+arguments and transferred bytes before effects commit. Use identical inputs,
+budgets, entropy, replies and prefix length. A mismatch is a diagnostic;
+whole-run reversal preserves the saved journal while restoring active state.
 
-```sh
-mkdir -p /home/tobias/Projects/bennett-workspace/bennett-vm/.tmp
+Build and test from this checkout, headlessly and offline:
+
+~~~sh
+mkdir -p .tmp/local
 env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u BROWSER \
-  TMPDIR=/home/tobias/Projects/bennett-workspace/bennett-vm/.tmp \
-  cargo test --manifest-path /home/tobias/Projects/bennett-workspace/bennett-vm/Cargo.toml --offline
-```
+  TMPDIR="$PWD/.tmp/local" CARGO_TARGET_DIR="$PWD/.tmp/local/target" \
+  timeout 180s cargo test --offline -j3 -- --test-threads=4
+~~~
 
-The differential harness requires the sibling ISA repo's built reference
-binary and published fixtures. Override their locations with
-`BENNETT_ISA_REF` and `BENNETT_FIXTURES`; absence is a test failure. The spec
-examples are independently extracted from the sibling published spec.
-Set `BENNETT_HARNESS_COUNTS=1` and add `-- --nocapture` to print comparison counts.
-Milestone 1's gate compared the first 12 fixtures, both spec examples and generated
-boundary cases (counts have grown since; see PROGRESS).
+Tests resolve published fixtures, specs, headers and oracle binaries only
+through the exact ISA SHA in [gate.toml](gate.toml). Materialise its checkout
+with the pinned gate tool's verify command before testing. The resolver uses
+the local gate cache or BENNETT_ISA_SPEC, and rejects a mismatched HEAD.
+It never defaults to a live sibling. The integration modules link once into
+the suite test binary.
 
-[Architecture and milestones](docs/PLAN.md) · [Verified evidence and divergences](docs/PROGRESS.md)
+The default suite excludes exhaustive source expansion, published-oracle
+differentials/conformance and C ABI rebuilds. The gate runs both the default
+suite and every ignored test. A focused slow case can be run with
+cargo test --offline -j3 --test suite -- FILTER --ignored --test-threads=4.
+[Quality evidence](docs/quality.md) records measured timing, coverage, known
+exceptions and the per-file structural baseline. Internal issue tracking
+uses bd; dated reviews remain under docs/reviews/.
 
-The stateful library exports all 41 §10 functions; estimates and coverage
-remain explicit milestone-4–5 stubs. Use [include/bennett_vm.h](include/bennett_vm.h)
-with the published ISA include directory. `cargo build --offline` emits static
-and shared libraries under `target/debug/`. Calls on one program require caller
-synchronization; execution advances at `wait` or `run_step`. VM extensions add
-immutable JCS snapshots and history-prefix reversal. See the C11 consumer in
-[tests/launch_abi.c](tests/launch_abi.c) and contract details in PROGRESS.md.
+The stateful C library uses [include/bennett_vm.h](include/bennett_vm.h)
+with the published ISA headers. Calls on one program require caller
+synchronization; execution advances at wait or run_step. VM extensions
+provide immutable JCS snapshots and history-prefix reversal. The C consumers
+in tests/launch_abi.c and tests/sched_abi.c exercise the ABI.
 
-The gate is the full `cargo test --offline --release` run, sequential per engine
-(`BENNETT_VM_ENGINE=interpreter`, then `jit`; C ABI paths are shared), plus the C launch
-and scheduler consumers. Current pass counts and the published-conformance tally are
-recorded in [HANDOFF.md](HANDOFF.md) and [PROGRESS](docs/PROGRESS.md), not duplicated
-here. Object execution is ISA 0.8; ISA 0.9 is consumed only as a partial capability
-(`SPEC_VERSIONS.toml`, section `isa_0_9`), with the remaining slices tracked in beads.
+Target-backed structured actions and native QRAM execute native operations.
+Actual sequential resource/error ledgers are distinct from resource estimates
+and certificates. Published schedule/library/ordinal support is consumed only
+where implemented; unsupported construction, estimate or schedule requests
+return explicit reasons. ISA 0.9 integration is incomplete.
 
-Milestone 4 remains **partial and blocked**: ISA 0.8 never published its §11 `ref`
-expansion library (ISA 0.9 publishes ref-0.9; consuming it is tracked under
-`bennett-vm-47t`) and `eps_decade` indexing is undefined (`cxg`). Target-backed structured actions and
-native QRAM execute actual native operations. Designated dirty pools, explicit
-accuracy-request batches, class capacities and actual sequential event accounting
-are implemented. Target-backed CLI output and immutable launch snapshots expose
-`target_resources` / `target_error` (accumulated program ledger at that boundary).
-These are not estimates or certificates. Target schema remains exactly ISA §8.
+Set BENNETT_VM_ENGINE=jit before process startup for native CC/R and oracle
+execution (x86-64 Linux). Engine selection is cached once per process.
+Interpreter is the default. Modes baseline, inline, structure, reindex,
+simplify and optimised expose the private execution passes. They preserve
+reference-row budgets, canonical labels, faults, history and identities.
+Native code threads runtime row helpers and provides nine integer kernels;
+arbitrary widths use runtime helpers. Unsupported hosts fail explicitly.
+BENNETT_JIT_AUDIT=1 prints native execution counters to stderr.
 
-No schedule/library hash/ordinals are fabricated. Lifted/oracle row decomposition,
-non-native memory comparators, verbatim scheduled execution/accounting and
-reproducibility wait on the published expansion contract. Scheduler requests
-return explicit UNSUPPORTED. Finish milestone 4 after publication. Milestone 5
-JIT is implemented independently of that missing target library. No future
-North-Star capability is removed from scope.
-
-Select native execution of CC/R and oracle segments with `BENNETT_VM_ENGINE=jit`
-(current host backend: x86-64 Linux). Interpreter remains default. Individual
-optimisation modes are `inline`, `structure`, `reindex`, `simplify`; `optimised`
-combines them without codegen. The four ISA §5.7 passes preserve reference-row
-budgets, canonical labels, faults, history and identities. Native code threads
-runtime row helpers and emits nine host integer arithmetic kernels; arbitrary
-widths and complex rows use runtime helpers. Unsupported hosts fail explicitly.
-`BENNETT_JIT_AUDIT=1` prints native execution counters to stderr.
-
-The differential gate compares every object image in the recorded corpus through each
-pass, their composition, and JIT mode against the interpreter and the CLI reference;
-identity, validation, pure Q and literal debug commands are also compared. See PROGRESS
-for the counts and their limits.
+The mandatory differential suite compares each optimisation mode and native
+execution with the interpreter and pinned published CLI oracle. Set
+BENNETT_HARNESS_COUNTS=1 and add --nocapture to print comparison counts.

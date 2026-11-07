@@ -398,7 +398,7 @@ fn executable(obj: &Object, name: &str, claim: &Json) -> Result<(), String> {
     crate::sched::validate_entries(&schedule, obj, &ids)?;
     crate::sched::require_library(schedule.get("bindings").and_then(|b| b.get("expansion")))?;
     Err(err(
-        "unimplemented: invocation-context realisation requires §11 ref@0.8 (b-isa-spec-8r4; bennett-vm-47t)",
+        "unimplemented: invocation-context realisation requires §11 ref@0.8",
     ))
 }
 /// Replay one claim. `args` and `budget` are resolved invocation parameters;
@@ -432,7 +432,7 @@ fn verify_claim_impl(
         "structural" => structural(obj, name, claim, args, budget, libraries),
         "exhaustive" | "sampled" => {
             let kind = string(claim, "kind")?;
-            let expected = claim.get("expected").ok_or_else(||err("unimplemented: §12.1 sampled payload does not define an expected relation/default (bennett-vm-clw, isa-0.9); replay request from bennett-driver must bind the comparison"))?;
+            let expected = claim.get("expected").ok_or_else(||err("unimplemented: §12.1 sampled payload does not define an expected relation/default; replay request from bennett-driver must bind the comparison"))?;
             if expected.as_str() == Some("oracle") {
                 executable(obj, name, claim)?;
                 unreachable!()
@@ -958,7 +958,7 @@ pub(crate) fn verify_embedded(
     // claiming they were verified from this single invocation would be false.
     if doc.get("composition").is_some() {
         return Err(err(
-            "unimplemented: §12.3 multiplicities/error composition requires bound schedule ref@0.8 (b-isa-spec-8r4); bennett-estimate request",
+            "unimplemented: §12.3 multiplicities/error composition requires bound schedule ref@0.8; bennett-estimate request",
         ));
     }
     Ok(())
@@ -1081,13 +1081,13 @@ pub fn verify_claim09(
     let (args, budget) = crate::invocation::resolve(obj, name, field(claim, "invocation")?)?;
     if subject.get("schedule_hash").is_some() || controls != 0 {
         return Err(err(
-            "unavailable.reason: scheduled/controlled 0.9 invocation replay requires full bound realisation (bennett-vm-47t, bennett-vm-clw)",
+            "unavailable.reason: scheduled/controlled 0.9 invocation replay requires full bound realisation",
         ));
     }
     let kind = string(claim, "kind")?;
     if !["exhaustive", "sampled"].contains(&kind) {
         return Err(err(
-            "unavailable.reason: standalone structural/universal 0.9 invocation checks staged in bennett-vm-clw",
+            "unavailable.reason: standalone structural/universal 0.9 invocation checks is unavailable",
         ));
     }
     let expected = field(claim, "expected")?;

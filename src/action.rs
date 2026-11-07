@@ -807,7 +807,7 @@ impl<'o> Exec<'o> {
                 self.state
                     .apply_exact(t, &pred, Exact::rotation(&ins.op, th));
             }
-            _ => return Err(format!("unimplemented: gate {} (milestone 3)", ins.op)),
+            _ => return Err(format!("unimplemented: gate {}", ins.op)),
         }
         Ok(())
     }
@@ -866,7 +866,7 @@ impl<'o> Exec<'o> {
                         n
                     });
                 }
-                _ => return Err(format!("unimplemented: implicit gate {op} (milestone 4)")),
+                _ => return Err(format!("unimplemented: implicit gate {op}")),
             }
             return Ok(());
         }
@@ -929,7 +929,7 @@ impl<'o> Exec<'o> {
             t.validate_predicate_depth(self.pred.len())?;
             let qram = crate::target::field(&t.document, "qram")?;
             if qram == &crate::json::Json::Null {
-                return Err("unimplemented: quantum-memory comparator expansion (milestone 4); unpublished ref library (bennett-vm-47t)".into());
+                return Err("unimplemented: quantum-memory comparator expansion; unpublished ref library".into());
             }
             let vars = BTreeMap::from([
                 ("a".into(), crate::target::Rational::from(region.a as u64)),
@@ -1335,7 +1335,7 @@ impl<'o> Exec<'o> {
             "oracle_call" | "action_call" | "adj" | "ctl" => self.exec_region_call(ins),
             "qinplace" => self.exec_qinplace(ins),
             _ => Err(format!(
-                "unimplemented: Q instruction {op} in @{} (milestone 3)",
+                "unimplemented: Q instruction {op} in @{}",
                 self.func
             )),
         }
@@ -1827,7 +1827,7 @@ pub fn execute_action_with_idle(
 ) -> Result<(), String> {
     let f = obj
         .function(name)
-        .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking (milestone 2)")))?;
+        .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking")))?;
     let bound = (obj.isa == "0.9").then(|| bind_allocations(f));
     let f = bound.as_ref().unwrap_or(f);
     if !matches!(
@@ -2339,7 +2339,7 @@ impl QuantumState {
         self.target = Some(std::sync::Arc::new(target));
         Ok(())
     }
-    /// Actual execution accounting, separate from the milestone-5 estimate ABI.
+    /// Actual execution accounting, separate from the estimate ABI.
     pub fn target_accounting(&self) -> Result<crate::json::Json, String> {
         let mut result = self
             .target

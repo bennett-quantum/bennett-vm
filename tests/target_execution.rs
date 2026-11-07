@@ -437,7 +437,7 @@ fn direct_target_actions_refuse_unpublished_row_expansion() {
     )
     .unwrap_err();
     assert!(
-        e.contains("unimplemented:") && e.contains("milestone 4") && e.contains("47t"),
+        e.contains("unimplemented:") && e.contains("gate-level expansion for qload"),
         "{e}"
     );
 }

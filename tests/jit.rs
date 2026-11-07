@@ -181,7 +181,7 @@ fn unknown_engine_fails_explicitly_before_any_command() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         String::from_utf8(output.stderr).unwrap().trim(),
-        "unimplemented: execution engine unknown (milestone 5)"
+        "unimplemented: execution engine unknown"
     );
 }
 

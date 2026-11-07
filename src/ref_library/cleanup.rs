@@ -72,7 +72,7 @@ impl Catalog {
             .collect::<Vec<_>>();
         if crate::sched::select(&selectors, &address)?.is_some() {
             return Err(err(
-                "unavailable.reason: exact whole-source cleanup pairing remains staged in bennett-vm-47t-c",
+                "unavailable.reason: exact whole-source cleanup pairing is unavailable",
             ));
         }
         self.walk(field(c, "body")?, env, out, next, active)

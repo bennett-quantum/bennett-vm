@@ -122,7 +122,7 @@ fn read_selection() -> Result<Option<(Passes, bool)>, String> {
         "jit" => Some((Passes::all(), true)),
         _ => {
             return Err(format!(
-                "unimplemented: execution engine {mode} (milestone 5)"
+                "unimplemented: execution engine {mode}"
             ));
         }
     })
@@ -476,7 +476,7 @@ mod native {
         fn finish(mut self) -> Result<Vec<u8>, String> {
             for (at, target) in self.fixups {
                 let rel = i32::try_from(self.labels[target] as i64 - (at + 4) as i64)
-                    .map_err(|_| "unimplemented: JIT code larger than rel32 (milestone 5)")?;
+                    .map_err(|_| "unimplemented: JIT code larger than rel32")?;
                 self.bytes[at..at + 4].copy_from_slice(&rel.to_le_bytes());
             }
             Ok(self.bytes)
@@ -526,7 +526,7 @@ mod native {
                     }
                     _ => {
                         return Err(format!(
-                            "unimplemented: native integer kernel {op} (milestone 5)"
+                            "unimplemented: native integer kernel {op}"
                         ));
                     }
                 }
@@ -695,11 +695,11 @@ mod native {
     use super::*;
     pub struct Code;
     pub fn arithmetic(_: &str, _: u64, _: u64, _: usize) -> Result<u64, String> {
-        Err("unimplemented: JIT host arithmetic for this host (milestone 5)".into())
+        Err("unimplemented: JIT host arithmetic for this host".into())
     }
     impl Code {
         pub fn compile(_: &[Node], _: usize) -> Result<Self, String> {
-            Err("unimplemented: JIT host codegen for this host (milestone 5)".into())
+            Err("unimplemented: JIT host codegen for this host".into())
         }
         pub fn run(
             &self,

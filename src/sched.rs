@@ -249,7 +249,7 @@ pub fn require_library(expansion: Option<&Json>) -> Result<(), String> {
         .and_then(Json::as_str)
         .unwrap_or("0.8");
     Err(error(format!(
-        "unimplemented: expansion library {name}@{version} (milestone 4); no published operation/ordinal/scratch/removability document is available (b-isa-spec-8r4; bennett-vm-47t)"
+        "unimplemented: expansion library {name}@{version}; no published operation/ordinal/scratch/removability document is available"
     )))
 }
 /// K57 binds an omitted expansion to the object's own ISA version.

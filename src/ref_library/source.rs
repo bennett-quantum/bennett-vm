@@ -232,7 +232,7 @@ pub(super) fn action_body(
     }
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction) {
         return Err(err(
-            "unavailable.reason: linked oracle construction staged in bennett-vm-47t",
+            "unavailable.reason: linked oracle construction is unavailable",
         ));
     }
     let bound = (object.isa == "0.9").then(|| crate::action::bind_allocations(f));
@@ -504,7 +504,7 @@ impl Source {
     }
     // Match a whole written inverse at source level before any cleanup leaf
     // is expanded. Keep the original row wrappers for reverse; recompute is
-    // newly instantiated at the release point (see ISA b-isa-spec-5cd).
+    // newly instantiated at the release point.
     fn inverse_rows(a: &Instr, b: &Instr) -> bool {
         if a.op == b.op && a.operands == b.operands && (a.op == "qif" || a.op == "qloop") {
             return a.nested.len() == b.nested.len()
@@ -2289,7 +2289,7 @@ impl Source {
                 if op != "action_call" {
                     if operands.get(offset).map(String::as_str) != Some("action_call") {
                         return Err(err(
-                            "unavailable.reason: source oracle call construction staged in bennett-vm-47t",
+                            "unavailable.reason: source oracle call construction is unavailable",
                         ));
                     }
                     offset += 1;
@@ -2545,7 +2545,7 @@ impl Source {
             }
             _ => {
                 return Err(err(format!(
-                    "unavailable.reason: source {op} symbol/row formation staged in bennett-vm-47t"
+                    "unavailable.reason: source {op} symbol/row formation is unavailable"
                 )));
             }
         };

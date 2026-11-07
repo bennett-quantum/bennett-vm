@@ -1,5 +1,7 @@
 # bennett-vm
 
+Workspace status: [bennett/HANDOFF.md](../bennett/HANDOFF.md).
+
 Independent, std-only Rust device runtime for Bennett ISA 0.8, with partial
 ISA 0.9 consumption recorded in [SPEC_VERSIONS.toml](SPEC_VERSIONS.toml).
 The published specs define the contracts; the reference interpreter is an

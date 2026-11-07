@@ -146,6 +146,10 @@ git ls-files | rg '(__pycache__|[.]pyc$|[.]log$|LOCK$|[.]backup$|[.]darc$|PROGRE
 The first search has no matches; the second lists only the two scoped
 exceptions above. Full machine-readable per-file distribution/mass follows.
 
+Repository HANDOFF.md is retired; README points to the workspace handoff.
+The red presence/pointer check now passes. Dated review and quality evidence
+remain available; transient job progress stays outside tracked files.
+
 <!-- quality-baseline -->
 ```json
 {

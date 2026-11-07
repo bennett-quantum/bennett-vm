@@ -36,3 +36,21 @@ specs and binaries resolve through `tests/support/pins.rs` to the full SHA in
 The pin was materialised with the pinned gate tool's `verify` command against
 the main checkout. It is unchanged and currently not reachable from origin/main;
 publication remains orchestrator work.
+
+Coverage (default suite, before the structural refactors):
+`timeout 600s cargo llvm-cov --offline -j3 --lcov --output-path .tmp/quality-vm/coverage.lcov -- --test-threads=4`
+passed (44 unit + 310 integration; 72 gate-only ignored cases). Measured source
+line coverage is **81.71% (23,850 / 29,189)**, summing LCOV LH/LF records for
+`src/`. The resolver verified ISA pin fd626d37aba1f719c3b7b2059be46cbfaf462886.
+This number excludes the mandatory slow gate, so it is a reproducible partial
+measurement, not a full-contract coverage claim.
+
+The five least-covered modules and reasons for the remaining gaps:
+
+| module | covered / lines | reason |
+| --- | --- | --- |
+| sched_abi.rs | 0 / 226 | C consumers require a separate static-library build and run in the gate |
+| ref_library/oracle_direct.rs | 42 / 139 | exhaustive row-carrier execution belongs to oracle_cleanup09 in the slow gate |
+| ref_library/oracle_memory.rs | 113 / 264 | exhaustive memory-carrier reversal belongs to the same slow suite |
+| qcli.rs | 159 / 275 | malformed CLI combinations and state display branches are incompletely covered; the larger differential suite adds command coverage |
+| launch.rs | 568 / 961 | static-library C ABI consumers and oracle differentials run in the slow gate |

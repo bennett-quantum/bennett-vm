@@ -3,7 +3,7 @@
 mod support;
 use bennett_vm::json::{self, Json};
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
 };
 
@@ -53,15 +53,12 @@ fn run(bin: &Path, command: &str, object: &Path, engine: &str) -> Json {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cancellation_keeps_later_definitions_in_both_engines() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let scratch = root.join(format!(".tmp/segment-instances-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
-    let reference = std::env::var_os("BENNETT_ISA_REF")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            root.join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref")
-        });
+    let reference = crate::pins::isa().join("reference-interpreter/target/debug/bennett-isa-ref");
     let vm = Path::new(env!("CARGO_BIN_EXE_bennett-vm"));
     let expected = json::parse(r#"[{"type":"i8","value":"9"}]"#).unwrap();
     for version in ["0.8", "0.9"] {

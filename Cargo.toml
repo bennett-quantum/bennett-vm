@@ -2,8 +2,16 @@
 name = "bennett-vm"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 
 [dependencies]
 
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
+
+[[test]]
+name = "suite"
+path = "tests/suite.rs"
+
+[profile.test]
+debug = "line-tables-only"

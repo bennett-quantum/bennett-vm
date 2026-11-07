@@ -363,9 +363,9 @@ fn arithmetic_catalog_traces_preserve_full_interface_and_clean_scratch() {
 
 #[test]
 fn source_actions_lower_to_the_bound_catalog() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
-        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
     .unwrap();
     let text = text.replace(
@@ -441,9 +441,9 @@ fn source_actions_lower_to_the_bound_catalog() {
 
 #[test]
 fn source_control_order_is_stable_and_duplicates_are_unioned() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
-        root.join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
     .unwrap();
     let text = text.replace(
@@ -507,8 +507,7 @@ fn replay_permutation(
 
 #[test]
 fn source_memory_loops_images_and_borrows_are_full_domain_maps() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects");
+    let root = crate::pins::isa().join("conformance/cases/objects");
     let c = Catalog::published().unwrap();
     for (file, name, t_width, p_width) in [
         ("actions", "flip", 2, 2),
@@ -581,8 +580,7 @@ fn source_memory_loops_images_and_borrows_are_full_domain_maps() {
 
 #[test]
 fn linked_symbols_bind_exact_interfaces_and_keep_callee_ordinals() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects/actions.bisa");
+    let root = crate::pins::isa().join("conformance/cases/objects/actions.bisa");
     let (obj, ids) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
     let hash = ids.closure["flip"].clone().unwrap();
     let mut b = Bindings::new();
@@ -620,8 +618,7 @@ fn linked_symbols_bind_exact_interfaces_and_keep_callee_ordinals() {
 
 #[test]
 fn source_controlled_callees_and_resolved_angle_adjoint() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/conformance/cases/objects/control_flow.bisa");
+    let root = crate::pins::isa().join("conformance/cases/objects/control_flow.bisa");
     let (obj, _) = bennett_vm::load(&std::fs::read_to_string(root).unwrap(), false).unwrap();
     let c = Catalog::published().unwrap();
     for adjoint in [false, true] {
@@ -638,8 +635,7 @@ fn source_controlled_callees_and_resolved_angle_adjoint() {
         assert_eq!(leaves[0].invocation.len(), 1);
         assert_eq!(leaves[0].invocation[0].adjoint, adjoint);
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let root = crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa");
     let raw = std::fs::read_to_string(root)
         .unwrap()
         .replace(

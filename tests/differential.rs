@@ -1,9 +1,7 @@
 //! Differential harness against the reference interpreter binary.
 //!
-//! The oracle is used only through its CLI (brief rule). Paths default to
-//! the sibling `bennett-isa-spec` checkout and may be overridden with
-//! `BENNETT_ISA_REF` / `BENNETT_FIXTURES`. A missing oracle is a failing
-//! test, never a skip.
+//! The oracle is used only through its CLI at the gate pin.
+//! A missing oracle is a failure, never a skip.
 
 #[allow(dead_code)]
 #[path = "support/source09.rs"]
@@ -25,25 +23,11 @@ fn record(args: &[String], out: &Output) {
     }
 }
 
-fn workspace() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
 fn reference() -> PathBuf {
-    if let Ok(p) = std::env::var("BENNETT_ISA_REF") {
-        return PathBuf::from(p);
-    }
-    workspace().join("bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref")
+    crate::pins::isa().join("reference-interpreter/target/debug/bennett-isa-ref")
 }
-
 fn fixtures() -> PathBuf {
-    if let Ok(p) = std::env::var("BENNETT_FIXTURES") {
-        return PathBuf::from(p);
-    }
-    workspace().join("bennett-isa-spec/reference-interpreter/tests/fixtures")
+    crate::pins::isa().join("reference-interpreter/tests/fixtures")
 }
 
 fn vm() -> &'static str {
@@ -182,6 +166,7 @@ fn fx(name: &str) -> String {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn check_and_hash_byte_identical_on_every_fixture() {
     for f in fixture_files() {
         let path = f.display().to_string();
@@ -191,6 +176,7 @@ fn check_and_hash_byte_identical_on_every_fixture() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn run_oracle_differential() {
     let cases: Vec<Vec<String>> = vec![
         s(&[
@@ -543,6 +529,7 @@ fn assert_outcome(case: &str, args: &[String]) {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn classical_control_and_launch_differential() {
     for entry in [
         "sum",
@@ -676,6 +663,7 @@ fn add_cc(
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn every_fixture_symbol_executes_through_cli() {
     use bennett_vm::object::{FnKind, Type};
     let mut counts = (0, 0, 0);
@@ -814,6 +802,7 @@ fn every_fixture_symbol_executes_through_cli() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn retained_instances_survive_segment_cancellation() {
     let text = std::fs::read_to_string(fixtures().join("classical.bisa")).unwrap();
     let text = add_cc(
@@ -831,6 +820,7 @@ fn retained_instances_survive_segment_cancellation() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn admitted_classical09_rows_differential() {
     let functions = "oracle @o (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { l:reg[1] }\n^entry():\nl = lift.const.i1 0\nlift.retval l\naction @flip (t:wire mut) () () () ()\n^entry():\nx t\nfn r @fixed (q:qreg[2]) (r:qreg[2]) () () ()\n^entry():\nret q\nfn r @fixed_result (q:qreg[*]) (r:qreg[2]) () () ()\n^entry():\nret q\nfn cc @sizes (n:i64) (w:i64, same:i1) () () ()\n^entry():\nq = qreg.new any n\nid = qreg.id q\nalias = qreg.from_id id\nw = qreg.width alias\nagain = qreg.id alias\nsame = icmp.eq id again\nqreg.free alias\nret w same\nfn cc @transfer (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nr = call @fixed q\nw = qreg.width r\nqreg.free r\nret w\nfn cc @result (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nr = call @fixed_result q\nw = qreg.width r\nqreg.free r\nret w\nfn cc @block (n:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any n\nbr ^next(q)\n^next(r:qreg[2]):\nw = qreg.width r\nqreg.free r\nret w\nfn cc @slice (lo:i64, len:i64) (w:i64) () () ()\n^entry():\nq = qreg.new any 3\nv = qreg.slice q lo len\naction_call @flip (v) () () ()\nv2 = qreg.slice q lo len\naction_call @flip (v2) () () ()\nw = qreg.width q\nqreg.free q\nret w\nfn cc @mint (s:i64, h:i64, st:i64, d:i64) (tk:token) () () ()\n^entry():\ntk = budget.mint @o s h st d\nret tk\nfn cc @stop0 () () () () ()\n^entry():\nfault 0\nfn cc @stop42 () () () () ()\n^entry():\nfault 42\nfn cc @stopmax () () () () ()\n^entry():\nfault 18446744073709551615";
     let path = temp_object("classical09-rows", &source09::source(functions));
@@ -913,6 +903,7 @@ fn admitted_classical09_rows_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn reallocated_action_names_and_loop_bindings() {
     let functions = "action @rebind (t:wire mut) (p:wire in) () () ()\nregs {  } bounds {3}\n^entry():\nd = qalloc cold 2\nx d[1]\nx d[1]\nqfree d\nd = qcopy t\nquncopy t d\nd = qalloc cold 1\nqloop 3 {\nqfree d\nd = qalloc hot 1\n}\nqfree d\nfn r @inner (t:qreg[1], p:qreg[1]) () () () ()\n^entry():\naction_call @rebind (t) (p) () ()\nret\nfn cc @main () () () () ()\n^entry():\nt = qreg.new any 1\np = qreg.new any 1\ncall @inner t p\nret";
     let path = temp_object("reallocated-action", &source09::source(functions));
@@ -936,6 +927,7 @@ fn reallocated_action_names_and_loop_bindings() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn zero_and_indexed_memory_addresses() {
     for (width, address, memory) in [(0, "()", "r=02"), (1, "a[1]", "r=0201")] {
         let functions = format!(
@@ -972,6 +964,7 @@ fn zero_and_indexed_memory_addresses() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cross_arm_qif_adjoint_and_reversal() {
     let functions = "action @cross (t:wire mut) (p:wire in) () () ()\n^entry():\nqif p {\nd = qalloc any 1\n} {\nqfree d\n}\nfn r @inner (q:qreg[1], p:qreg[1]) () () () ()\n^entry():\naction_call @cross (q) (p) () ()\nret\nfn cc @main () () () () ()\n^entry():\nq = qreg.new any 1\np = qreg.new any 1\ncall @inner q p\nret";
     let text = source09::source(functions);
@@ -993,6 +986,7 @@ fn cross_arm_qif_adjoint_and_reversal() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn arm_local_qif_adjoint_preserves_versioned_cli_bytes() {
     let functions = "action @local (t:wire mut) (p:wire in) () () ()\n^entry():\nqif p {\nd = qalloc any 1\nx t\ns t\nqfree d\n} {\ne = qalloc any 1\ns t\nx t\nqfree e\n}";
     for version in ["0.8", "0.9"] {
@@ -1015,6 +1009,7 @@ fn arm_local_qif_adjoint_preserves_versioned_cli_bytes() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn spectator_measurement_preserves_rotation_inverse() {
     let functions = "action @rotate (t:wire mut) () () () ()\n^entry():\nry 0.123 t\nfn cc @main () (r:i1) () () ()\n^entry():\nq = qreg.new any 1\ns = qreg.new any 1\naction_call @rotate (q) () () ()\nr = measure s\nadj action_call @rotate (q) () () ()\nqreg.free q\nret r";
     for version in ["0.8", "0.9"] {
@@ -1043,6 +1038,7 @@ fn spectator_measurement_preserves_rotation_inverse() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn host_reply_and_prefix_reversal_differential() {
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(".tmp/host-replies.json");
     std::fs::write(
@@ -1089,6 +1085,7 @@ fn host_reply_and_prefix_reversal_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn action_basis_measurements_differential() {
     use bennett_vm::object::{FnKind, Type};
     let mut cases = 0;
@@ -1208,9 +1205,10 @@ fn action_basis_measurements_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn spec_examples_are_extracted_and_diffed() {
     let spec =
-        std::fs::read_to_string(workspace().join("bennett-isa-spec/spec/Bennett-ISA-Spec.md"))
+        std::fs::read_to_string(crate::pins::isa().join("spec/Bennett-ISA-Spec.md"))
             .unwrap();
     let mut count = 0;
     for fenced in spec
@@ -1231,6 +1229,7 @@ fn spec_examples_are_extracted_and_diffed() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn malformed_classical_types_are_load_errors() {
     let text = std::fs::read_to_string(fixtures().join("classical.bisa")).unwrap();
     for (name, old, new) in [
@@ -1246,6 +1245,7 @@ fn malformed_classical_types_are_load_errors() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn oracle_interface_memory_is_restored() {
     // The bounded computation may overwrite memory; the oracle construction
     // reverses that prefix before returning to its caller (§5.2).
@@ -1273,11 +1273,13 @@ fn oracle_interface_memory_is_restored() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cc_oracle_then_gate_preserves_xor_interpreter() {
     cc_oracle_then_gate_preserves_xor("interpreter");
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cc_oracle_then_gate_preserves_xor_jit() {
     cc_oracle_then_gate_preserves_xor("jit");
 }
@@ -1349,6 +1351,7 @@ fn cc_oracle_then_gate_preserves_xor(engine: &str) {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cc_oracle_then_gate_differential() {
     let path = cc_oracle_then_gate_object("oracle-then-gate-differential");
     for budget in ["0", "2", "3"] {
@@ -1370,6 +1373,7 @@ fn cc_oracle_then_gate_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cc_oracle_xor_budgets_controls_and_arguments() {
     let text = std::fs::read_to_string(fixtures().join("inc8.bisa")).unwrap();
     let text = add_cc(
@@ -1478,6 +1482,7 @@ const SPINNING_ORACLE: &str = "perm_action @perm (t:wire mut) () () () ()\n^entr
 
 /// bennett-vm-erb: §5.2 writes survive a later action_call on another register.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn oracle_fault_code_survives_a_later_action_call() {
     let measured = signed_object(
         "erb-measure",
@@ -1543,6 +1548,7 @@ const ALIAS_CALLS: [(&str, &str); 6] = [
 /// aliases": overlap is a trap before any effect, a read-only control overlap
 /// is legal.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn region_call_overlaps_trap_before_any_effect() {
     for (name, call) in ALIAS_CALLS {
         for (kind, version) in [("cc", "0.9"), ("r", "0.9"), ("cc", "0.8")] {
@@ -1723,6 +1729,7 @@ fn bell_measure_program(measure: &str) -> String {
 
 /// bennett-vm-4ke: measure.iN is a measure for §7.4 uncall and §10 reversal.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn measure_with_width_suffix_blocks_uncall_and_reversal() {
     let path = signed_object("4ke", "0.9", &bell_measure_program("measure.i2"));
     // The reference has no measure.iN yet (b-isa-spec-fuk.7): the 0.9 text is the
@@ -1769,6 +1776,7 @@ fn measure_with_width_suffix_blocks_uncall_and_reversal() {
 /// bennett-vm-w63: 0.9 §10 FAILED -> REVERSED through run-program; 0.8's
 /// eligibility is COMPLETED only and stays.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn failed_runs_reverse_through_run_program_at_0_9() {
     let functions = "fn cc @boom () (r:i64) () () ()\n^entry():\nx = const.i64 1\ny = const.i64 0\nr = udiv x y\nret r\nfn r @inner (d:i64) (r:i64) () () ()\n^entry():\nx = const.i64 1\nr = udiv x d\nret r\nfn cc @nested () (r:i64) () () ()\n^entry():\nd = const.i64 0\nq = qreg.new any 1\nr = call @inner d\nret r\nfn cc @measured () (r:i1, s:i64) () () ()\n^entry():\nq = qreg.new any 1\nr = measure q\nd = const.i64 0\ns = call @inner d\nret r s";
     for version in ["0.8", "0.9"] {
@@ -1806,6 +1814,7 @@ fn failed_runs_reverse_through_run_program_at_0_9() {
 
 /// bennett-vm-w63 through the §10 ABI: bennett_reverse of a FAILED run.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn launch_reverse_accepts_failed_runs_at_0_9() {
     use bennett_vm::launch::*;
     const OK: i32 = 0;
@@ -1852,6 +1861,7 @@ fn launch_reverse_accepts_failed_runs_at_0_9() {
 /// bennett-vm-h6j: a transfer no host can allocate is a diagnostic (exit 1),
 /// never a panic.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn unallocatable_transfers_are_diagnostics_not_panics() {
     for fixture in ["r21/cc-length.bisa", "r21/r-length.bisa"] {
         let path = fx(fixture);
@@ -1877,6 +1887,7 @@ fn unallocatable_transfers_are_diagnostics_not_panics() {
 /// bennett-vm-dwj: §4.1 K17, the first outcome whose cumulative weight is
 /// strictly greater than draw x total, judged exactly at a CDF tie.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn measurement_draws_compare_exact_born_weights() {
     let functions = "action @single (t:wire mut) () () () ()\n^entry():\nh t\naction @h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[1]\naction @h0h1 (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nh t[1]\naction @bell (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\ncx t[0] t[1]\naction @phase (t:wire[2] mut) () () () ()\n^entry():\nh t[0]\nrz 0.5 t[0]\nh t[0]\nry 1.0 t[1]\nfn cc @one (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h1 (q) () () ()\nr = measure q\nret r\nfn cc @two (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @h0h1 (q) () () ()\nr = measure q\nret r\nfn cc @bell_m (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @bell (q) () () ()\nr = measure q\nret r\nfn cc @angle (a:i64) (r:i2) () () ()\n^entry():\nq = qreg.new any 2\naction_call @phase (q) () () ()\nr = measure q\nret r\nfn cc @sequence (a:i64) (r:i1, s:i1) () () ()\n^entry():\nq = qreg.new any 1\nw = qreg.new any 1\naction_call @single (q) () () ()\naction_call @single (w) () () ()\nr = measure q\ns = measure w\nret r s";
     for version in ["0.8", "0.9"] {
@@ -2047,6 +2058,7 @@ const ILL_FORMED: [(&str, &str, &str); 23] = [
 ];
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn ill_formed_objects_are_rejected_at_load() {
     let mut escaped = vec![];
     for version in ["0.8", "0.9"] {
@@ -2109,6 +2121,7 @@ const CLEANUPS: [(&str, &str); 16] = [
 ];
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn exact_inverse_cleanups_are_admitted() {
     for version in ["0.8", "0.9"] {
         for (name, body) in CLEANUPS {
@@ -2136,6 +2149,7 @@ const UNCALL_PRELUDE: &str = "oracle @inner (x:wire in) (t:wire) (f:wire[4]) () 
 /// "an intervening `lift.store` is not ill-formed". A 0.9 layout defeats the
 /// reference's identity check (b-isa-spec-7fd), so the store is judged by the text.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn matched_oracle_uncalls_are_admitted() {
     for (name, regs, body) in [
         (
@@ -2194,6 +2208,7 @@ fn matched_oracle_uncalls_are_admitted() {
 /// instruction creates a new instance". The reference rejects this object
 /// ("SSA definition reused"), which is filed against it; the text decides.
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn cc_names_may_have_several_defining_instructions() {
     let text = source09::source(
         "fn cc @main () (r:i8) () () ()\n^entry():\nr = const.i8 1\nr = const.i8 2\nret r",
@@ -2241,6 +2256,7 @@ fn ill_formed_text(version: &str, functions: &str) -> String {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn classical_rows_and_boundary_faults() {
     let text = std::fs::read_to_string(fixtures().join("classical.bisa")).unwrap();
     for op in [
@@ -2313,6 +2329,7 @@ fn classical_rows_and_boundary_faults() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn history_reverses_actual_region_invocations() {
     let text = std::fs::read_to_string(fixtures().join("registers.bisa")).unwrap();
     let t = add_cc(
@@ -2545,6 +2562,7 @@ fn coherent_corpus(path: &Path) {
     }
 }
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn coherent_commands_on_every_fixture() {
     for path in fixture_files() {
         coherent_corpus(&path);
@@ -2552,9 +2570,10 @@ fn coherent_commands_on_every_fixture() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn published_d_and_g_cli_cases_differential() {
     // Re-run every runnable D/G command; staged scenarios have no oracle surface.
-    let cases = workspace().join("bennett-isa-spec/conformance/cases");
+    let cases = crate::pins::isa().join("conformance/cases");
     let mut compared = 0;
     for suite in ["D", "G"] {
         let mut dirs = std::fs::read_dir(cases.join(suite))
@@ -2599,6 +2618,7 @@ fn published_d_and_g_cli_cases_differential() {
 #[path = "support/device.rs"]
 mod device_fixture;
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn block_image_boundaries_differential() {
     let raw = device_fixture::block_object(true);
     let path = temp_object("full-sector-block", &raw); // includes independent check comparison
@@ -2616,6 +2636,7 @@ fn block_image_boundaries_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn jit_transformation_boundaries_differential() {
     // §5.7 T6; §3.6 observable canonical labels; §14.1 every row is a
     // budget step. These witnesses supplement, never replace, all fixtures.
@@ -2697,11 +2718,12 @@ fn jit_transformation_boundaries_differential() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn certificate_replay_requests_differential() {
     // §12.1 has no CLI verdict surface in the reference. Its run-oracle and
     // run-action surfaces do serve the underlying requests, including full
     // target/fault tuples and inverse pairs. Compare those, never invented CLI.
-    let root = workspace().join("bennett-isa-spec/conformance/cases/objects");
+    let root = crate::pins::isa().join("conformance/cases/objects");
     let pair = root.join("qinplace.bisa").display().to_string();
     for input in 0..4 {
         for name in ["inc2", "dec2"] {

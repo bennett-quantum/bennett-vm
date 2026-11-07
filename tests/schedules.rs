@@ -81,11 +81,9 @@ fn unknown_expansion_is_rejected_even_without_explicit_binding() {
 }
 #[test]
 fn schedule_validates_paths_and_cleanup_before_library_rejection() {
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(
-        repo.parent()
-            .unwrap()
-            .join("bennett-isa-spec/conformance/cases/objects/sched_inc8.bisa"),
+        crate::pins::isa().join("conformance/cases/objects/sched_inc8.bisa"),
     )
     .unwrap();
     let (obj, ids) = bennett_vm::load(&text, false).unwrap();
@@ -151,10 +149,7 @@ fn lower_specificity_ties_do_not_invalidate_unique_maximum() {
 #[test]
 fn all_schedule_bindings_are_checked_before_consumption() {
     use bennett_vm::{sched::Bindings, target::Target};
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases");
+    let root = crate::pins::isa().join("conformance/cases");
     let (object, ids) = bennett_vm::load(
         &std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap(),
         false,
@@ -231,12 +226,12 @@ fn all_schedule_bindings_are_checked_before_consumption() {
 #[test]
 fn data_symbol_is_not_an_instruction_path() {
     // §11 path is a chain of program points, never a data entry.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
     let (obj, ids) = bennett_vm::load(
         &std::fs::read_to_string(
-            root.join("bennett-isa-spec/conformance/cases/objects/actions.bisa"),
+            crate::pins::isa().join("conformance/cases/objects/actions.bisa"),
         )
         .unwrap(),
         false,
@@ -257,10 +252,7 @@ fn data_symbol_is_not_an_instruction_path() {
 fn every_published_h_scenario_is_retained_with_loud_library_refusal() {
     // §11: consumer validates paths and executes verbatim or rejects; it must
     // never invent the unpublished ref operation ordinals to make H go green.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases");
+    let root = crate::pins::isa().join("conformance/cases");
     let (obj, ids) = bennett_vm::load(
         &std::fs::read_to_string(root.join("objects/sched_inc8.bisa")).unwrap(),
         false,

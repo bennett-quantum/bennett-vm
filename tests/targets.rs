@@ -12,12 +12,7 @@ fn j(s: &str) -> Json {
 }
 fn published(case: &str, file: &str) -> String {
     std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join(format!(
-                "bennett-isa-spec/conformance/cases/E/{case}/{file}"
-            )),
+        crate::pins::isa().join(format!("conformance/cases/E/{case}/{file}")),
     )
     .unwrap()
 }
@@ -236,10 +231,7 @@ fn launch_uses_target_scheme_and_rejects_missing_alphabet() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmp = repo.join(".tmp/target-launch");
     std::fs::create_dir_all(&tmp).unwrap();
-    let object = repo
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases/objects/registers.bisa");
+    let object = crate::pins::isa().join("conformance/cases/objects/registers.bisa");
     let mut v = base();
     if let Json::Obj(m) = &mut v {
         m.insert("gates".into(),j(r#"[{"op":"h","classes":["*"],"controls":{"min":0,"max":0},"epsilon":0,"cost":{"time":1}},{"op":"s","classes":["*"],"controls":{"min":0,"max":0},"epsilon":0,"cost":{"time":1}},{"op":"cx","classes":["*"],"controls":{"min":1,"max":1},"epsilon":0,"cost":{"time":1}}]"#));
@@ -376,11 +368,9 @@ fn jcs_class_order_uses_utf16_not_utf8() {
 #[test]
 fn targeted_c_launch_capacity_and_reverse_metadata() {
     use bennett_vm::launch::*;
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let raw = std::fs::read(
-        repo.parent()
-            .unwrap()
-            .join("bennett-isa-spec/conformance/cases/objects/registers.bisa"),
+        crate::pins::isa().join("conformance/cases/objects/registers.bisa"),
     )
     .unwrap();
     let mut v = base();

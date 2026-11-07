@@ -6,10 +6,7 @@ use bennett_vm::{
 use std::{collections::BTreeMap, path::PathBuf};
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/fixtures/accepted-k83-09")
+    crate::pins::isa().join("conformance/fixtures/accepted-k83-09")
 }
 fn vectors() -> Json {
     bennett_vm::json::parse(&std::fs::read_to_string(fixtures().join("k83.json")).unwrap()).unwrap()

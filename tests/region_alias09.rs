@@ -36,13 +36,7 @@ fn alias(engine: &str) {
                 std::process::id()
             ));
             std::fs::write(&path, text).unwrap();
-            let reference = std::env::var_os("BENNETT_ISA_REF")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| {
-                    Path::new(env!("CARGO_MANIFEST_DIR")).join(
-                        "../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref",
-                    )
-                });
+            let reference = crate::pins::isa().join("reference-interpreter/target/debug/bennett-isa-ref");
             for bin in [
                 &reference,
                 &Path::new(env!("CARGO_BIN_EXE_bennett-vm")).to_path_buf(),
@@ -70,15 +64,18 @@ fn alias(engine: &str) {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn dynamic_region_alias_traps_interpreter() {
     alias("interpreter");
 }
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn dynamic_region_alias_traps_jit() {
     alias("jit");
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn oracle_slots_trap_all_dynamic_alias_pairs_on_both_engines() {
     for engine in ["interpreter", "jit"] {
         for actuals in [
@@ -118,6 +115,7 @@ fn oracle_slots_trap_all_dynamic_alias_pairs_on_both_engines() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn action_entry_rejects_invalid_bindings_before_any_gate() {
     use bennett_vm::action::{QuantumState, RegionWires, execute_action_inner};
     let text = support::source(

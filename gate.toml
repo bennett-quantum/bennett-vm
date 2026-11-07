@@ -6,10 +6,15 @@ timeout_s = 14400
 
 [env]
 CARGO_TARGET_DIR = "{root}/.tmp/gate-target"
+BENNETT_ISA_SPEC = "{sibling:bennett-isa-spec}"
 
 [[check]]
 name = "cargo test"
-argv = ["cargo", "test", "--offline"]
+argv = ["cargo", "test", "--offline", "-j3", "--", "--test-threads=4"]
+
+[[check]]
+name = "slow and published-oracle tests"
+argv = ["cargo", "test", "--offline", "-j3", "--", "--ignored", "--test-threads=4"]
 
 [siblings."bennett-isa-spec"]
 sha = "fd626d37aba1f719c3b7b2059be46cbfaf462886"

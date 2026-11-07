@@ -14,7 +14,7 @@ fn dir(name: &str) -> PathBuf {
     path
 }
 fn fixture() -> PathBuf {
-    root().join("../bennett-isa-spec/reference-interpreter/tests/fixtures/classical.bisa")
+    crate::pins::isa().join("reference-interpreter/tests/fixtures/classical.bisa")
 }
 fn run(command: &str, path: &std::path::Path, entry: &str, options: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_bennett-vm"))

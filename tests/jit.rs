@@ -3,12 +3,8 @@ use bennett_vm::{
     jit::{Passes, Program},
     object,
 };
-use std::path::Path;
 fn fixture(name: &str) -> object::Object {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures")
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures")
         .join(name);
     bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false)
         .unwrap()

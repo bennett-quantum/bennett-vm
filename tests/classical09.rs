@@ -268,17 +268,13 @@ fn minted_budget_rows_jit() {
 }
 
 #[test]
+#[ignore = "published oracle differential; mandatory in the gate"]
 fn incoming_tokens_with_equal_tuples_keep_distinct_identities() {
     let distinct = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token, b:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (b) (r)\nret";
     let same = "fn r @echo (t:token) (r:token) () () ()\n^entry():\nret t\nfn cc @main (a:token) () () () ()\n^entry():\nr = call @echo a\nuncall @echo (a) (r)\nret";
     let distinct = format!("{ORACLE}{distinct}");
     let same = format!("{ORACLE}{same}");
-    let reference = std::env::var_os("BENNETT_ISA_REF")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../bennett-isa-spec/reference-interpreter/target/debug/bennett-isa-ref")
-        });
+    let reference = crate::pins::isa().join("reference-interpreter/target/debug/bennett-isa-ref");
     for binary in [
         reference.as_path(),
         std::path::Path::new(env!("CARGO_BIN_EXE_bennett-vm")),

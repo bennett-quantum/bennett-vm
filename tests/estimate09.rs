@@ -59,11 +59,11 @@ fn resolved_arguments_are_bit_exact_and_have_no_defaults() {
 }
 #[test]
 fn aggregation_retains_classes_escaped_keys_and_exact_rationals() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let _root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
     let mut t = j(&std::fs::read_to_string(
-        root.join("bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json"),
+        crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json"),
     )
     .unwrap());
     if let Json::Obj(m) = &mut t {

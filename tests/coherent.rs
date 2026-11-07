@@ -14,10 +14,7 @@ fn hadamard_round_trip_has_exact_support() {
 #[test]
 fn standalone_action_is_served() {
     // §14.2: Bell from |00> = (|00>+|11>)/√2, phase included.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa");
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
         .args(["run-action", p.to_str().unwrap(), "bell", "--mut", "0"])
         .output()
@@ -27,10 +24,7 @@ fn standalone_action_is_served() {
 #[test]
 fn literal_step_prefix_is_served() {
     // §3.6: after the inverse step every frame field is clean.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/inc8.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/inc8.bisa");
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
         .args([
             "reverse",
@@ -48,10 +42,7 @@ fn literal_step_prefix_is_served() {
 #[test]
 fn designated_borrow_preserves_entangled_reference() {
     // §5.6: declared operation ⊗ identity on any external system entangled with B.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let (obj, _) = bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false).unwrap();
     let mut s = QuantumState::new();
     let ws = s.alloc_wires(4); // target, input, borrowed, reference
@@ -92,10 +83,7 @@ fn rotation_inverse_clears_workspace_exactly() {
 #[test]
 fn exhaustive_borrow_proof_accepts_identity_without_lemma_shape() {
     // §5.6 permits a T3 proof over the full domain, alternatively to the lemma.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let text = std::fs::read_to_string(p).unwrap();
     let text = text.replace("cx x b\ncx b t\ncx x b\ncx b t", "cx b t\ncx b t");
     bennett_vm::load(&text, true).unwrap();
@@ -103,10 +91,7 @@ fn exhaustive_borrow_proof_accepts_identity_without_lemma_shape() {
 #[test]
 fn derived_frame_layout_is_fixed_for_recursive_closure() {
     // §3.6: frame layout fixed per oracle; §3.7: W_cell=max(P,Sc,Did,W_max).
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/sum_db.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/sum_db.bisa");
     let (obj, _) = bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false).unwrap();
     let mut m = bennett_vm::step::Machine::new(
         &obj,
@@ -137,10 +122,7 @@ fn derived_frame_layout_is_fixed_for_recursive_closure() {
 #[test]
 fn borrowed_controls_in_lists_are_not_hidden_from_proof() {
     // §5.6: borrowed wires touched as control or target only inside verified frames.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let text = std::fs::read_to_string(p)
         .unwrap()
         .replace("cx x b\ncx b t\ncx x b\ncx b t", "mcx (b) t");
@@ -152,10 +134,7 @@ fn every_reached_row_inverse_restores_complete_pre_step_tuple() {
     // §3.6/T2: Π_t⁻¹ restores every location/cell/counter/stack cell and frame,
     // not just the oracle's eventual payload. Exercise zero, one and all-one entries.
     use bennett_vm::{object::FnKind, value::Value};
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures");
+    let root = crate::pins::isa().join("reference-interpreter/tests/fixtures");
     let mut checked = 0;
     for entry in std::fs::read_dir(root).unwrap() {
         let p = entry.unwrap().path();
@@ -215,10 +194,7 @@ fn every_reached_row_inverse_restores_complete_pre_step_tuple() {
 #[test]
 fn borrow_frames_are_proved_before_nonpermutation_composition() {
     // §5.6: frames are maximal contiguous permutation-only subcircuits.
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let text=std::fs::read_to_string(p).unwrap().replace("qif p {\nh t\n} {\nx t\n}","b = qborrow any 1\ncx p b\ncx b t\ncx p b\ncx b t\nh t\ncx p b\ncx b t\ncx p b\ncx b t\nqreturn b");
     bennett_vm::load(&text, true).unwrap();
     // A nonidentity frame cannot be excused by a second frame undoing it.

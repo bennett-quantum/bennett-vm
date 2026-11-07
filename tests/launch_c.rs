@@ -2,10 +2,7 @@
 use bennett_vm::{json::Json, object};
 use std::{path::Path, process::Command};
 fn fixture() -> String {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures");
+    let root = crate::pins::isa().join("reference-interpreter/tests/fixtures");
     let mut obj =
         object::parse(&std::fs::read_to_string(root.join("classical.bisa")).unwrap()).unwrap();
     for file in ["registers.bisa", "inc8.bisa"] {
@@ -133,6 +130,7 @@ fn fixture() -> String {
     build(syms(Some(&ids)))
 }
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_launch_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmp = repo.join(".tmp/c-abi");
@@ -159,7 +157,7 @@ fn c11_launch_contract() {
         .arg("-I")
         .arg(repo.join("include"))
         .arg("-I")
-        .arg(repo.parent().unwrap().join("bennett-isa-spec/include"))
+        .arg(crate::pins::isa().join("include"))
         .arg(repo.join("tests/launch_abi.c"))
         .arg(tmp.join("target/debug/libbennett_vm.a"))
         .args(["-ldl", "-lpthread", "-lm", "-o"])
@@ -182,14 +180,12 @@ fn c11_launch_contract() {
 }
 
 #[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_sched_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmp = repo.join(".tmp/sched-abi");
     std::fs::create_dir_all(&tmp).unwrap();
-    let root = repo
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases");
+    let root = crate::pins::isa().join("conformance/cases");
     let raw = std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap();
     let (_, ids) = bennett_vm::load(&raw, false).unwrap();
     let object = tmp.join("inc8.bisa");
@@ -220,7 +216,7 @@ fn c11_sched_contract() {
         .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-I"])
         .arg(repo.join("include"))
         .arg("-I")
-        .arg(repo.parent().unwrap().join("bennett-isa-spec/include"))
+        .arg(crate::pins::isa().join("include"))
         .arg(repo.join("tests/sched_abi.c"))
         .arg(tmp.join("target/debug/libbennett_vm.a"))
         .args(["-ldl", "-lpthread", "-lm", "-o"])

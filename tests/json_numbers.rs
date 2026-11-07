@@ -137,10 +137,7 @@ fn jcs_nonfinite_emission_errors() {
 
 #[test]
 fn target_accepts_canonical_numbers_and_preserves_exact_costs() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases/E/E-jcs-target-hash/target.json");
+    let path = crate::pins::isa().join("conformance/cases/E/E-jcs-target-hash/target.json");
     let base = std::fs::read_to_string(path).unwrap();
     let mut original = json::parse(&base).unwrap();
     if let Json::Obj(root) = &mut original

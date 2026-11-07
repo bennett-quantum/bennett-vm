@@ -1,10 +1,7 @@
 //! Published ISA 0.9 admission and byte-exact identity witnesses.
 use bennett_vm::{identity, object};
 fn examples() -> Vec<String> {
-    let spec = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../bennett-isa-spec/spec/Bennett-ISA-Spec-0.9.md"
-    ))
+    let spec = std::fs::read_to_string(crate::pins::isa().join("spec/Bennett-ISA-Spec-0.9.md"))
     .unwrap();
     spec.split("```\n")
         .filter_map(|part| {

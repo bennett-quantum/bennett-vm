@@ -13,10 +13,7 @@ fn j(s: &str) -> Json {
     json::parse(s).unwrap()
 }
 fn target(schemes: &str) -> Target {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases/E/E-matching-first-entry/target.json");
+    let path = crate::pins::isa().join("conformance/cases/E/E-matching-first-entry/target.json");
     let mut v = j(std::fs::read_to_string(path).unwrap().trim_end());
     if let Json::Obj(m) = &mut v {
         m.insert("gates".into(),j(r#"[{"op":"x","classes":["*"],"controls":{"min":0,"max":"unbounded"},"epsilon":0,"cost":{"time":1}},{"op":"cx","classes":["*"],"controls":{"min":1,"max":"unbounded"},"epsilon":0,"cost":{"time":2}},{"op":"ccx","classes":["*"],"controls":{"min":2,"max":"unbounded"},"epsilon":0,"cost":{"time":3}},{"op":"swap","classes":["*"],"controls":{"min":0,"max":"unbounded"},"epsilon":0,"cost":{"time":4}}]"#));
@@ -39,10 +36,7 @@ fn x(w: usize) -> Gate {
     }
 }
 fn object(body: &str) -> bennett_vm::object::Object {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa");
     let raw = std::fs::read_to_string(p).unwrap();
     let raw = raw.replace("h t[0]\ncx t[0] t[1]", body);
     let raw = if body.contains("qloop 2") {
@@ -173,10 +167,7 @@ fn requested_accuracy_executes_selected_native_leaf_and_charges_achieved_error()
 #[test]
 fn while_flags_follow_listed_order_and_release_capacity() {
     // §4.6: "after iteration i < n: ccx ..."; "flags uncomputed in reverse and freed".
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let obj = bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false)
         .unwrap()
         .0;
@@ -268,10 +259,7 @@ fn caller_idle_pool_must_be_disjoint_and_unique() {
 fn local_image_creation_and_cleanup_are_unconditional_native_gates() {
     // §4.6: "unconditional allocation, X gates from the data image";
     // "image gates reversed, cells released clean" even with a false inherited predicate.
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     let raw = std::fs::read_to_string(p)
         .unwrap()
         .replace("d = qload scratch p\nqxor d t\nqunload scratch p d\n", "");
@@ -307,10 +295,7 @@ fn local_image_creation_and_cleanup_are_unconditional_native_gates() {
 }
 
 fn control_object() -> bennett_vm::object::Object {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa");
+    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa");
     bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false)
         .unwrap()
         .0
@@ -633,9 +618,9 @@ fn native_qram_store_exchange_and_load_obey_address_and_inherited_control() {
     // §4.6: for each selected cell, XOR or exchange under a==i. §3.5
     // additionally predicates every operation. Exercise all two-cell contents,
     // both addresses, all target values and both predicate values.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read_to_string(
-        root.join("bennett-isa-spec/reference-interpreter/tests/fixtures/control_flow.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/control_flow.bisa"),
     )
     .unwrap();
     let mut doc = target("[]").document;
@@ -744,9 +729,9 @@ fn launch_snapshot_exposes_actual_accounting_and_keeps_old_snapshots_immutable()
     // §10 snapshots are a VM extension; §8.2 dictates the five classical steps
     // and wire liveness (occupancy 1+2+2=5, peak 2) in @allocation.
     use bennett_vm::launch::*;
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let _root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let raw = std::fs::read(
-        root.join("bennett-isa-spec/reference-interpreter/tests/fixtures/registers.bisa"),
+        crate::pins::isa().join("reference-interpreter/tests/fixtures/registers.bisa"),
     )
     .unwrap();
     let mut doc = target("[]").document;

@@ -1,9 +1,6 @@
 #[test]
 fn spec_rules_precede_stored_identity() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("bennett-isa-spec/conformance/cases/objects");
+    let root = crate::pins::isa().join("conformance/cases/objects");
     let cases = [
         ("f_borrow_neg1", "5.6", "the frame is V; W; V⁻¹; W"),
         (

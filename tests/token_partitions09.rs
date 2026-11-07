@@ -53,3 +53,26 @@ fn published_checker_obligations() {
     let path = crate::pins::isa().join("conformance/fixtures/accepted-k84-09/baseline.bisa");
     bennett_vm::load(&std::fs::read_to_string(path).unwrap(), false).unwrap();
 }
+
+#[test]
+fn source_cleanup_uses_identity_through_forwarding_and_adjoint() {
+    use bennett_vm::{json, ref_library::Catalog};
+    let source = crate::source09::source("oracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x\nperm_action @pair (t:wire mut, f:wire[4] mut) (x:wire in) () (a:token, b:token) ()\n^entry():\noracle_call @identity a (x) t f () ()\noracle_call @identity b (x) t f () ()\nperm_action @outer (t:wire mut, f:wire[4] mut) (x:wire in) () (a:token, b:token) ()\n^entry():\naction_call @pair (t, f) (x) () (a, b)");
+    let (object, _) = bennett_vm::load(&source, false).unwrap();
+    let catalog = Catalog::parse(&std::fs::read_to_string(crate::pins::isa().join("spec/ref-0.9.json")).unwrap()).unwrap();
+    let args = json::parse(r#"[["1","0","0","0"],["1","0","0","0"]]"#).unwrap();
+    for name in ["pair", "outer"] {
+        for adjoint in [false, true] {
+            for (labels, count) in [("[0,0]", 1), ("[0,1]", 0)] {
+                let labels = json::parse(labels).unwrap();
+                let expansion = catalog.lower_action_with_token_aliases(&object, name, &args, adjoint, 0, &[], Some(&labels)).unwrap();
+                assert_eq!(expansion.cleanups.len(), count, "{name} adjoint={adjoint} {labels:?}");
+                if count != 0 {
+                    assert_eq!(expansion.cleanups[0].address.generated, 0);
+                    assert_eq!(expansion.cleanups[0].address.path.last().unwrap().point, if adjoint { "entry:0" } else { "entry:1" });
+                }
+            }
+        }
+    }
+    assert!(catalog.lower_action(&object, "pair", &args, false, 0).unwrap_err().contains("token_aliases"));
+}

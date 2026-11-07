@@ -202,7 +202,7 @@ fn crossing_uncall_pairs() {
         for (label, rows, steps) in admitted {
             let path = object(label, version, &with(rows));
             for engine in ENGINES {
-                let args = argv(&[
+                let mut args = argv(&[
                     "run-oracle",
                     &path,
                     "o",
@@ -211,6 +211,7 @@ fn crossing_uncall_pairs() {
                     "--arg",
                     "token:64",
                 ]);
+                if version == "0.9" { args.extend(argv(&["--token-aliases", "[0,1]"])); }
                 assert_eq!(
                     success(&args, engine).get("steps").unwrap().as_u64(),
                     Some(steps),

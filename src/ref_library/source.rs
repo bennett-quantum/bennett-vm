@@ -1849,11 +1849,11 @@ impl Source {
             let Some(&prior) = occurrences.inverse.get(&index) else {
                 continue;
             };
-            if prior >= index || !matches!(i.op.as_str(), "action_call" | "adj" | "ctl") {
+            if prior >= index || !matches!(i.op.as_str(), "action_call" | "oracle_call" | "adj" | "ctl") {
                 continue;
             }
             let (inverse, _control, op, args) = crate::action::normalize_call(i)?;
-            if !inverse || op != "action_call" {
+            if op != "oracle_call" && (!inverse || op != "action_call") {
                 continue;
             }
             let compute = &instructions[prior];
@@ -1865,15 +1865,12 @@ impl Source {
                 .object
                 .function(args[0].trim_start_matches('@'))
                 .ok_or_else(|| err("missing paired callee"))?;
-            let mut targets = crate::validate::list_operand(&args[1])?;
-            targets.extend(
-                crate::validate::list_operand(&args[3])?
-                    .into_iter()
-                    .zip(&f.lists[2])
-                    .filter(|(_, p)| p.role.as_deref() == Some("mut"))
-                    .map(|(n, _)| n),
-            );
-            let perm = f.kind == FnKind::PermAction;
+            let mut targets = if op == "oracle_call" { args[3..5].to_vec() } else { crate::validate::list_operand(&args[1])? };
+            if op == "action_call" {
+                targets.extend(crate::validate::list_operand(&args[3])?.into_iter()
+                    .zip(&f.lists[2]).filter(|(_, p)| p.role.as_deref() == Some("mut")).map(|(n, _)| n));
+            }
+            let perm = matches!(f.kind, FnKind::PermAction | FnKind::Oracle);
             call_pairs.insert(compute.line, (i.clone(), targets.clone(), perm));
             call_pairs.insert(i.line, (compute.clone(), targets, perm));
         }
@@ -2018,8 +2015,9 @@ impl Source {
                         body
                     }
                 } else if let Some((partner, targets, perm)) = call_pairs.get(&i.line) {
-                    let (call_inverse, control, _, _) = crate::action::normalize_call(i)?;
-                    if call_inverse ^ adjoint {
+                    let (call_inverse, control, op, _) = crate::action::normalize_call(i)?;
+                    let cleanup = if op == "oracle_call" { i.line > partner.line } else { call_inverse };
+                    if cleanup ^ adjoint {
                         let computing = self.instruction(partner, adjoint, env)?;
                         let uncomputing = self.instruction(partner, !adjoint, env)?;
                         {

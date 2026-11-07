@@ -220,7 +220,7 @@ fn nested_oracle_fixed_instances_belong_to_the_entered_invocation_without_lift_c
     let params = json::parse(r#"[["1","0","0","0"],"0","1"]"#).unwrap();
     let expansion = Catalog::published()
         .unwrap()
-        .lower_action_with_cleanup(&obj, "root", &params, false, 0, &[])
+        .lower_action_with_token_aliases(&obj, "root", &params, false, 0, &[], Some(&json::parse("[0]").unwrap()))
         .unwrap();
     for (instance, expected) in [
         ("[0]", true),

@@ -218,3 +218,44 @@ fn full_object_matches_reference_output_within_ten_times_its_walltime() {
     );
     assert!(ratio < 10.0, "VM/reference wall ratio {ratio:.3}");
 }
+
+#[test]
+fn classical_accounting_cost_stays_within_twice_the_initial_cost() {
+    use bennett_vm::target::{Event, Rational, Target};
+    use std::collections::BTreeMap;
+    let target = Target::parse(std::str::from_utf8(TARGET).unwrap()).unwrap();
+    let mut times = vec![];
+    for count in [500u64, 5000, 15000] {
+        // Hand-derived: disjoint unit intervals on no wires consume `count`
+        // time units, zero gates, and zero wire occupancy.
+        let events: Vec<_> = (0..count)
+            .map(|i| Event {
+                start: Rational::from(i),
+                duration: Rational::from(1),
+                wires: vec![],
+                cost: BTreeMap::new(),
+            })
+            .collect();
+        let start = Instant::now();
+        let report = target.account(&events, &[]).unwrap();
+        let elapsed = start.elapsed();
+        eprintln!("{count} classical accounting events: {elapsed:?}");
+        assert_eq!(report.get("time"), Some(&Json::Str(count.to_string())));
+        assert_eq!(report.get("gate_count").unwrap().as_str(), Some("0"));
+        assert_eq!(
+            report
+                .get("qubit_second")
+                .unwrap()
+                .get("data")
+                .unwrap()
+                .as_str(),
+            Some("0")
+        );
+        times.push(elapsed.as_secs_f64() / count as f64);
+    }
+    let ratio = times[2] / times[0];
+    assert!(
+        ratio <= 2.0,
+        "per-event accounting cost grew {ratio:.3}x; seconds/event {times:?}"
+    );
+}

@@ -261,6 +261,31 @@ impl Opts {
     }
 }
 
+/// Read each named region once, preserving binary file bytes without a hex round trip.
+pub fn region_bindings(opts: &Opts) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
+    let mut given = std::collections::BTreeMap::new();
+    for flag in ["mem", "mem-file"] {
+        for binding in opts.all(flag) {
+            let (name, value) = binding
+                .split_once('=')
+                .filter(|(name, value)| !name.is_empty() && !value.is_empty())
+                .ok_or_else(|| format!("--{flag} requires name=value"))?;
+            if given.contains_key(name) {
+                return Err(format!("duplicate region binding {name:?}"));
+            }
+            let bytes = match flag {
+                "mem" => crate::sha256::from_hex(value)
+                    .map_err(|e| format!("invalid --mem hex for {name:?}: {e}"))?,
+                "mem-file" => std::fs::read(value)
+                    .map_err(|e| format!("--mem-file {name:?} at {value:?}: {e}"))?,
+                _ => unreachable!("region binding flags are fixed"),
+            };
+            given.insert(name.to_string(), bytes);
+        }
+    }
+    Ok(given)
+}
+
 /// Strip a leading `@` from an entry name, as the reference CLI allows.
 pub fn entry_name(text: &str) -> &str {
     text.strip_prefix('@').unwrap_or(text)

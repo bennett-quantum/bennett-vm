@@ -1444,7 +1444,7 @@ impl<'o> Machine<'o> {
 }
 
 pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
-    let opts = cliargs::scan_opts(args, &["input", "budget", "mem", "arg"], &[])?;
+    let opts = cliargs::scan_opts(args, &["input", "budget", "mem", "mem-file", "arg"], &[])?;
     if opts.positional.len() != 2 {
         return Err("run-oracle needs <object> and <oracle>".into());
     }
@@ -1485,15 +1485,8 @@ pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
     };
     let mut mem: Vec<Vec<BigUint>> = Vec::new();
     let mut mem_given: std::collections::BTreeMap<String, Vec<BigUint>> = Default::default();
-    for kv in opts.all("mem") {
-        let (rname, hex) = kv
-            .split_once('=')
-            .ok_or_else(|| format!("invalid --mem {kv:?} (want name=hex)"))?;
-        let bytes = from_hex(hex).map_err(|e| format!("invalid --mem hex: {e}"))?;
-        mem_given.insert(
-            rname.to_string(),
-            bytes_to_cells(&bytes, rname, &obj, &name)?,
-        );
+    for (rname, bytes) in cliargs::region_bindings(&opts)? {
+        mem_given.insert(rname.clone(), bytes_to_cells(&bytes, &rname, &obj, &name)?);
     }
     let oracle = obj.function(&name).unwrap();
     for (p, (a, w, _)) in oracle.lists[3].iter().zip(sig.mem.iter()) {
@@ -1596,11 +1589,17 @@ fn bytes_to_cells(
             ),
         ));
     }
-    let mut all = BigUint::zero();
-    for (i, b) in bytes.iter().enumerate() {
-        if *b != 0 {
-            all = all.add(&BigUint::from_u64(*b as u64).shl(i * 8));
-        }
-    }
-    Ok((0..ncells).map(|i| all.shr(i * w).mask(w)).collect())
+    // Decode a cell at a time: work and temporary storage scale with the region.
+    Ok((0..ncells)
+        .map(|i| {
+            let first_bit = i * w;
+            let first_byte = first_bit / 8;
+            let last_byte = (first_bit + w).div_ceil(8);
+            let mut cell = BigUint::zero();
+            for (j, byte) in bytes[first_byte..last_byte].iter().enumerate() {
+                cell = cell.add(&BigUint::from_u64(*byte as u64).shl(j * 8));
+            }
+            cell.shr(first_bit % 8).mask(w)
+        })
+        .collect())
 }

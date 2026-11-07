@@ -15,3 +15,10 @@ Prior-fix verification:
 
 The review's original red-first evidence is preserved in the closed issues;
 this round adds no replacement implementation for already-fixed findings.
+
+Binary region input: `cargo test -j3 --test memory_files -- --test-threads=4`
+reproduced 2 failures (`unknown option --mem-file`) before implementation,
+then passed all 3 tests. Coverage includes both engines, both ISA versions,
+step enumeration, reversal, duplicate/unknown/bad-size bindings and the last
+byte of a 64 KiB image. Payload assertions now use the published JSON integer
+convention (small integers are numbers), retaining exact hand-derived bytes.

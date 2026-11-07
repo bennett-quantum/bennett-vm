@@ -48,6 +48,7 @@ mod target_execution;
 mod targets;
 mod validation_order;
 mod opcodes;
+mod token_partitions09;
 
 #[path = "support/source09.rs"]
 mod source09;

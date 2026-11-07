@@ -97,7 +97,7 @@ impl Catalog {
                 s(p.ty.signature_text())
             };
             env.values
-                .insert(p.name.clone(), Bound::Value(value.clone(), ty));
+                .insert(p.name.clone(), Bound::Value(value.clone(), ty, None));
         }
         for p in &f.lists[3] {
             let Type::Region(address, cell) = p.ty else {
@@ -224,7 +224,7 @@ pub(super) fn body(object: &Object, name: &str, env: &mut Bindings) -> Result<Js
         if param.ty == Type::Token {
             continue;
         }
-        let Some(Bound::Value(value, _)) = env.values.get(&param.name).cloned() else {
+        let Some(Bound::Value(value, _, _)) = env.values.get(&param.name).cloned() else {
             return Err(err("unbound oracle classical argument"));
         };
         let (width, initial) = match param.ty {

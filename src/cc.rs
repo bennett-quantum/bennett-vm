@@ -516,6 +516,10 @@ impl Machine {
     }
     fn undo(&mut self, index: usize, control: bool) -> Result<(), String> {
         if self.history[index].reversed || self.history[index].marker {
+            if control {
+                self.stack = self.history[index].control.clone();
+                self.next_activation = self.history[index].next_activation;
+            }
             return Ok(());
         }
         let keys: Vec<_> = self.history[index]

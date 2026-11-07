@@ -37,6 +37,7 @@ pub mod sha256;
 pub mod step;
 pub mod stepcli;
 pub mod target;
+pub mod token_aliases;
 mod typing;
 pub mod validate;
 pub mod value;
@@ -56,6 +57,9 @@ pub fn load(text: &str, hash_only: bool) -> Result<(object::Object, identity::Id
     }
     let ids = identity::compute(&obj)?;
     if !hash_only {
+        if obj.isa == "0.9" {
+            certificate::validate_metadata(&obj, &ids)?;
+        }
         check_oracle_pairs(&obj)?;
         identity::check_hashes(&obj, &ids)?;
         if obj.isa == "0.9"

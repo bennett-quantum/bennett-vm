@@ -19,6 +19,7 @@ mod oracle_source;
 pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
 pub use oracle_cleanup::OracleCleanupPair;
 mod source;
+pub(crate) use source::token_cleanup_points;
 use crate::{
     json::{self, Json},
     target::{Rational as R, arr, field, keys, string},
@@ -61,7 +62,7 @@ enum Bound {
         origin: String,
         cells: Vec<String>,
     },
-    Value(Json, Json),
+    Value(Json, Json, Option<u64>),
     Records {
         fields: Json,
         order: Json,
@@ -407,7 +408,7 @@ impl Catalog {
             }
             self.walk(field(c, "body")?, &mut local, out, next, active)?;
         } else if let Some(token) = c.get("$oracle_invocation") {
-            let Some(Bound::Value(value, ty)) = env.values.get(string(token)?) else {
+            let Some(Bound::Value(value, ty, _)) = env.values.get(string(token)?) else {
                 return Err(err("unbound oracle_invocation source token"));
             };
             if ty.as_str() != Some("token") {
@@ -1331,13 +1332,13 @@ fn bind_formals(
             "region" => bind_region(f, a, outer, &env)?,
             "value" => {
                 let ty = field(f, "isa_type")?;
-                if let Some(Bound::Value(value, source_ty)) =
+                if let Some(Bound::Value(value, source_ty, identity)) =
                     a.as_str().and_then(|n| outer.values.get(n))
                 {
                     if source_ty != ty {
                         return Err(err("value isa_type mismatch"));
                     }
-                    Bound::Value(value.clone(), ty.clone())
+                    Bound::Value(value.clone(), ty.clone(), *identity)
                 } else {
                     let isa_ty = if let Some(ptr) = ty.get("ptr") {
                         keys(ty, &["ptr"])?;
@@ -1370,7 +1371,7 @@ fn bind_formals(
                     if let Some(t) = isa_ty {
                         crate::invocation::decode_args(&Json::Arr(vec![a.clone()]), &[t], 1)?;
                     }
-                    Bound::Value(a.clone(), ty.clone())
+                    Bound::Value(a.clone(), ty.clone(), None)
                 }
             }
             "records" => bind_records(f, a, outer, &env)?,

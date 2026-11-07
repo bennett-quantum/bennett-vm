@@ -9,6 +9,8 @@ use crate::{
     value::{Budget, Value},
 };
 use std::collections::{BTreeMap, BTreeSet};
+mod metadata;
+pub(crate) use metadata::validate_metadata;
 fn err(s: impl std::fmt::Display) -> String {
     format!("§12.1: {s}")
 }

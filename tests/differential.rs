@@ -623,7 +623,7 @@ fn add_cc(
             (
                 "signature",
                 Json::obj(vec![
-                    ("abi", Json::Str("0.8".into())),
+                    ("abi", Json::Str(bennett_vm::object::parse(text).unwrap().isa)),
                     ("tier", Json::Str("cc".into())),
                     ("kind", Json::Str("cc".into())),
                     (
@@ -693,7 +693,7 @@ fn every_fixture_symbol_executes_through_cli() {
                                 },
                             ]));
                         }
-                        assert_outcome(&format!("{} {} B={budget}", path.display(), f.name), &args);
+                        assert_outcome(&format!("{} {} B={budget}", path.display(), f.name), &tuple_fixture_args(args));
                         counts.0 += 1;
                     }
                 }
@@ -713,7 +713,7 @@ fn every_fixture_symbol_executes_through_cli() {
                     ]);
                     // The host success case needs its explicit reply file below.
                     if f.name != "host" {
-                        assert_outcome(&f.name, &args);
+                        assert_outcome(&f.name, &tuple_fixture_args(args));
                         counts.1 += 1;
                     }
                 }
@@ -787,7 +787,7 @@ fn every_fixture_symbol_executes_through_cli() {
                             },
                         ]));
                     }
-                    assert_outcome(&format!("action {}", f.name), &args);
+                    assert_outcome(&format!("action {}", f.name), &tuple_fixture_args(args));
                     counts.2 += 1;
                 }
                 FnKind::Lproc => {}
@@ -1195,7 +1195,7 @@ fn action_basis_measurements_differential() {
                     "--arg",
                     if variant == 1 { "qreg:11" } else { "qreg:00" },
                 ]));
-                assert_outcome(&format!("observe {} variant {variant}", f.name), &args);
+                assert_outcome(&format!("observe {} variant {variant}", f.name), &tuple_fixture_args(args));
                 cases += 1;
             }
         }
@@ -2185,7 +2185,7 @@ fn matched_oracle_uncalls_are_admitted() {
                     "{UNCALL_PRELUDE}oracle @main () (t:wire) (f:wire[4]) () (tk:token)\nregs {{ {regs} }}\n^entry():\n{body}"
                 ),
             );
-            assert_coherent(&s(&[
+            assert_coherent(&tuple_fixture_args(s(&[
                 "run-oracle",
                 &path,
                 "main",
@@ -2193,7 +2193,7 @@ fn matched_oracle_uncalls_are_admitted() {
                 "",
                 "--arg",
                 "token:64",
-            ]));
+            ])));
         }
     }
     let text = source09::source(&format!(
@@ -2469,7 +2469,7 @@ fn coherent_corpus(path: &Path) {
                         },
                     ]));
                 }
-                assert_coherent(&args);
+                assert_coherent(&tuple_fixture_args(args));
             }
             let mut args = s(&[
                 "step-check",
@@ -2492,7 +2492,7 @@ fn coherent_corpus(path: &Path) {
                     },
                 ]));
             }
-            assert_coherent(&args);
+            assert_coherent(&tuple_fixture_args(args));
         } else if matches!(f.kind, FnKind::Action | FnKind::PermAction) {
             let mut n = 0;
             for list in &f.lists[..3] {
@@ -2529,7 +2529,7 @@ fn coherent_corpus(path: &Path) {
                         },
                     ]));
                 }
-                assert_coherent(&args);
+                assert_coherent(&tuple_fixture_args(args));
             }
             for basis in [
                 "0".repeat(n),
@@ -2553,7 +2553,7 @@ fn coherent_corpus(path: &Path) {
                                 },
                             ]));
                         }
-                        assert_coherent(&args);
+                        assert_coherent(&tuple_fixture_args(args));
                     }
                 }
             }
@@ -2603,7 +2603,7 @@ fn published_d_and_g_cli_cases_differential() {
                         .replace("{dir}", dir.to_str().unwrap())
                 })
                 .collect::<Vec<_>>();
-            if suite == "D" {
+            if suite == "D" && doc.get("expect").unwrap().get("exit").unwrap().as_u64() == Some(0) {
                 assert_coherent(&args);
             } else {
                 assert_outcome(doc.get("id").unwrap().as_str().unwrap(), &args);
@@ -2611,7 +2611,7 @@ fn published_d_and_g_cli_cases_differential() {
             compared += 1;
         }
     }
-    assert_eq!(compared, 17, "all 7 D and 10 G CLI cases must participate");
+    assert_eq!(compared, 26, "all 10 D and 16 G CLI cases at the pin must participate");
 }
 
 use crate::device_fixture;
@@ -2771,4 +2771,20 @@ fn certificate_replay_requests_differential() {
             }
         }
     }
+}
+
+/// §12.3 K91 requires a partition for every generated tuple-only token request.
+/// These witnesses choose fresh distinct identities; published case commands bypass this helper.
+fn tuple_fixture_args(mut args: Vec<String>) -> Vec<String> {
+    use bennett_vm::object::FnKind;
+    let object = bennett_vm::object::parse(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();
+    if object.isa == "0.9" && !args.iter().any(|a| a == "--token-aliases") {
+        let tokens = args.windows(2).filter(|pair| pair[0] == "--arg" && pair[1].starts_with("token:")).count();
+        if tokens != 0 {
+            let oracle = object.function(&args[2]).unwrap().kind == FnKind::Oracle;
+            let labels = (0..tokens + usize::from(oracle)).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+            args.extend(s(&["--token-aliases", &format!("[{labels}]")]));
+        }
+    }
+    args
 }

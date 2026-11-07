@@ -85,7 +85,7 @@ pub fn resolve(
     name: &str,
     invocation: &Json,
 ) -> Result<(Vec<Value>, Budget), String> {
-    keys(invocation, &["args", "budget"])?;
+    keys(invocation, &["args", "budget", "token_aliases"])?;
     let f = obj
         .function(name)
         .ok_or("§12.3: unknown invocation region")?;
@@ -98,7 +98,7 @@ pub fn resolve(
         .iter()
         .map(|p| p.ty.clone())
         .collect::<Vec<_>>();
-    let args = decode_args(field(invocation, "args")?, &types, obj.ptr_width)?;
+    let mut args = decode_args(field(invocation, "args")?, &types, obj.ptr_width)?;
     let budget = decode_budget(field(invocation, "budget")?)?;
     crate::cliargs::validate_budget(obj, &budget)?;
     for v in &args {
@@ -106,6 +106,11 @@ pub fn resolve(
             crate::cliargs::validate_budget(obj, b)?;
         }
     }
+    crate::token_aliases::bind(
+        &mut args,
+        (f.kind == FnKind::Oracle).then_some(budget),
+        invocation.get("token_aliases"),
+    )?;
     Ok((args, budget))
 }
 /// A request parser must check canonical bytes before hashing/copying them.

@@ -219,7 +219,7 @@ pub fn select(entries: &[Selector], op: &Operation) -> Result<Option<usize>, Str
         .count()
         > 1
     {
-        return Err(error("multiple maximal matching entries"));
+        return Err(error("multiple maximal matching schedule entries"));
     }
     Ok(Some(index))
 }
@@ -441,6 +441,23 @@ fn validate_path(
 /// bound library's occurrence domains with `validate_bound_entries`.
 pub fn validate_entries(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
     validate_entries_mode(doc, object, ids, None, false)
+}
+/// K91 ties exist only where actual token equality admits a matched pair.
+pub(crate) fn validate_token_cleanup_ties(doc: &Json, object: &Object, ids: &Identities) -> Result<(), String> {
+    let binding = field(doc, "bindings")?;
+    let Some(aliases) = binding.get("token_aliases") else { return Ok(()); };
+    let name = string(field(binding, "region")?)?;
+    let entries = arr(field(doc, "entries")?)?.iter()
+        .filter(|e| e.get("kind").and_then(Json::as_str) == Some("cleanup"))
+        .map(Selector::parse).collect::<Result<Vec<_>, _>>()?;
+    for point in crate::ref_library::token_cleanup_points(object, name, aliases)? {
+        select(&entries, &Operation {
+            path: vec![Point { symbol: ids.interface[name].clone(), point, ..Default::default() }],
+            kind: OperationKind::Cleanup,
+            ..Default::default()
+        })?;
+    }
+    Ok(())
 }
 /// Check embedded source structure without guessing realised call occurrences.
 /// Action-local support is fixed at entry/exit, so direct action invocation

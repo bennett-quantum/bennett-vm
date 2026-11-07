@@ -116,7 +116,7 @@ fn parse_bits(s: &str, n: usize) -> Result<BigUint, String> {
 pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     let o = cliargs::scan_opts(
         args,
-        &["mut", "in", "mem", "basis", "state", "args", "arg"],
+        &["mut", "in", "mem", "basis", "state", "args", "arg", "token-aliases"],
         &["adjoint"],
     )?;
     if o.positional.len() != 2 {
@@ -232,12 +232,16 @@ pub fn command(args: &[String], reverse: bool) -> Result<(), String> {
     } else {
         o.all("arg")
     };
-    let av = bind_args(
+    let mut av = bind_args(
         &obj,
         &sig.args,
         &raw,
         &cliargs::default_budget(&obj, 1_000_000),
     )?;
+    if obj.isa == "0.9" {
+        let aliases = crate::token_aliases::parse(o.one("token-aliases")?)?;
+        crate::token_aliases::bind(&mut av, None, aliases.as_ref())?;
+    }
     let pool = s.alloc_wires(borrow_capacity(&obj, name)?);
     let entry = s.clone();
     let adj = o.flags.contains("adjoint");

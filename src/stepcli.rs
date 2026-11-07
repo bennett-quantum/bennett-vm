@@ -47,7 +47,11 @@ fn inputs(obj: &Object, name: &str, o: &cliargs::Opts, budget: &Budget) -> Resul
     if !given.is_empty() {
         return Err("§5.1: unknown interface region".into());
     }
-    let args = crate::qcli::bind_args(obj, &sig.args, &o.all("arg"), budget)?;
+    let mut args = crate::qcli::bind_args(obj, &sig.args, &o.all("arg"), budget)?;
+    if obj.isa == "0.9" {
+        let aliases = crate::token_aliases::parse(o.one("token-aliases")?)?;
+        crate::token_aliases::bind(&mut args, Some(*budget), aliases.as_ref())?;
+    }
     Ok(Inputs { mem, args, fixed })
 }
 fn budget(obj: &Object, o: &cliargs::Opts, n: u64) -> Result<Budget, String> {
@@ -59,7 +63,7 @@ fn budget(obj: &Object, o: &cliargs::Opts, n: u64) -> Result<Budget, String> {
 pub fn reverse(args: &[String]) -> Result<(), String> {
     let o = cliargs::scan_opts(
         args,
-        &["input", "budget", "mem", "mem-file", "arg", "steps"],
+        &["input", "budget", "mem", "mem-file", "arg", "steps", "token-aliases"],
         &[],
     )?;
     if o.positional.len() != 2 {
@@ -150,7 +154,7 @@ pub fn check(args: &[String]) -> Result<(), String> {
     let o = cliargs::scan_opts(
         args,
         &[
-            "budget", "mem", "mem-file", "arg", "max-bits", "samples", "seed",
+            "budget", "mem", "mem-file", "arg", "max-bits", "samples", "seed", "token-aliases",
         ],
         &["exhaustive", "suite"],
     )?;

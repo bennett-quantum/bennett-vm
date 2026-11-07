@@ -1462,7 +1462,7 @@ impl<'o> Exec<'o> {
         for (ty, name) in types.iter().zip(names.iter()) {
             match ty {
                 crate::object::Type::Token => match self.args.get(name) {
-                    Some(Value::Token(b) | Value::TokenId(_, b)) => out.push(Value::Token(*b)),
+                    Some(v @ (Value::Token(_) | Value::TokenId(..))) => out.push(v.clone()),
                     _ => {
                         return Err(diag(
                             "4.7",
@@ -1846,7 +1846,7 @@ pub fn execute_action_with_idle(
     let certificate_budget = args
         .iter()
         .find_map(|v| {
-            if let Value::Token(b) = v {
+            if let Value::Token(b) | Value::TokenId(_, b) = v {
                 Some(*b)
             } else {
                 None

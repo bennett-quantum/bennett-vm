@@ -1484,7 +1484,7 @@ impl<'o> Machine<'o> {
 }
 
 pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
-    let opts = cliargs::scan_opts(args, &["input", "budget", "mem", "mem-file", "arg"], &[])?;
+    let opts = cliargs::scan_opts(args, &["input", "budget", "mem", "mem-file", "arg", "token-aliases"], &[])?;
     if opts.positional.len() != 2 {
         return Err("run-oracle needs <object> and <oracle>".into());
     }
@@ -1577,6 +1577,10 @@ pub fn cmd_run_oracle(args: &[String]) -> Result<(), String> {
             }
         };
         arg_values.push(value);
+    }
+    if obj.isa == "0.9" {
+        let aliases = crate::token_aliases::parse(opts.one("token-aliases")?)?;
+        crate::token_aliases::bind(&mut arg_values, Some(budget), aliases.as_ref())?;
     }
     let outcome = run_oracle(&obj, &name, &inputs, &mut mem, &arg_values, budget)?;
     println!(

@@ -90,7 +90,7 @@ struct Handle {
 }
 #[derive(Clone, Debug)]
 struct Data {
-    memory: Map<BigUint, u8>,
+    memory: crate::classical_memory::Memory,
     table: Map<usize, Allocation>,
     allocation_index: Map<BigUint, usize>,
     interval_index: Map<BigUint, usize>,
@@ -332,7 +332,7 @@ impl Data {
             BTreeMap::new()
         };
         let mut d = Self {
-            memory: Map::new(),
+            memory: crate::classical_memory::Memory::default(),
             table: Map::new(),
             allocation_index: Map::new(),
             interval_index: Map::new(),
@@ -359,7 +359,7 @@ impl Data {
                     live: true,
                     pinned: true,
                 });
-                d.write(&g.base, &from_hex(&obj.data[name])?);
+                d.memory.replace(&g.base, &from_hex(&obj.data[name])?, None);
             }
         }
         Ok(d)
@@ -412,19 +412,16 @@ impl Data {
         bytes
             .try_reserve_exact(n)
             .map_err(|e| format!("host limit: §7.1 transfer of {n} bytes: {e}"))?;
-        bytes.extend((0..n).map(|i| *self.memory.get(&p.add(&u(i as u64))).unwrap_or(&0)));
+        bytes.resize(n, 0);
+        self.memory.read(p, &mut bytes);
         Ok(bytes)
     }
     fn write(&mut self, p: &BigUint, bytes: &[u8]) {
-        for (i, b) in bytes.iter().enumerate() {
-            let a = p.add(&u(i as u64));
-            self.writes.insert(a.clone());
-            if *b == 0 {
-                self.memory.remove(&a);
-            } else {
-                self.memory.insert(a, *b);
-            }
-        }
+        self.memory.write(p, bytes);
+        // Keep the existing frame/trace address index until row publication
+        // changes; reversal obtains original bytes from the span journal.
+        self.writes
+            .extend((0..bytes.len()).map(|i| p.add(&u(i as u64))));
     }
     fn digest(&self) -> String {
         // The spec fixes the memory state, but no digest serialization.
@@ -442,8 +439,9 @@ impl Data {
             .collect();
         let bytes = self
             .memory
-            .iter()
-            .map(|(a, b)| Json::Arr(vec![Json::u(a), Json::u64(*b as u64)]))
+            .ordered_bytes()
+            .into_iter()
+            .map(|(a, b)| Json::Arr(vec![Json::u(&a), Json::u64(b as u64)]))
             .collect();
         sha256_hex(
             Json::obj(vec![
@@ -2038,13 +2036,9 @@ impl Data {
         for k in memory_keys {
             if before.memory.get(k) != after.memory.get(k) {
                 self.writes.insert(k.clone());
-                if let Some(v) = before.memory.get(k) {
-                    self.memory.insert(k.clone(), *v);
-                } else {
-                    self.memory.remove(k);
-                }
             }
         }
+        self.memory.undo_delta(&before.memory, &after.memory);
         restore(&mut self.block, &before.block, &after.block);
         restore(&mut self.handles, &before.handles, &after.handles);
         restore(&mut self.tokens, &before.tokens, &after.tokens);

@@ -279,12 +279,12 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 1
     },
     "src/cc.rs": {
-      "branch_mass": 1345,
+      "branch_mass": 1337,
       "max_lines": 415,
-      "over_100": 5,
+      "over_100": 4,
       "over_25": 25,
       "over_300": 2,
-      "trivial_wrappers": 28
+      "trivial_wrappers": 27
     },
     "src/cc/frame_work.rs": {
       "branch_mass": 1,

@@ -419,11 +419,23 @@ impl Data {
         for (i, b) in bytes.iter().enumerate() {
             let a = p.add(&u(i as u64));
             self.writes.insert(a.clone());
+            #[cfg(test)]
+            let (before, existed) = (
+                std::mem::ManuallyDrop::new(crate::execution_work::Probe).snapshot(),
+                self.memory.contains_key(&a),
+            );
             if *b == 0 {
                 self.memory.remove(&a);
             } else {
                 self.memory.insert(a, *b);
             }
+            #[cfg(test)]
+            crate::step_scaling::record_memory_work(|work| {
+                work.byte_tree_operations += 1;
+                work.byte_tree_nodes += std::mem::ManuallyDrop::new(crate::execution_work::Probe).snapshot().path_copies
+                    - before.path_copies + u64::from(!existed && *b != 0);
+                work.resident_units = self.memory.len() as u64;
+            });
         }
     }
     fn digest(&self) -> String {

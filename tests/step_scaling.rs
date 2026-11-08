@@ -820,3 +820,98 @@ fn printf_dispatch_work() {
         work.initialization_visits
     );
 }
+
+// Source-owned counters isolate byte-memory work from allocation validity,
+// register trees, and the diagnostic address set retained by frames.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct MemoryWork {
+    pub byte_tree_nodes: u64,
+    pub byte_tree_operations: u64,
+    pub journal_bytes: u64,
+    pub metadata_probes: u64,
+    pub page_allocations: u64,
+    pub copied_bytes: u64,
+    pub resident_units: u64,
+}
+thread_local! {
+    static MEMORY_WORK: std::cell::Cell<MemoryWork> = const {
+        std::cell::Cell::new(MemoryWork {
+            byte_tree_nodes: 0, byte_tree_operations: 0, journal_bytes: 0,
+            metadata_probes: 0, page_allocations: 0, copied_bytes: 0, resident_units: 0,
+        })
+    };
+}
+pub(crate) fn record_memory_work(update: impl FnOnce(&mut MemoryWork)) {
+    MEMORY_WORK.with(|cell| {
+        let mut work = cell.get();
+        update(&mut work);
+        cell.set(work);
+    });
+}
+fn memory_work() -> MemoryWork {
+    MEMORY_WORK.with(std::cell::Cell::get)
+}
+fn reset_memory_work() {
+    MEMORY_WORK.with(|cell| cell.set(MemoryWork::default()));
+}
+fn memory_run(functions: &str) -> crate::cc::RuntimeRun {
+    let source = format!(
+        "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=128\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n\nsection layout\n{{\"A_tab\":16,\"H\":128,\"S_cells\":0,\"globals\":{{}},\"heap_base\":16,\"heap_limit_max\":\"340282366920938463463374607431768211439\",\"interface_regions\":{{}},\"null_size\":1,\"ptr_width\":128}}\n"
+    );
+    let object = std::sync::Arc::new(crate::object::parse(&source).unwrap());
+    let resources = crate::cc::Resources::new(&object).unwrap();
+    crate::cc::RuntimeRun::new(object, &resources, "main", vec![], vec![]).unwrap()
+}
+
+#[test]
+fn memory_journal_retention_tracks_changed_bytes() {
+    let mut samples = vec![];
+    for prefix in [CHECKPOINTS[0], CHECKPOINTS[2]] {
+        let functions = format!(
+            "fn cc @main () (v:i128) () () ()\n^entry():\nn = const.i128 16\np = alloc n\na = const.i128 22685491128062564230891640495451214097\nb = const.i128 45370982256125128461783280990902428194\nstore.i128 p a\n{}{}v = load.i128 p\nret v",
+            "unused = const.i8 0\n".repeat(prefix),
+            "store.i128 p b\nstore.i128 p a\n".repeat(CHECKPOINTS[0] / 2),
+        );
+        let mut run = memory_run(&functions);
+        for _ in 0..prefix + 5 { run.step().unwrap(); }
+        reset_memory_work();
+        let probe = crate::execution_work::Probe::start();
+        for _ in 0..CHECKPOINTS[0] { run.step().unwrap(); }
+        let work = memory_work();
+        assert_eq!(probe.snapshot().steps, CHECKPOINTS[0] as u64);
+        drop(probe);
+        assert_eq!(run.fault(), None);
+        samples.push(work);
+        eprintln!("memory prefix={prefix}, committed_rows={}, committed_bytes={}: {work:?}", CHECKPOINTS[0], CHECKPOINTS[0] * 16);
+        run.step().unwrap(); run.step().unwrap();
+        assert_eq!(run.values(), &[crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap())]);
+        run.reverse_to(prefix + 5).unwrap();
+        while !run.terminal() { run.step().unwrap(); }
+        assert_eq!(run.fault(), None);
+        assert_eq!(run.values(), &[crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap())]);
+    }
+    eprintln!("Rprefix[memory_metadata_probes]={}/{}", samples[1].metadata_probes, samples[0].metadata_probes);
+    for work in &samples {
+        assert_eq!(work.byte_tree_nodes, 0, "byte-memory AVL-node allocations per committed store must be zero");
+        assert_eq!(work.byte_tree_operations, 0, "byte-memory tree operations");
+        assert_eq!(work.journal_bytes, (CHECKPOINTS[0] * 16) as u64, "original journal bytes must equal committed write bytes");
+    }
+    assert_eq!(samples[0].metadata_probes, samples[1].metadata_probes);
+}
+
+#[test]
+fn large_sparse_image_uses_only_touched_pages() {
+    // A 2^25-byte allocation is zero-filled without resident byte storage.
+    // Four nonzero 16-byte spans are widely separated within it.
+    let mut run = memory_run("fn cc @main () (a:i128, b:i128, c:i128, d:i128) () () ()\n^entry():\nn = const.i128 33554432\np = alloc n\nv = const.i128 22685491128062564230891640495451214097\np0 = const.i128 16\np1 = const.i128 10000\np2 = const.i128 16777216\np3 = const.i128 33554432\nstore.i128 p0 v\nstore.i128 p1 v\nstore.i128 p2 v\nstore.i128 p3 v\na = load.i128 p0\nb = load.i128 p1\nc = load.i128 p2\nd = load.i128 p3\nret a b c d");
+    reset_memory_work();
+    while !run.terminal() { run.step().unwrap(); }
+    assert_eq!(run.fault(), None);
+    let value = crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap());
+    assert_eq!(run.values(), &[value.clone(), value.clone(), value.clone(), value]);
+    let work = memory_work();
+    eprintln!("sparse 2^25-byte image, four touched pages: {work:?}");
+    assert_eq!(work.resident_units, 4, "resident memory units must be pages, independent of zero-filled image extent");
+    run.reverse_to(0).unwrap();
+    assert_eq!(run.history_len(), 0);
+}

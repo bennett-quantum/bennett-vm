@@ -260,6 +260,14 @@ pub fn region_bindings(opts: &Opts) -> Result<std::collections::BTreeMap<String,
     Ok(given)
 }
 
+/// Optional first-measurement output; singleton validation happens before launch.
+pub fn state_output(opts: &Opts) -> Result<crate::action::StateOutput, String> {
+    let path = opts.one("state-out")?.map(std::path::PathBuf::from);
+    Ok(crate::action::StateOutput {
+        pending: std::rc::Rc::new(std::cell::RefCell::new(path)),
+    })
+}
+
 /// Strip a leading `@` from an entry name, as the reference CLI allows.
 pub fn entry_name(text: &str) -> &str {
     text.strip_prefix('@').unwrap_or(text)

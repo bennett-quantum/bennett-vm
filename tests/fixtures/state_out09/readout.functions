@@ -3,8 +3,8 @@ action @prepare (q:wire[2] mut, t:wire mut, image:wire[68] mut) () () () ()
 x q[1]
 h q[0]
 s q[0]
+x t
 h t
-z t
 x image[0]
 x image[67]
 fn cc @sample () (r:i2) () () ()

@@ -9,6 +9,7 @@
 
 use crate::bigint::BigUint;
 use crate::exact::Exact;
+use crate::json::Json;
 use crate::object::{Function, Instr, Object};
 use crate::persistent::Seq;
 use crate::value::{Budget, Value};
@@ -59,6 +60,7 @@ pub struct QuantumState {
     peak: BTreeMap<String, usize>,
     dirty: BTreeSet<usize>,
     requests: Option<VecDeque<GateRequest>>,
+    pub(crate) state_output: StateOutput,
 }
 
 impl QuantumState {
@@ -80,6 +82,7 @@ impl QuantumState {
             peak: BTreeMap::new(),
             dirty: BTreeSet::new(),
             requests: None,
+            state_output: StateOutput::default(),
         }
     }
     pub fn wire_count(&self) -> usize {
@@ -304,8 +307,7 @@ impl QuantumState {
         ordered.sort_by_key(|(v, _)| (0..wires.len()).map(|i| v.bit(i)).collect::<Vec<_>>());
         let threshold = draw * total;
         let mut cumulative = 0.0;
-        let mut chosen = None;
-        for (index, (v, p)) in ordered.iter().enumerate() {
+        let chosen = ordered.iter().enumerate().find_map(|(index, (v, p))| {
             cumulative += **p;
             // Binary64 settles every comparison away from a tie; the exact
             // weights settle the rest.
@@ -316,11 +318,8 @@ impl QuantumState {
                 let outcomes = &ordered[..=index];
                 self.exact_weight_above_draw(wires, outcomes.iter().map(|(v, _)| *v), draw)
             };
-            if above {
-                chosen = Some((*v).clone());
-                break;
-            }
-        }
+            above.then_some(*v).cloned()
+        });
         // The last cumulative weight is the total, and draw < 1.
         let value = chosen
             .or_else(|| ordered.last().map(|(v, _)| (*v).clone()))
@@ -368,6 +367,160 @@ impl QuantumState {
         (value, bits)
     }
 }
+
+/// A quantum engine supplies its physical amplitudes without changing its state.
+/// Exact support, including coefficients whose display rounds to zero, is retained.
+pub trait QuantumReadout {
+    fn engine_label(&self) -> &str;
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Amp));
+}
+
+impl QuantumReadout for QuantumState {
+    fn engine_label(&self) -> &str {
+        "exact"
+    }
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Amp)) {
+        self.exact.iter().for_each(|(basis, amplitude)| {
+            let normalized = amplitude.normalized_value(&self.normalization);
+            visit(basis, normalized);
+        });
+    }
+}
+
+/// Shared across execution checkpoints: restoring one cannot emit a second dump.
+/// No pending path means either output is disabled or it has already been written.
+#[derive(Clone, Debug, Default)]
+pub struct StateOutput {
+    pub(crate) pending: std::rc::Rc<std::cell::RefCell<Option<std::path::PathBuf>>>,
+}
+
+impl StateOutput {
+    /// Capture once, immediately before collapse. Bundles arrive in allocation
+    /// order; subsequent handles for the same wires are views, not allocations.
+    pub fn capture<'a>(
+        &self,
+        engine: &impl QuantumReadout,
+        bundles: impl Iterator<Item = &'a [usize]>,
+    ) -> Result<(), String> {
+        let mut pending = self.pending.borrow_mut();
+        let Some(path) = &*pending else {
+            return Ok(());
+        };
+        let state = state_readout(engine, bundles)?;
+        std::fs::write(path, state.to_jcs())
+            .map_err(|e| format!("--state-out {}: {e}", path.display()))?;
+        *pending = None;
+        Ok(())
+    }
+}
+
+fn state_readout<'a>(
+    engine: &impl QuantumReadout,
+    bundles: impl Iterator<Item = &'a [usize]>,
+) -> Result<Json, String> {
+    let registers = readout_registers(bundles);
+    let amplitudes = readout_amplitudes(engine)?;
+    let constant = registers
+        .iter()
+        .enumerate()
+        .filter_map(|(reg, wires)| {
+            readout_constant(wires, &amplitudes).map(|value| (reg.to_string(), value))
+        })
+        .collect();
+    let rows = amplitudes
+        .into_iter()
+        .map(|(basis, amp)| readout_row(&registers, &constant, basis, amp))
+        .collect::<Result<_, _>>()?;
+    Ok(Json::obj(vec![
+        ("engine", Json::Str(engine.engine_label().into())),
+        ("registers", readout_metadata(&registers)),
+        ("constant", Json::Obj(constant)),
+        ("amps", Json::Arr(rows)),
+    ]))
+}
+
+fn readout_amplitudes(engine: &impl QuantumReadout) -> Result<Vec<(BigUint, Amp)>, String> {
+    let mut amplitudes = Vec::new();
+    engine.visit_amplitudes(&mut |basis, amp| amplitudes.push((basis.clone(), amp)));
+    amplitudes
+        .first()
+        .ok_or("--state-out: engine returned an empty quantum state")?;
+    Ok(amplitudes)
+}
+
+fn readout_registers<'a>(bundles: impl Iterator<Item = &'a [usize]>) -> Vec<&'a [usize]> {
+    let mut seen = BTreeSet::<usize>::new();
+    bundles
+        .filter(|wires| {
+            // Each allocation's original handle precedes all of its derived views.
+            let original = !wires.iter().all(|wire| seen.contains(wire));
+            seen.extend(*wires);
+            original
+        })
+        .collect()
+}
+
+// Keep ordinary integer registers in basis rows. Wide fixed images use byte hex
+// so the consumer need not parse enormous decimal integers.
+fn readout_constant(wires: &[usize], amplitudes: &[(BigUint, Amp)]) -> Option<Json> {
+    let value = QuantumState::extract(&amplitudes[0].0, wires);
+    let fixed = Some(value)
+        .filter(|_| wires.len() > u64::BITS as usize)
+        .filter(|value| {
+            amplitudes
+                .iter()
+                .all(|(basis, _)| QuantumState::extract(basis, wires) == *value)
+        });
+    let value = fixed?;
+    let bytes: Vec<u8> = (0..wires.len().div_ceil(8))
+        .map(|byte| (0..8).fold(0, |v, bit| v | (u8::from(value.bit(byte * 8 + bit)) << bit)))
+        .collect();
+    Some(Json::Str(crate::sha256::to_hex(&bytes)))
+}
+
+fn readout_row(
+    registers: &[&[usize]],
+    constant: &BTreeMap<String, Json>,
+    basis: BigUint,
+    (re, im): Amp,
+) -> Result<Json, String> {
+    if [re, im].iter().any(|value| !value.is_finite()) {
+        return Err("--state-out: engine returned a non-finite amplitude".into());
+    }
+    let values = registers
+        .iter()
+        .enumerate()
+        .filter(|(reg, _)| !constant.contains_key(&reg.to_string()))
+        .map(|(reg, wires)| {
+            let value = QuantumState::extract(&basis, wires).to_decimal();
+            (reg.to_string(), Json::Str(value))
+        })
+        .collect();
+    Ok(Json::obj(vec![
+        ("basis", Json::Obj(values)),
+        ("re", Json::Num(re.to_string())),
+        ("im", Json::Num(im.to_string())),
+    ]))
+}
+
+fn readout_metadata(registers: &[&[usize]]) -> Json {
+    Json::Arr(
+        registers
+            .iter()
+            .enumerate()
+            .map(|(reg, wires)| {
+                Json::obj(vec![
+                    ("reg", Json::u64(reg as u64)),
+                    ("width", Json::u64(wires.len() as u64)),
+                ])
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+#[path = "../tests/state_out09.rs"]
+mod state_out09;
 
 /// How far from a tie, relative to the total weight, binary64 Born weights
 /// decide a draw. Far above their rounding error, far below any exact gap the

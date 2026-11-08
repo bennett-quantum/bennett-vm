@@ -90,7 +90,7 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
         }
         Some((&node.key, node.value.as_ref()))
     }
-    pub(crate) fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    fn entry<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&Rc<V>>
     where
         K: Borrow<Q>,
     {
@@ -101,10 +101,16 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
             match key.cmp(n.key.borrow()) {
                 std::cmp::Ordering::Less => p = n.left.as_deref(),
                 std::cmp::Ordering::Greater => p = n.right.as_deref(),
-                std::cmp::Ordering::Equal => return Some(n.value.as_ref()),
+                std::cmp::Ordering::Equal => return Some(&n.value),
             }
         }
         None
+    }
+    pub(crate) fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
+        self.entry(key).map(Rc::as_ref)
     }
     pub(crate) fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
@@ -385,6 +391,17 @@ impl<V: Clone> Seq<V> {
             &self[i]
         })
     }
+    pub(crate) fn shared_from(&self, start: usize) -> Vec<Rc<V>> {
+        #[cfg(test)]
+        crate::history_work::tape_prefix(start);
+        (start..self.len())
+            .map(|i| {
+                #[cfg(test)]
+                crate::history_work::visit_sequence::<V>(i);
+                self.0.entry(&i).expect("missing retained event").clone()
+            })
+            .collect()
+    }
     pub(crate) fn to_vec(&self) -> Vec<V> {
         self.iter().cloned().collect()
     }
@@ -392,9 +409,6 @@ impl<V: Clone> Seq<V> {
         for v in it {
             self.push(v);
         }
-    }
-    pub(crate) fn retain(&mut self, mut f: impl FnMut(&V) -> bool) {
-        *self = self.iter().filter(|v| f(v)).cloned().collect();
     }
 }
 impl<V: Clone> FromIterator<V> for Seq<V> {

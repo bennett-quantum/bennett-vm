@@ -8,7 +8,13 @@ pub(crate) struct Snapshot {
     pub event_refs: u64,
     pub skipped_tape_prefix: u64,
 }
-pub(crate) enum Operation { PrefixFrame, IndexProbe, UndoFrame, EventRef, SkippedTapePrefix }
+pub(crate) enum Operation {
+    PrefixFrame,
+    IndexProbe,
+    UndoFrame,
+    EventRef,
+    SkippedTapePrefix,
+}
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
     static PREFIX: Cell<usize> = const { Cell::new(0) };
@@ -16,7 +22,9 @@ thread_local! {
     static WORK: Cell<Snapshot> = Cell::new(Snapshot::default());
 }
 pub(crate) fn record(operation: Operation, amount: u64) {
-    if !ENABLED.with(Cell::get) { return; }
+    if !ENABLED.with(Cell::get) {
+        return;
+    }
     WORK.with(|work| {
         let mut value = work.get();
         let count = match operation {
@@ -31,12 +39,18 @@ pub(crate) fn record(operation: Operation, amount: u64) {
     });
 }
 pub(crate) fn visit_frame(row: usize) {
-    if row < PREFIX.with(Cell::get) { record(Operation::PrefixFrame, 1); }
+    if row < PREFIX.with(Cell::get) {
+        record(Operation::PrefixFrame, 1);
+    }
 }
-pub(crate) fn tape_prefix(row: usize) { TAPE_PREFIX.with(|prefix| prefix.set(row)); }
+pub(crate) fn tape_prefix(row: usize) {
+    TAPE_PREFIX.with(|prefix| prefix.set(row));
+}
 pub(crate) fn visit_sequence<T>(row: usize) {
     let name = std::any::type_name::<T>();
-    if name.ends_with("cc::Frame") { visit_frame(row); }
+    if name.ends_with("cc::Frame") {
+        visit_frame(row);
+    }
     if name == std::any::type_name::<crate::json::Json>() && row < TAPE_PREFIX.with(Cell::get) {
         record(Operation::SkippedTapePrefix, 1);
     }
@@ -50,9 +64,15 @@ impl Probe {
         TAPE_PREFIX.with(|prefix| prefix.set(0));
         Self
     }
-    pub(crate) fn query_prefix(&self, row: usize) { PREFIX.with(|prefix| prefix.set(row)); }
-    pub(crate) fn snapshot(&self) -> Snapshot { WORK.with(Cell::get) }
+    pub(crate) fn query_prefix(&self, row: usize) {
+        PREFIX.with(|prefix| prefix.set(row));
+    }
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        WORK.with(Cell::get)
+    }
 }
 impl Drop for Probe {
-    fn drop(&mut self) { ENABLED.with(|enabled| enabled.set(false)); }
+    fn drop(&mut self) {
+        ENABLED.with(|enabled| enabled.set(false));
+    }
 }

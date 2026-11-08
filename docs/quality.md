@@ -374,6 +374,22 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_300": 0,
       "trivial_wrappers": 5
     },
+    "src/history.rs": {
+      "branch_mass": 48,
+      "max_lines": 28,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 6
+    },
+    "src/history_work.rs": {
+      "branch_mass": 23,
+      "max_lines": 17,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 4
+    },
     "src/identity.rs": {
       "branch_mass": 330,
       "max_lines": 88,

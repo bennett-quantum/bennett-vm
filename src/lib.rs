@@ -99,6 +99,7 @@ mod tests {
     }
 }
 
+mod history;
 mod persistent;
 
 // Private work probes need cfg(test); integration libraries do not receive it.

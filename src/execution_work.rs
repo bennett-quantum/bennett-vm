@@ -12,6 +12,11 @@ pub(crate) struct Snapshot {
     pub payload_clones: u64,
     pub logical_value_clones: u64,
     pub lock_scans: u64,
+    pub prefix_frame_visits: u64,
+    pub index_probes: u64,
+    pub undo_frames: u64,
+    pub event_refs: u64,
+    pub skipped_tape_prefix: u64,
 }
 pub(crate) enum Operation {
     Step,
@@ -22,6 +27,11 @@ pub(crate) enum Operation {
     PayloadClone,
     LogicalValueClone,
     LockScan,
+    PrefixFrame,
+    IndexProbe,
+    UndoFrame,
+    EventRef,
+    SkippedTapePrefix,
 }
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -41,6 +51,11 @@ pub(crate) fn record(operation: Operation, amount: u64) {
                 Operation::PayloadClone => &mut work.payload_clones,
                 Operation::LogicalValueClone => &mut work.logical_value_clones,
                 Operation::LockScan => &mut work.lock_scans,
+                Operation::PrefixFrame => &mut work.prefix_frame_visits,
+                Operation::IndexProbe => &mut work.index_probes,
+                Operation::UndoFrame => &mut work.undo_frames,
+                Operation::EventRef => &mut work.event_refs,
+                Operation::SkippedTapePrefix => &mut work.skipped_tape_prefix,
             };
             *count += amount;
             cell.set(work);

@@ -525,6 +525,8 @@ impl Machine {
             }
             return Ok(());
         }
+        #[cfg(test)]
+        crate::execution_work::record(crate::execution_work::Operation::UndoFrame, 1);
         let keys: Vec<_> = self.history[index]
             .definitions
             .iter()
@@ -947,10 +949,23 @@ impl Machine {
                 if seg.name != xs[0].trim_start_matches('@')
                     || seg.args != av
                     || seg.results != rv
-                    || self.history.iter().skip(seg.end + 1).any(|f| !f.pure)
+                    || self.history.iter().enumerate().inspect(|(i, _)| {
+                        #[cfg(test)]
+                        if *i <= seg.end {
+                            crate::execution_work::record(crate::execution_work::Operation::PrefixFrame, 1);
+                        }
+                    }).skip(seg.end + 1).any(|(_, f)| !f.pure)
                     || self
                         .history
                         .iter()
+                        .enumerate()
+                        .inspect(|(i, _)| {
+                            #[cfg(test)]
+                            if *i < seg.start {
+                                crate::execution_work::record(crate::execution_work::Operation::PrefixFrame, 1);
+                            }
+                        })
+                        .map(|(_, frame)| frame)
                         .skip(seg.start)
                         .take(seg.end - seg.start + 1)
                         .any(|f| f.measured)
@@ -2174,8 +2189,17 @@ impl RuntimeRun {
                 (Some(before), Some(after)) if field(after).len() > field(before).len() => {
                     field(after)
                         .iter()
+                        .enumerate()
+                        .inspect(|(i, _)| {
+                            #[cfg(test)]
+                            crate::execution_work::record(if *i < field(before).len() {
+                                crate::execution_work::Operation::SkippedTapePrefix
+                            } else {
+                                crate::execution_work::Operation::EventRef
+                            }, 1);
+                        })
                         .skip(field(before).len())
-                        .cloned()
+                        .map(|(_, value)| value.clone())
                         .collect()
                 }
                 _ => vec![],

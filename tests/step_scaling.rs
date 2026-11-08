@@ -585,7 +585,11 @@ fn effect_export_work_is_linear() {
             "prefix-walking control count={count}: visited={visited}; expected={expected_visits}"
         );
         assert_eq!(visited, expected_visits, "oracle missed prefix visits");
-        assert_ne!(visited, events.len() as u64, "oracle accepted a prefix walk");
+        assert_ne!(
+            visited,
+            events.len() as u64,
+            "oracle accepted a prefix walk"
+        );
         assert_eq!(
             visited - events.len() as u64,
             (count * (count - 1) / 2) as u64,

@@ -392,8 +392,6 @@ impl<V: Clone> Seq<V> {
         })
     }
     pub(crate) fn shared_from(&self, start: usize) -> Vec<Rc<V>> {
-        #[cfg(test)]
-        crate::history_work::tape_prefix(start);
         (start..self.len())
             .map(|i| {
                 #[cfg(test)]

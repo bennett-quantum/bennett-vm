@@ -62,6 +62,12 @@ struct Activation {
     call_start: Option<usize>,
     args: Vec<Value>,
 }
+#[derive(Clone, Default)]
+struct FrameEvents {
+    tape: Vec<std::rc::Rc<Json>>,
+    hosts: Vec<std::rc::Rc<Json>>,
+    measurements: Vec<std::rc::Rc<Json>>,
+}
 #[cfg_attr(not(test), derive(Clone))]
 struct Frame {
     classes_before: Map<usize, String>,
@@ -75,7 +81,7 @@ struct Frame {
     after: Option<Data>,
     control: Seq<Activation>,
     pure: bool,
-    events: [Vec<std::rc::Rc<Json>>; 3],
+    events: FrameEvents,
     marker: bool,
     measured: bool,
     tokens_created: Vec<u64>,
@@ -699,15 +705,16 @@ impl Machine {
                 .record(self.trace_row(&a, &before, &addresses), &obj);
         }
         let events = if self.stateful && !pure(&ins.op) && ins.op != "uncall" {
-            [
-                self.data.tape.shared_from(before.tape.len()),
-                self.data.hosts.shared_from(before.hosts.len()),
-                self.data
+            FrameEvents {
+                tape: self.data.tape.shared_from(before.tape.len()),
+                hosts: self.data.hosts.shared_from(before.hosts.len()),
+                measurements: self
+                    .data
                     .measurements
                     .shared_from(before.measurements.len()),
-            ]
+            }
         } else {
-            std::array::from_fn(|_| vec![])
+            FrameEvents::default()
         };
         let frame_pure = pure(&ins.op) && fault.is_none();
         let measured = is_measure(&ins.op) && fault.is_none();
@@ -2183,17 +2190,17 @@ impl RuntimeRun {
         r.data.measurements.clear();
         r.quantum = self.machine.quantum.clone();
     }
-    fn records(&self, field: usize) -> Vec<Json> {
+    fn records(&self, field: fn(&FrameEvents) -> &[std::rc::Rc<Json>]) -> Vec<Json> {
         self.machine
             .history
             .iter()
             .enumerate()
             .filter(|(row, frame)| !self.machine.history.reversed(*row) && !frame.marker)
             .flat_map(|(_, frame)| {
-                (0..frame.events[field].len()).map(move |index| {
+                (0..field(&frame.events).len()).map(move |index| {
                     #[cfg(test)]
                     crate::history_work::record(crate::history_work::Operation::EventRef, 1);
-                    frame.events[field][index].as_ref().clone()
+                    field(&frame.events)[index].as_ref().clone()
                 })
             })
             .collect()
@@ -2248,10 +2255,10 @@ impl RuntimeRun {
             .measured_in(0, self.machine.history.len())
     }
     pub(crate) fn tape(&self) -> Vec<Json> {
-        self.records(0)
+        self.records(|events| &events.tape)
     }
     pub(crate) fn measurements(&self) -> Vec<Json> {
-        self.records(2)
+        self.records(|events| &events.measurements)
     }
     pub(crate) fn history_len(&self) -> usize {
         self.machine.history.len()
@@ -2504,7 +2511,10 @@ impl RuntimeRun {
                 Json::Arr(self.machine.trace.project(&self.machine.obj)),
             ),
             ("tape", Json::Arr(self.tape())),
-            ("host_requests", Json::Arr(self.records(1))),
+            (
+                "host_requests",
+                Json::Arr(self.records(|events| &events.hosts)),
+            ),
         ];
         if self.machine.quantum.target.is_some() {
             out.push((

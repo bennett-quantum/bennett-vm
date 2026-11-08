@@ -622,3 +622,27 @@ fn radical_phase_and_multiple_registers_roundtrip_to_the_engine_exact_state() {
     engine.prepare(&image, &value);
     assert_roundtrip(&fixture.read(), &engine);
 }
+
+#[test]
+fn zero_width_concatenations_do_not_shift_later_allocations() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        &fixture.object,
+        include_str!("fixtures/state_out09/zero-width-concat.bisa"),
+    )
+    .unwrap();
+    success(fixture.run(
+        "run-program",
+        "interpreter",
+        "sample",
+        &["--state-out", fixture.state.to_str().unwrap()],
+    ));
+    let state = fixture.read();
+    let registers = state.get("registers").unwrap().as_arr().unwrap();
+    assert_eq!(
+        registers.len(),
+        3,
+        "concat is a view of two empty allocations"
+    );
+    assert_eq!(registers[2].get("width").and_then(Json::as_u64), Some(1));
+}

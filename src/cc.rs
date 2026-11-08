@@ -1199,7 +1199,8 @@ impl Machine {
                 }
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
-                let bundles = self.data.handles.values().map(|h| &h.wires[..]);
+                let handles = self.data.handles.values();
+                let bundles = handles.filter(|h| h.parent.is_none()).map(|h| &h.wires[..]);
                 self.quantum.state_output.capture(&self.quantum, bundles)?;
                 let (v, bits) = self.quantum.measure(&ws, draw);
                 self.quantum.target_release(&ws);

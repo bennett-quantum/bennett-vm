@@ -453,7 +453,7 @@ fn readout_registers<'a>(bundles: impl Iterator<Item = &'a [usize]>) -> Vec<&'a 
     bundles
         .filter(|wires| {
             // Each allocation's original handle precedes all of its derived views.
-            let original = !wires.iter().all(|wire| seen.contains(wire));
+            let original = wires.first().is_none_or(|wire| !seen.contains(wire));
             seen.extend(*wires);
             original
         })

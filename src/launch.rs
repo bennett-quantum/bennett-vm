@@ -450,6 +450,42 @@ pub unsafe extern "C" fn bennett_run(
     entropy_len: usize,
     out: *mut u64,
 ) -> i32 {
+    run_with_options(
+        p,
+        entry,
+        args,
+        entropy,
+        entropy_len,
+        out,
+        RunOptions::default(),
+    )
+}
+
+/// Per-run Rust launch options; the published C launch signatures are unchanged.
+/// Defaults retain typed diagnostic deltas and build no trace JSON while stepping.
+/// Both modes expose the complete legacy trace through `bennett_run_snapshot`.
+#[derive(Default)]
+pub struct RunOptions {
+    collect_trace: bool,
+}
+impl RunOptions {
+    /// Encode each diagnostic row during execution instead of at snapshot time.
+    pub fn collect_trace(mut self, enabled: bool) -> Self {
+        self.collect_trace = enabled;
+        self
+    }
+}
+/// Start a run with explicit observation options and the pointer/lifetime
+/// requirements of `bennett_run`. This Rust extension changes no C ABI signature.
+pub unsafe fn run_with_options(
+    p: *mut bennett_program_t,
+    entry: *const c_char,
+    args: *const bennett_args_t,
+    entropy: *const u8,
+    entropy_len: usize,
+    out: *mut u64,
+    options: RunOptions,
+) -> i32 {
     status(|| {
         let p = get_mut(p)?;
         let name = text(entry)?.trim_start_matches('@');
@@ -463,8 +499,7 @@ pub unsafe extern "C" fn bennett_run(
         if f.lists[0].len() != args.values.len() {
             return Err(error(ARG, "§10: positional argument count differs"));
         }
-        let mut values = vec![];
-        let mut regs = vec![];
+        let (mut values, mut regs) = (vec![], vec![]);
         for (param, arg) in f.lists[0].iter().zip(&args.values) {
             values.push(match (&param.ty, arg) {
                 (Type::I(n), Some(Arg::Int(w, b))) if n == w => Value::int(*n, b.clone()),
@@ -505,7 +540,7 @@ pub unsafe extern "C" fn bennett_run(
             r,
             Run {
                 state: State::Running,
-                runtime,
+                runtime: runtime.collect_trace(options.collect_trace),
                 request: None,
             },
         );
@@ -513,6 +548,7 @@ pub unsafe extern "C" fn bennett_run(
         Ok(())
     })
 }
+
 impl bennett_result_t {
     fn from_run(p: &mut bennett_program_t, r: u64) -> Self {
         let run = &p.runs[&r];

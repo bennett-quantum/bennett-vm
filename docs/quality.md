@@ -294,6 +294,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_300": 0,
       "trivial_wrappers": 0
     },
+    "src/cc/trace.rs": {
+      "branch_mass": 96,
+      "max_lines": 56,
+      "over_100": 0,
+      "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
     "src/certificate.rs": {
       "branch_mass": 485,
       "max_lines": 164,

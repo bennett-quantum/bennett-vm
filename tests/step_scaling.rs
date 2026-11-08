@@ -38,6 +38,9 @@ struct Run {
 }
 impl Run {
     fn new() -> Self {
+        Self::with_observation(false)
+    }
+    fn with_observation(observed: bool) -> Self {
         unsafe {
             let mut program = ptr::null_mut();
             checked(bennett_load(
@@ -50,14 +53,20 @@ impl Run {
             let mut args = ptr::null_mut();
             checked(bennett_args_new(0, &mut args));
             let mut id = 0;
-            checked(bennett_run(
-                program,
-                c"main".as_ptr(),
-                args,
-                ptr::null(),
-                0,
-                &mut id,
-            ));
+            let start = if observed {
+                run_with_options(
+                    program,
+                    c"main".as_ptr(),
+                    args,
+                    ptr::null(),
+                    0,
+                    &mut id,
+                    RunOptions::default().collect_trace(true),
+                )
+            } else {
+                bennett_run(program, c"main".as_ptr(), args, ptr::null(), 0, &mut id)
+            };
+            checked(start);
             bennett_args_free(args);
             let (mut result, mut request) = (ptr::null_mut(), ptr::null_mut());
             checked(bennett_wait(program, id, &mut result, &mut request));
@@ -360,6 +369,99 @@ fn classical_accounting_comparisons_stay_within_twice_the_initial_work() {
             CHECKPOINTS[0],
             work.accounting_comparisons,
             count,
+        );
+    }
+}
+
+// Counts complete diagnostic row constructors, separately from other JSON
+// (effect journals, replies and snapshots are deliberately outside this unit).
+thread_local! {
+    static TRACE_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+pub(crate) fn record_trace_json_build() {
+    TRACE_BUILDS.with(|count| count.set(count.get() + 1));
+}
+fn trace_builds() -> u64 {
+    TRACE_BUILDS.with(std::cell::Cell::get)
+}
+
+#[test]
+fn measure_step_trace_json_builds() {
+    for steps in CHECKPOINTS {
+        let mut run = Run::new();
+        let before = trace_builds();
+        let start = Instant::now();
+        let work = run.prefix(steps);
+        let builds = trace_builds() - before;
+        eprintln!(
+            "trace measurement: {steps} rows, {builds} row JSON builds, {:.6} builds/row; wall {:?}",
+            builds as f64 / work.steps as f64,
+            start.elapsed()
+        );
+        assert_eq!(work.steps, steps as u64);
+    }
+}
+
+impl Run {
+    fn snapshot(&self) -> Json {
+        unsafe {
+            let mut snapshot = ptr::null_mut();
+            checked(bennett_run_snapshot(self.program, self.id, &mut snapshot));
+            let mut n = 0;
+            let bytes = bennett_snapshot_jcs(snapshot, &mut n);
+            let report =
+                json::parse(std::str::from_utf8(std::slice::from_raw_parts(bytes, n)).unwrap())
+                    .unwrap();
+            bennett_snapshot_free(snapshot);
+            report
+        }
+    }
+}
+
+#[test]
+fn trace_off_builds_no_step_json() {
+    for steps in CHECKPOINTS {
+        let mut off = Run::new();
+        let before_off = trace_builds();
+        let off_work = off.prefix(steps);
+        let after_off = trace_builds();
+        let mut on = Run::with_observation(true);
+        let before_on = trace_builds();
+        let on_work = on.prefix(steps);
+        let on_builds = trace_builds() - before_on;
+        assert!(on_builds > 0, "observed denominator must be positive");
+        assert_eq!(off_work.steps, on_work.steps);
+        assert_eq!(off_work.steps, steps as u64);
+        let before_export = trace_builds();
+        let export_start = Instant::now();
+        let off_snapshot = off.snapshot();
+        let export_wall = export_start.elapsed();
+        let export_builds = trace_builds() - before_export;
+        let before_observed_export = trace_builds();
+        let on_snapshot = on.snapshot();
+        assert_eq!(trace_builds(), before_observed_export, "observed snapshot only clones its encoded rows");
+        assert_eq!(export_builds, off_snapshot.get("history_length").unwrap().as_u64().unwrap());
+        eprintln!("lazy snapshot: {export_builds} row JSON builds; wall {export_wall:?}");
+        assert_eq!(
+            off_snapshot, on_snapshot,
+            "complete legacy snapshot at {steps}"
+        );
+        assert!(
+            !off_snapshot
+                .get("trace")
+                .unwrap()
+                .as_arr()
+                .unwrap()
+                .is_empty()
+        );
+        eprintln!(
+            "{steps} rows: off={} on={on_builds}, Rtrace={:.6}",
+            after_off - before_off,
+            (after_off - before_off) as f64 / on_builds as f64
+        );
+        assert_eq!(
+            after_off, before_off,
+            "trace-off execution constructed row JSON at {steps} rows"
         );
     }
 }

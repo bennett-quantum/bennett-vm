@@ -237,3 +237,117 @@ fn register_views_do_not_renumber_or_duplicate_allocations() {
     }
     assert_eq!(state.get("amps").unwrap().as_arr().unwrap().len(), 1);
 }
+
+struct AlternateEngine(Vec<(crate::bigint::BigUint, crate::action::Amp)>);
+impl crate::action::QuantumReadout for AlternateEngine {
+    fn engine_label(&self) -> &str {
+        "alternate"
+    }
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&crate::bigint::BigUint, crate::action::Amp)) {
+        for (basis, amplitude) in &self.0 {
+            visit(basis, *amplitude);
+        }
+    }
+}
+fn output(fixture: &Fixture) -> crate::action::StateOutput {
+    let opts = crate::cliargs::scan_opts(
+        &["--state-out".into(), fixture.state.to_str().unwrap().into()],
+        &["state-out"],
+        &[],
+    )
+    .unwrap();
+    crate::cliargs::state_output(&opts).unwrap()
+}
+
+#[test]
+fn the_same_hook_accepts_another_engine_and_captures_once_across_clones() {
+    let fixture = Fixture::new();
+    let state_output = output(&fixture);
+    let checkpoint = state_output.clone();
+    let engine = AlternateEngine(vec![(crate::bigint::BigUint::from_u64(1), (0.0, -1.0))]);
+    let wires = [0];
+    state_output
+        .capture(&engine, std::iter::once(wires.as_slice()))
+        .unwrap();
+    let state = fixture.read();
+    assert_eq!(
+        state.get("engine").and_then(Json::as_str),
+        Some("alternate")
+    );
+    let row = &state.get("amps").unwrap().as_arr().unwrap()[0];
+    assert_eq!(
+        row.get("basis").unwrap().get("0").and_then(Json::as_str),
+        Some("1")
+    );
+    assert_eq!(number(row.get("re").unwrap()), 0.0);
+    assert_eq!(number(row.get("im").unwrap()), -1.0);
+    std::fs::write(&fixture.state, "already captured").unwrap();
+    checkpoint
+        .capture(&engine, std::iter::once(wires.as_slice()))
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&fixture.state).unwrap(),
+        "already captured"
+    );
+}
+
+#[test]
+fn exact_readout_uses_the_exact_map_without_mutating_it() {
+    let fixture = Fixture::new();
+    let mut engine = crate::action::QuantumState::new();
+    let wires = engine.alloc_wires(1);
+    engine.prepare(&wires, &crate::bigint::BigUint::from_u64(1));
+    let before = engine.clone();
+    // A deliberately stale binary64 cache cannot become the readout oracle.
+    engine.amps.clear();
+    output(&fixture)
+        .capture(&engine, std::iter::once(wires.as_slice()))
+        .unwrap();
+    let state = fixture.read();
+    assert_eq!(state.get("engine").and_then(Json::as_str), Some("exact"));
+    let rows = state.get("amps").unwrap().as_arr().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]
+            .get("basis")
+            .unwrap()
+            .get("0")
+            .and_then(Json::as_str),
+        Some("1")
+    );
+    assert_eq!(number(rows[0].get("re").unwrap()), 1.0);
+    assert!(engine.exact_equals(&before));
+    assert!(engine.amps.is_empty());
+}
+
+#[test]
+fn malformed_engine_readout_fails_before_writing_or_consuming_the_hook() {
+    let fixture = Fixture::new();
+    let state_output = output(&fixture);
+    let wires = [0];
+    let empty = AlternateEngine(vec![]);
+    assert!(
+        state_output
+            .capture(&empty, std::iter::once(wires.as_slice()))
+            .unwrap_err()
+            .contains("empty quantum state")
+    );
+    for component in [f64::NAN, f64::INFINITY] {
+        let invalid = AlternateEngine(vec![(crate::bigint::BigUint::zero(), (component, 0.0))]);
+        assert!(
+            state_output
+                .capture(&invalid, std::iter::once(wires.as_slice()))
+                .unwrap_err()
+                .contains("non-finite amplitude")
+        );
+        assert!(!fixture.state.exists());
+    }
+    let valid = AlternateEngine(vec![(crate::bigint::BigUint::zero(), (1.0, 0.0))]);
+    state_output
+        .capture(&valid, std::iter::once(wires.as_slice()))
+        .unwrap();
+    assert_eq!(
+        fixture.read().get("amps").unwrap().as_arr().unwrap().len(),
+        1
+    );
+}

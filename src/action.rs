@@ -368,21 +368,83 @@ impl QuantumState {
     }
 }
 
-/// A quantum engine supplies its physical amplitudes without changing its state.
-/// Exact support, including coefficients whose display rounds to zero, is retained.
+/// The representation fixes the engine label and the JSON component types.
+/// Exact amplitudes carry a numerator and its positive squared normalization;
+/// dense amplitudes carry binary64 real and imaginary components.
+/// Each exact JSON component is numerator / sqrt(normalization), where both
+/// arrays contain c * sqrt(2)^s * i^j * exp(i * phase) terms with rational c/phase.
+pub trait ReadoutAmplitude {
+    const ENGINE: &'static str;
+    fn components(self) -> Result<(Json, Json), String>;
+}
+
+impl ReadoutAmplitude for (Exact, Exact) {
+    const ENGINE: &'static str = "exact";
+    fn components(self) -> Result<(Json, Json), String> {
+        let (amplitude, normalization) = self;
+        let conjugate = amplitude.conj();
+        let real = amplitude.add(&conjugate).scale_pow2(-1);
+        let imaginary = amplitude
+            .add(&conjugate.neg())
+            .mul(&Exact::pair(0.0, -1.0))
+            .scale_pow2(-1);
+        let component = |numerator: Exact| {
+            Json::obj(vec![
+                ("numerator", readout_terms(&numerator)),
+                ("normalization", readout_terms(&normalization)),
+            ])
+        };
+        Ok((component(real), component(imaginary)))
+    }
+}
+
+impl ReadoutAmplitude for Amp {
+    const ENGINE: &'static str = "dense";
+    fn components(self) -> Result<(Json, Json), String> {
+        let (re, im) = self;
+        [re, im]
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some((Json::Num(re.to_string()), Json::Num(im.to_string())))
+            .ok_or("--state-out: engine returned a non-finite amplitude".into())
+    }
+}
+
+fn readout_dyadic((negative, magnitude, scale): (bool, &BigUint, usize)) -> Json {
+    let (numerator, denominator) =
+        crate::rational::Rational::from_dyadic(negative, magnitude.clone(), scale).fraction();
+    let fraction = format!("{numerator}/{denominator}");
+    Json::Str(fraction.strip_suffix("/1").unwrap_or(&fraction).to_owned())
+}
+
+fn readout_terms(value: &Exact) -> Json {
+    Json::Arr(
+        value
+            .terms()
+            .map(|(coefficient, sqrt2, imaginary, phase)| {
+                Json::obj(vec![
+                    ("coefficient", readout_dyadic(coefficient)),
+                    ("sqrt2", Json::Bool(sqrt2)),
+                    ("imaginary", Json::Bool(imaginary)),
+                    ("phase", readout_dyadic(phase)),
+                ])
+            })
+            .collect(),
+    )
+}
+
+/// A quantum engine supplies its amplitude representation without changing state.
 pub trait QuantumReadout {
-    fn engine_label(&self) -> &str;
-    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Amp));
+    type Amplitude: ReadoutAmplitude;
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Self::Amplitude));
 }
 
 impl QuantumReadout for QuantumState {
-    fn engine_label(&self) -> &str {
-        "exact"
-    }
-    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Amp)) {
+    type Amplitude = (Exact, Exact);
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Self::Amplitude)) {
         self.exact.iter().for_each(|(basis, amplitude)| {
-            let normalized = amplitude.normalized_value(&self.normalization);
-            visit(basis, normalized);
+            let value = (amplitude.clone(), self.normalization.clone());
+            visit(basis, value);
         });
     }
 }
@@ -395,8 +457,8 @@ pub struct StateOutput {
 }
 
 impl StateOutput {
-    /// Capture once, immediately before collapse. Bundles arrive in allocation
-    /// order; subsequent handles for the same wires are views, not allocations.
+    /// Capture once, immediately before collapse. Bundles name original
+    /// allocations in their creation order, including zero-width allocations.
     pub fn capture<'a>(
         &self,
         engine: &impl QuantumReadout,
@@ -414,11 +476,11 @@ impl StateOutput {
     }
 }
 
-fn state_readout<'a>(
-    engine: &impl QuantumReadout,
+fn state_readout<'a, E: QuantumReadout>(
+    engine: &E,
     bundles: impl Iterator<Item = &'a [usize]>,
 ) -> Result<Json, String> {
-    let registers = readout_registers(bundles);
+    let registers: Vec<_> = bundles.collect();
     let amplitudes = readout_amplitudes(engine)?;
     let constant = registers
         .iter()
@@ -430,39 +492,33 @@ fn state_readout<'a>(
     let rows = amplitudes
         .into_iter()
         .map(|(basis, amp)| readout_row(&registers, &constant, basis, amp))
-        .collect::<Result<_, _>>()?;
+        .collect();
     Ok(Json::obj(vec![
-        ("engine", Json::Str(engine.engine_label().into())),
+        ("engine", Json::Str(E::Amplitude::ENGINE.into())),
         ("registers", readout_metadata(&registers)),
         ("constant", Json::Obj(constant)),
         ("amps", Json::Arr(rows)),
     ]))
 }
 
-fn readout_amplitudes(engine: &impl QuantumReadout) -> Result<Vec<(BigUint, Amp)>, String> {
+type ReadoutRow = (BigUint, (Json, Json));
+
+fn readout_amplitudes<E: QuantumReadout>(engine: &E) -> Result<Vec<ReadoutRow>, String> {
     let mut amplitudes = Vec::new();
-    engine.visit_amplitudes(&mut |basis, amp| amplitudes.push((basis.clone(), amp)));
+    engine.visit_amplitudes(&mut |basis, value| {
+        amplitudes.push(value.components().map(|value| (basis.clone(), value)));
+    });
+    let mut amplitudes = amplitudes.into_iter().collect::<Result<Vec<_>, _>>()?;
     amplitudes
         .first()
         .ok_or("--state-out: engine returned an empty quantum state")?;
+    amplitudes.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(amplitudes)
-}
-
-fn readout_registers<'a>(bundles: impl Iterator<Item = &'a [usize]>) -> Vec<&'a [usize]> {
-    let mut seen = BTreeSet::<usize>::new();
-    bundles
-        .filter(|wires| {
-            // Each allocation's original handle precedes all of its derived views.
-            let original = wires.first().is_none_or(|wire| !seen.contains(wire));
-            seen.extend(*wires);
-            original
-        })
-        .collect()
 }
 
 // Keep ordinary integer registers in basis rows. Wide fixed images use byte hex
 // so the consumer need not parse enormous decimal integers.
-fn readout_constant(wires: &[usize], amplitudes: &[(BigUint, Amp)]) -> Option<Json> {
+fn readout_constant(wires: &[usize], amplitudes: &[ReadoutRow]) -> Option<Json> {
     let value = QuantumState::extract(&amplitudes[0].0, wires);
     let fixed = Some(value)
         .filter(|_| wires.len() > u64::BITS as usize)
@@ -482,11 +538,8 @@ fn readout_row(
     registers: &[&[usize]],
     constant: &BTreeMap<String, Json>,
     basis: BigUint,
-    (re, im): Amp,
-) -> Result<Json, String> {
-    if [re, im].iter().any(|value| !value.is_finite()) {
-        return Err("--state-out: engine returned a non-finite amplitude".into());
-    }
+    (re, im): (Json, Json),
+) -> Json {
     let values = registers
         .iter()
         .enumerate()
@@ -496,11 +549,7 @@ fn readout_row(
             (reg.to_string(), Json::Str(value))
         })
         .collect();
-    Ok(Json::obj(vec![
-        ("basis", Json::Obj(values)),
-        ("re", Json::Num(re.to_string())),
-        ("im", Json::Num(im.to_string())),
-    ]))
+    Json::obj(vec![("basis", Json::Obj(values)), ("re", re), ("im", im)])
 }
 
 fn readout_metadata(registers: &[&[usize]]) -> Json {

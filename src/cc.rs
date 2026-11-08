@@ -83,6 +83,7 @@ struct Allocation {
 #[derive(Clone, Debug, PartialEq)]
 struct Handle {
     wires: Vec<usize>,
+    allocation: bool,
     live: bool,
     parent: Option<u64>,
     viewed: bool,
@@ -469,6 +470,7 @@ impl Data {
             id,
             Handle {
                 wires,
+                allocation: parent.is_none(),
                 live: true,
                 parent,
                 viewed: false,
@@ -1138,8 +1140,7 @@ impl Machine {
                     result = Some(Value::Qreg(v));
                 }
                 "qreg.concat" => {
-                    let a = get!(self.id(&xs[0]));
-                    let b = get!(self.id(&xs[1]));
+                    let (a, b) = (get!(self.id(&xs[0])), get!(self.id(&xs[1])));
                     let ha = self.data.handle(a).unwrap();
                     let hb = self.data.handle(b).unwrap();
                     if a == b || ha.parent.is_some() || hb.parent.is_some() {
@@ -1149,6 +1150,7 @@ impl Machine {
                     self.data.handles.get_mut(&a).unwrap().live = false;
                     self.data.handles.get_mut(&b).unwrap().live = false;
                     let id = self.data.new_handle(ws, None);
+                    self.data.handles.get_mut(&id).unwrap().allocation = false;
                     result = Some(Value::Qreg(id));
                 }
                 "qreg.width" | "qreg.id" if obj.isa == "0.9" => {
@@ -1200,7 +1202,7 @@ impl Machine {
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
                 let handles = self.data.handles.values();
-                let bundles = handles.filter(|h| h.parent.is_none()).map(|h| &h.wires[..]);
+                let bundles = handles.filter(|h| h.allocation).map(|h| &h.wires[..]);
                 self.quantum.state_output.capture(&self.quantum, bundles)?;
                 let (v, bits) = self.quantum.measure(&ws, draw);
                 self.quantum.target_release(&ws);

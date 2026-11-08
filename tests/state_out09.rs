@@ -117,8 +117,14 @@ fn check_state(state: &Json) {
         let basis = rows[0].get("basis").unwrap().as_obj().unwrap();
         assert_eq!(basis.len(), 3);
         assert_eq!(basis["3"].as_str(), Some("0"));
-        assert!((number(rows[0].get("re").unwrap()) - re).abs() < 3e-16);
-        assert!((number(rows[0].get("im").unwrap()) - im).abs() < 3e-16);
+        assert_eq!(
+            decode_scalar(rows[0].get("re").unwrap(), &crate::exact::Exact::one()),
+            crate::exact::Exact::pair(re, 0.0)
+        );
+        assert_eq!(
+            decode_scalar(rows[0].get("im").unwrap(), &crate::exact::Exact::one()),
+            crate::exact::Exact::pair(im, 0.0)
+        );
     }
 }
 
@@ -240,9 +246,7 @@ fn register_views_do_not_renumber_or_duplicate_allocations() {
 
 struct AlternateEngine(Vec<(crate::bigint::BigUint, crate::action::Amp)>);
 impl crate::action::QuantumReadout for AlternateEngine {
-    fn engine_label(&self) -> &str {
-        "alternate"
-    }
+    type Amplitude = crate::action::Amp;
     fn visit_amplitudes(&self, visit: &mut dyn FnMut(&crate::bigint::BigUint, crate::action::Amp)) {
         for (basis, amplitude) in &self.0 {
             visit(basis, *amplitude);
@@ -270,10 +274,7 @@ fn the_same_hook_accepts_another_engine_and_captures_once_across_clones() {
         .capture(&engine, std::iter::once(wires.as_slice()))
         .unwrap();
     let state = fixture.read();
-    assert_eq!(
-        state.get("engine").and_then(Json::as_str),
-        Some("alternate")
-    );
+    assert_eq!(state.get("engine").and_then(Json::as_str), Some("dense"));
     let row = &state.get("amps").unwrap().as_arr().unwrap()[0];
     assert_eq!(
         row.get("basis").unwrap().get("0").and_then(Json::as_str),
@@ -315,7 +316,10 @@ fn exact_readout_uses_the_exact_map_without_mutating_it() {
             .and_then(Json::as_str),
         Some("1")
     );
-    assert_eq!(number(rows[0].get("re").unwrap()), 1.0);
+    assert_eq!(
+        decode_scalar(rows[0].get("re").unwrap(), &crate::exact::Exact::one()),
+        crate::exact::Exact::one()
+    );
     assert!(engine.exact_equals(&before));
     assert!(engine.amps.is_empty());
 }

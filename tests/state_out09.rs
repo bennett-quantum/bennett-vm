@@ -351,3 +351,274 @@ fn malformed_engine_readout_fails_before_writing_or_consuming_the_hook() {
         1
     );
 }
+
+#[test]
+fn irrational_readout_retains_the_exact_radical_and_its_phase() {
+    let zero = json::parse(r#"{"numerator":[],"normalization":[{"coefficient":"1","sqrt2":false,"imaginary":false,"phase":"0"}]}"#).unwrap();
+    let half_root = json::parse(r#"{"numerator":[{"coefficient":"1/2","sqrt2":true,"imaginary":false,"phase":"0"}],"normalization":[{"coefficient":"1","sqrt2":false,"imaginary":false,"phase":"0"}]}"#).unwrap();
+    for (source, phase) in [
+        (include_str!("fixtures/state_out09/radical.bisa"), false),
+        (
+            include_str!("fixtures/state_out09/radical-phase.bisa"),
+            true,
+        ),
+    ] {
+        for command in ["run-cc", "run-program"] {
+            for engine in ["interpreter", "jit"] {
+                let fixture = Fixture::new();
+                std::fs::write(&fixture.object, source).unwrap();
+                success(fixture.run(
+                    command,
+                    engine,
+                    "sample",
+                    &["--state-out", fixture.state.to_str().unwrap()],
+                ));
+                let state = fixture.read();
+                assert_eq!(state.get("engine").and_then(Json::as_str), Some("exact"));
+                let rows = state.get("amps").unwrap().as_arr().unwrap();
+                assert_eq!(rows.len(), 2);
+                for (basis, row) in rows.iter().enumerate() {
+                    assert_eq!(
+                        row.get("basis").unwrap().get("0").and_then(Json::as_str),
+                        Some(basis.to_string().as_str())
+                    );
+                    assert_eq!(
+                        row.get("re"),
+                        Some(if phase && basis == 1 {
+                            &zero
+                        } else {
+                            &half_root
+                        })
+                    );
+                    assert_eq!(
+                        row.get("im"),
+                        Some(if phase && basis == 1 {
+                            &half_root
+                        } else {
+                            &zero
+                        })
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_width_allocations_retain_their_indices_before_nonempty_registers() {
+    for command in ["run-cc", "run-program"] {
+        for engine in ["interpreter", "jit"] {
+            let fixture = Fixture::new();
+            std::fs::write(
+                &fixture.object,
+                include_str!("fixtures/state_out09/zero-width.bisa"),
+            )
+            .unwrap();
+            let result = success(fixture.run(
+                command,
+                engine,
+                "sample",
+                &["--state-out", fixture.state.to_str().unwrap()],
+            ));
+            assert_eq!(
+                result.get("status").and_then(Json::as_str),
+                Some("COMPLETED")
+            );
+            let state = fixture.read();
+            let registers = state.get("registers").unwrap().as_arr().unwrap();
+            assert_eq!(registers.len(), 3);
+            for (reg, width) in [0, 0, 1].into_iter().enumerate() {
+                assert_eq!(
+                    registers[reg].get("reg").and_then(Json::as_usize),
+                    Some(reg)
+                );
+                assert_eq!(
+                    registers[reg].get("width").and_then(Json::as_u64),
+                    Some(width)
+                );
+            }
+            let row = &state.get("amps").unwrap().as_arr().unwrap()[0];
+            for reg in ["0", "1", "2"] {
+                assert_eq!(
+                    row.get("basis").unwrap().get(reg).and_then(Json::as_str),
+                    Some("0")
+                );
+            }
+        }
+    }
+}
+
+// Decode the proposed rational/radical format independently through Exact's
+// arithmetic API. No f64 evaluation or decimal approximation enters this oracle.
+fn decode_dyadic(text: &str) -> (bool, crate::bigint::BigUint, usize) {
+    let (numerator, denominator) = text.split_once('/').unwrap_or((text, "1"));
+    let (negative, numerator) = numerator
+        .strip_prefix('-')
+        .map_or((false, numerator), |n| (true, n));
+    let magnitude = crate::bigint::BigUint::parse_decimal(numerator).unwrap();
+    let denominator = crate::bigint::BigUint::parse_decimal(denominator).unwrap();
+    assert!(!denominator.is_zero());
+    let scale = denominator.bits() - 1;
+    assert_eq!(denominator, crate::bigint::BigUint::from_u64(1).shl(scale));
+    (negative, magnitude, scale)
+}
+fn decode_terms(value: &Json) -> crate::exact::Exact {
+    use crate::exact::{Dyad, Exact};
+    value
+        .as_arr()
+        .expect("exact term array")
+        .iter()
+        .fold(Exact::zero(), |sum, term| {
+            let (negative, magnitude, scale) =
+                decode_dyadic(term.get("coefficient").unwrap().as_str().unwrap());
+            let mut coefficient = (0..magnitude.bits())
+                .filter(|bit| magnitude.bit(*bit))
+                .fold(Exact::zero(), |sum, bit| {
+                    sum.add(&Exact::one().scale_pow2(bit as i128))
+                });
+            coefficient = coefficient.scale_pow2(-(scale as i128));
+            if negative {
+                coefficient = coefficient.neg();
+            }
+            if term.get("sqrt2") == Some(&Json::Bool(true)) {
+                coefficient = coefficient.mul(&Exact::sqrt_half().scale_pow2(1));
+            }
+            if term.get("imaginary") == Some(&Json::Bool(true)) {
+                coefficient = coefficient.mul(&Exact::pair(0.0, 1.0));
+            }
+            let (negative, magnitude, scale) =
+                decode_dyadic(term.get("phase").unwrap().as_str().unwrap());
+            let mut angle = (0..magnitude.bits())
+                .rev()
+                .fold(Dyad::int(0), |angle, bit| {
+                    let doubled = angle.add(&angle);
+                    if magnitude.bit(bit) {
+                        doubled.add(&Dyad::int(1))
+                    } else {
+                        doubled
+                    }
+                });
+            for _ in 0..scale {
+                angle = angle.half();
+            }
+            if negative {
+                angle = angle.neg();
+            }
+            sum.add(&coefficient.mul(&Exact::phase(angle)))
+        })
+}
+fn decode_scalar(value: &Json, normalization: &crate::exact::Exact) -> crate::exact::Exact {
+    assert!(
+        value.as_obj().is_some(),
+        "exact scalar object required: {value:?}"
+    );
+    assert_eq!(
+        &decode_terms(value.get("normalization").unwrap()),
+        normalization
+    );
+    decode_terms(value.get("numerator").unwrap())
+}
+fn assert_roundtrip(state: &Json, engine: &crate::action::QuantumState) {
+    use crate::{bigint::BigUint, exact::Exact};
+    let constants = state.get("constant").unwrap().as_obj().unwrap();
+    let mut decoded = std::collections::BTreeMap::new();
+    for row in state.get("amps").unwrap().as_arr().unwrap() {
+        let mut basis = BigUint::zero();
+        let mut offset = 0;
+        for register in state.get("registers").unwrap().as_arr().unwrap() {
+            let reg = register.get("reg").unwrap().as_usize().unwrap().to_string();
+            let width = register.get("width").unwrap().as_usize().unwrap();
+            let value = match constants.get(&reg) {
+                Some(hex) => {
+                    let bytes = crate::sha256::from_hex(hex.as_str().unwrap()).unwrap();
+                    bytes
+                        .iter()
+                        .enumerate()
+                        .fold(BigUint::zero(), |mut value, (byte, v)| {
+                            for bit in 0..8 {
+                                value.set_bit(byte * 8 + bit, v & (1 << bit) != 0);
+                            }
+                            value
+                        })
+                }
+                None => BigUint::parse_decimal(
+                    row.get("basis")
+                        .unwrap()
+                        .get(&reg)
+                        .unwrap()
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap(),
+            };
+            for bit in 0..width {
+                basis.set_bit(offset + bit, value.bit(bit));
+            }
+            offset += width;
+        }
+        let re = decode_scalar(row.get("re").unwrap(), &engine.normalization);
+        let im = decode_scalar(row.get("im").unwrap(), &engine.normalization);
+        assert!(
+            decoded
+                .insert(basis, re.add(&im.mul(&Exact::pair(0.0, 1.0))))
+                .is_none()
+        );
+    }
+    assert_eq!(
+        decoded, engine.exact,
+        "decoded exact numerators equal the engine state"
+    );
+}
+fn hadamard(engine: &mut crate::action::QuantumState, wire: usize) {
+    let h = crate::exact::Exact::sqrt_half();
+    engine.apply_exact(wire, &[], [[h.clone(), h.clone()], [h.clone(), h.neg()]]);
+}
+
+#[test]
+fn radical_phase_and_multiple_registers_roundtrip_to_the_engine_exact_state() {
+    use crate::{action::QuantumState, bigint::BigUint};
+    for (source, phase) in [
+        (include_str!("fixtures/state_out09/radical.bisa"), false),
+        (
+            include_str!("fixtures/state_out09/radical-phase.bisa"),
+            true,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        std::fs::write(&fixture.object, source).unwrap();
+        success(fixture.run(
+            "run-program",
+            "interpreter",
+            "sample",
+            &["--state-out", fixture.state.to_str().unwrap()],
+        ));
+        let mut engine = QuantumState::new();
+        engine.alloc_wires(1);
+        hadamard(&mut engine, 0);
+        if phase {
+            engine.phase_if_all(&[0], (0.0, 1.0));
+        }
+        assert_roundtrip(&fixture.read(), &engine);
+    }
+    let fixture = Fixture::new();
+    success(fixture.run(
+        "run-program",
+        "interpreter",
+        "sample",
+        &["--state-out", fixture.state.to_str().unwrap()],
+    ));
+    let mut engine = QuantumState::new();
+    let q = engine.alloc_wires(2);
+    let target = engine.alloc_wire();
+    let image = engine.alloc_wires(68);
+    engine.alloc_wire();
+    engine.flip(q[1], &[]);
+    hadamard(&mut engine, q[0]);
+    engine.phase_if_all(&[q[0]], (0.0, 1.0));
+    engine.flip(target, &[]);
+    hadamard(&mut engine, target);
+    let mut value = BigUint::from_u64(1);
+    value.set_bit(67, true);
+    engine.prepare(&image, &value);
+    assert_roundtrip(&fixture.read(), &engine);
+}

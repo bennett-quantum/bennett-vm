@@ -112,3 +112,6 @@ mod pins;
 #[cfg(test)]
 #[path = "../tests/step_scaling.rs"]
 mod step_scaling;
+
+#[cfg(test)]
+mod history_work;

@@ -483,7 +483,8 @@ fn history_lookup_does_not_walk_its_prefix() {
         let pure_prefix = "unused = const.i8 0\n".repeat(prefix);
         let mut run = history_run(&format!("fn r @id () () () () ()\n^entry():\nret\nfn cc @main () () () () ()\n^entry():\n{pure_prefix}call @id\nuncall @id () ()\nret"));
         for _ in 0..prefix + 2 { run.step().unwrap(); }
-        let probe = crate::execution_work::Probe::start();
+        let probe = crate::history_work::Probe::start();
+        probe.query_prefix(prefix);
         let before = probe.snapshot();
         run.step().unwrap();
         let after = probe.snapshot();
@@ -505,7 +506,7 @@ fn effect_export_work_is_linear() {
         let mut run = history_run(&format!("fn cc @main () () () () ()\n^entry():\nn = const.i64 8\np = alloc n\n{effects}ret"));
         while !run.terminal() { run.step().unwrap(); }
         for _ in 0..2 {
-            let probe = crate::execution_work::Probe::start();
+            let probe = crate::history_work::Probe::start();
             let before = probe.snapshot();
             let events = run.tape();
             let after = probe.snapshot();

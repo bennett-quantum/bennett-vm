@@ -379,7 +379,11 @@ impl<V: Clone> Seq<V> {
         *self = Self::new();
     }
     pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &V> + ExactSizeIterator {
-        (0..self.len()).map(|i| &self[i])
+        (0..self.len()).map(|i| {
+            #[cfg(test)]
+            crate::history_work::visit_sequence::<V>(i);
+            &self[i]
+        })
     }
     pub(crate) fn to_vec(&self) -> Vec<V> {
         self.iter().cloned().collect()

@@ -319,10 +319,10 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 0
     },
     "src/classical_memory.rs": {
-      "branch_mass": 181,
+      "branch_mass": 184,
       "max_lines": 58,
       "over_100": 0,
-      "over_25": 2,
+      "over_25": 3,
       "over_300": 0,
       "trivial_wrappers": 1
     },

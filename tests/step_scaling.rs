@@ -1139,3 +1139,52 @@ fn unchanged_writes_retain_original_bytes_and_release_long_journal() {
         "empty pages must be removed"
     );
 }
+
+#[test]
+fn rewound_memory_releases_discarded_journal_suffix() {
+    use crate::{bigint::BigUint, classical_memory::Memory};
+    let address = BigUint::from_u64(1);
+    let mut memory = Memory::default();
+    memory.write(&address, &[1; 16]);
+    let prefix = memory.retained_journal_bytes();
+    for _ in 0..3 {
+        let before = memory.clone();
+        memory.write(&address, &[2; 16]);
+        let after = memory.clone();
+        memory.undo_delta(&before, &after);
+        drop(after);
+        assert_eq!(memory, before);
+        assert_eq!(
+            memory.retained_journal_bytes(),
+            prefix,
+            "rewound suffix retained"
+        );
+    }
+}
+
+#[test]
+fn journal_forks_preserve_interleaved_bytes_when_uncall_is_reversed() {
+    use crate::{bigint::BigUint, classical_memory::Memory};
+    let a = BigUint::from_u64(1);
+    let b = BigUint::from_u64(2);
+    let c = BigUint::from_u64(3);
+    let d = BigUint::from_u64(4);
+    let mut memory = Memory::default();
+    let before_a = memory.clone();
+    memory.write(&a, &[11]);
+    let after_a = memory.clone();
+    memory.write(&b, &[22]); // Another run between two callee writes.
+    let before_c = memory.clone();
+    memory.write(&c, &[33]);
+    let before_uncall = memory.clone();
+    memory.undo_delta(&before_c, &before_uncall); // Exact tail, prune c.
+    memory.undo_delta(&before_a, &after_a); // Keep b, undo a, fork journal.
+    let after_uncall = memory.clone();
+    assert_eq!(memory.ordered_bytes(), vec![(b.clone(), 22)]);
+    memory.write(&d, &[44]); // Another run after uncall.
+    memory.undo_delta(&before_uncall, &after_uncall);
+    assert_eq!(
+        memory.ordered_bytes(),
+        vec![(a, 11), (b, 22), (c, 33), (d, 44)]
+    );
+}

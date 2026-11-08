@@ -20,6 +20,7 @@ enum Node {
 }
 #[derive(Debug)]
 struct Displaced {
+    depth: usize,
     previous: Option<Rc<Displaced>>,
     address: BigUint,
     original: Vec<u8>,
@@ -181,7 +182,14 @@ impl Memory {
             w.journal_bytes += bytes.len() as u64;
             w.copied_bytes += bytes.len() as u64;
         });
+        let depth = self
+            .journal
+            .as_ref()
+            .map_or(0, |entry| entry.depth)
+            .checked_add(1)
+            .expect("host limit: memory journal versions");
         self.journal = Some(Rc::new(Displaced {
+            depth,
             previous: self.journal.take(),
             address: address.clone(),
             original,
@@ -261,16 +269,53 @@ impl Memory {
         }
         bytes
     }
+    #[cfg(test)]
+    pub(crate) fn retained_journal_bytes(&self) -> usize {
+        let mut bytes = 0;
+        let mut cursor = self.journal.as_deref();
+        while let Some(entry) = cursor {
+            bytes += entry.original.len();
+            cursor = entry.previous.as_deref();
+        }
+        bytes
+    }
     pub(crate) fn undo_delta(&mut self, before: &Self, after: &Self) {
-        let mut cursor = after.journal.clone();
-        loop {
-            match (&cursor, &before.journal) {
-                (None, None) => break,
-                (Some(a), Some(b)) if Rc::ptr_eq(a, b) => break,
-                _ => (),
+        if same_journal(&self.journal, &after.journal) {
+            // No intervening memory writer: sharing the saved version also
+            // releases the undone suffix when its frame checkpoints disappear.
+            self.root = before.root.clone();
+            self.pages = before.pages;
+            self.journal = before.journal.clone();
+            #[cfg(test)]
+            crate::step_scaling::record_memory_work(|w| w.resident_units = self.pages as u64);
+            return;
+        }
+        let mut left = before.journal.clone();
+        let mut right = after.journal.clone();
+        let mut before_spans = Vec::new();
+        let mut after_spans = Vec::new();
+        while !same_journal(&left, &right) {
+            let left_depth = left.as_ref().map_or(0, |entry| entry.depth);
+            let right_depth = right.as_ref().map_or(0, |entry| entry.depth);
+            if left_depth >= right_depth {
+                let entry = left.expect("memory journal common ancestor");
+                left = entry.previous.clone();
+                before_spans.push(entry);
+            } else {
+                let entry = right.expect("memory journal common ancestor");
+                right = entry.previous.clone();
+                after_spans.push(entry);
             }
-            let entry = cursor.expect("memory journal checkpoint must be an ancestor");
+        }
+        // Uncall can restore an ancestor, then append a restoration that keeps
+        // another run's bytes. Such branches need the saved pre-row values for
+        // both sides of the journal fork. Ordinary writes use displaced bytes.
+        let extends_before = before_spans.is_empty();
+        for entry in after_spans.into_iter().chain(before_spans) {
             let mut restore = entry.original.clone();
+            if !extends_before {
+                before.read(&entry.address, &mut restore);
+            }
             let mut changed = false;
             for (i, byte) in restore.iter_mut().enumerate() {
                 let address = entry.address.add(&BigUint::from_u64(i as u64));
@@ -283,8 +328,14 @@ impl Memory {
             if changed {
                 self.write(&entry.address, &restore);
             }
-            cursor = entry.previous.clone();
         }
+    }
+}
+fn same_journal(left: &Option<Rc<Displaced>>, right: &Option<Rc<Displaced>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+        _ => false,
     }
 }
 impl PartialEq for Memory {

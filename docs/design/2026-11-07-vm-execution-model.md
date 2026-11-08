@@ -646,3 +646,66 @@ counters cited in §2; historical timings cannot fill the remaining gaps.
    An interrupted measurement is UNKNOWN and leaves the work obligation open;
    exact semantic mismatches and completed counter-assertion failures remain red
    (`advisor-notes.md:476-481`; `briefs/COMMON.md`, final bullet).
+
+## 7. Resources
+
+This section adds measurements on **Spiral**, VM production head **4f49792**,
+using the unchanged release build, separately from the historical evidence in
+§§1–6. Machine, binary hash and actual UTC are in
+`.tmp/s1-resources/provenance.json`; corpus hashes and origins are in
+`.tmp/s1-resources/corpus-manifest.json`. These are informational host costs,
+not deterministic work ceilings or rung acceptance. All evidence paths below
+are relative to this worktree and remain local research artifacts.
+
+The retained rung-3 conformance evidence stops before generating launch objects.
+The available printf corpus is the VM's unchanged `r3-stepping` fixture, whose
+published fixture oracle is checked below; it is not the whole formatted rung-3
+acceptance corpus. The second corpus uses the retained LLVM18 rung-2 basic/grow
+objects at input `1000`, with the gate's explicit budget. Object discovery and
+the archived gate source are retained as
+`.tmp/s1-resources/receipts/objects.stdout`,
+`.tmp/s1-resources/gate.py.source.txt` and
+`.tmp/s1-resources/rung2-report.json`.
+
+### Release command observations
+
+Let `J=.tmp/s1-resources`, `VM=$J/target/release/bennett-vm`, and
+`O=$J/corpus/<corpus>/launch.bennett`. Commands use `taskset -c 0`, fresh
+processes and `BENNETT_VM_ENGINE=interpreter|jit`. For printf, run
+`$VM run-program $O main --replies $J/corpus/r3/replies.json --target $J/corpus/r3/target.json`.
+For hashtables, run
+`$VM run-program $O ht_demo_basic|ht_demo_grow --args 1000 --budget 10000000,1048576,65536,256`.
+Exact argv, wall/CPU and wait4 high-water are in each named receipt below.
+
+| Corpus | Engine | Wall s | CPU s | Peak RSS KiB | Receipt under `.tmp/s1-resources/receipts/` |
+|---|---|---:|---:|---:|---|
+| r3 | interpreter | 2.372132 | 2.342005 | 600672 | `r3-interpreter-cli-1.json` |
+| r3 | jit | 3.074482 | 3.070585 | 620316 | `r3-jit-cli-1.json` |
+| ht_basic | interpreter | 1.770919 | 1.749278 | 696000 | `ht_basic-interpreter-cli-correct-1.json` |
+| ht_basic | jit | 2.172113 | 2.149915 | 696504 | `ht_basic-jit-cli-correct-1.json` |
+| ht_grow | interpreter | 4.480394 | 4.459307 | 1820780 | `ht_grow-interpreter-cli-correct-1.json` |
+| ht_grow | jit | 5.534526 | 5.490579 | 1822352 | `ht_grow-jit-cli-correct-1.json` |
+
+### GPU inventory and policy boundary
+
+The compiled `.tmp/s1-resources/device_query.cu` successfully initialized a CUDA
+context. Verbatim `.tmp/s1-resources/receipts/cuda-device-query.stdout`:
+
+```text
+driver_version=13000 runtime_version=12000 device_count=1
+device=0 name=NVIDIA GeForce RTX 3090 SMs=82 global_memory_bytes=25769279488 compute_capability=8.6 memory_free_bytes=24436015104 memory_total_bytes=25769279488 unified_addressing=1 concurrent_kernels=1
+```
+
+`.tmp/s1-resources/gpu-environment.json` records `/dev/dxg`, loadable WSL CUDA,
+the nvcc path and absent `nvidia-smi`. Build/run argv and errors are retained in
+`receipts/cuda-build.*` and `receipts/cuda-device-query.*` under the same job
+directory. This inventory measures availability, not GPU throughput.
+
+`std::thread` needs no std-only policy exception. A CUDA/HIP/wgpu backend needs
+FFI or a crate and therefore a **maintainer-ratified std-only policy exception**.
+The `bennett-vm-bjm` CPU plan, captured verbatim in
+`.tmp/s1-resources/receipts/dense-plan.stdout`, leaves GPU implementation for a
+follow-up; inventory does not authorize that exception.
+
+Profiles, allocation/phase observations, parallel decompositions, dependency-aware
+slice order and reproducibility results follow in the next research checkpoint.

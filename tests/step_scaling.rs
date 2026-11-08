@@ -545,17 +545,52 @@ fn effect_export_work_is_linear() {
             let after = probe.snapshot();
             assert_eq!(events.len(), count);
             eprintln!(
-                "export count={count}: visited_event_refs/published_event_refs={}/{}; skipped={}",
+                "export count={count}: visited_event_refs/published_event_refs={}/{}",
                 after.event_refs - before.event_refs,
                 events.len(),
-                after.skipped_tape_prefix - before.skipped_tape_prefix
             );
-            assert_eq!(after.event_refs - before.event_refs, events.len() as u64);
             assert_eq!(
-                after.skipped_tape_prefix, before.skipped_tape_prefix,
-                "export walked tape prefix"
+                after.event_refs - before.event_refs,
+                events.len() as u64,
+                "export visited entries beyond its published events"
             );
         }
+
+        // Execute a reference export that deliberately walks every retained
+        // prefix. Its output is still linear; the work oracle must reject it.
+        let mut tape = crate::persistent::Seq::new();
+        let mut prefixes = vec![];
+        for row in 0..count {
+            tape.push(Json::u64(row as u64));
+            prefixes.push(tape.clone());
+        }
+        let probe = crate::history_work::Probe::start();
+        let before = probe.snapshot();
+        let mut events = vec![];
+        for (prefix_len, prefix) in prefixes.iter().enumerate() {
+            for (row, entry) in prefix.iter().enumerate() {
+                if row >= prefix_len {
+                    events.push(entry.clone());
+                }
+            }
+        }
+        let after = probe.snapshot();
+        let expected: Vec<_> = (0..count).map(|row| Json::u64(row as u64)).collect();
+        assert_eq!(events, expected);
+        let visited = after.event_refs - before.event_refs;
+        // Prefix lengths 1..=count sum to count*(count+1)/2 visits;
+        // subtracting the count emitted entries leaves count*(count-1)/2.
+        let expected_visits = (count * (count + 1) / 2) as u64;
+        eprintln!(
+            "prefix-walking control count={count}: visited={visited}; expected={expected_visits}"
+        );
+        assert_eq!(visited, expected_visits, "oracle missed prefix visits");
+        assert_ne!(visited, events.len() as u64, "oracle accepted a prefix walk");
+        assert_eq!(
+            visited - events.len() as u64,
+            (count * (count - 1) / 2) as u64,
+            "skipped prefix visits"
+        );
     }
 }
 

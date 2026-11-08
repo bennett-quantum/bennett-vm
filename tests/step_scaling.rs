@@ -54,7 +54,15 @@ impl Run {
             checked(bennett_args_new(0, &mut args));
             let mut id = 0;
             let start = if observed {
-                RunOptions::default().collect_trace(true).start(program, c"main".as_ptr(), args, ptr::null(), 0, &mut id)
+                run_with_options(
+                    program,
+                    c"main".as_ptr(),
+                    args,
+                    ptr::null(),
+                    0,
+                    &mut id,
+                    RunOptions::default().collect_trace(true),
+                )
             } else {
                 bennett_run(program, c"main".as_ptr(), args, ptr::null(), 0, &mut id)
             };
@@ -385,7 +393,11 @@ fn measure_step_trace_json_builds() {
         let start = Instant::now();
         let work = run.prefix(steps);
         let builds = trace_builds() - before;
-        eprintln!("trace baseline: {steps} rows, {builds} row JSON builds, {:.6} builds/row; wall {:?}", builds as f64 / work.steps as f64, start.elapsed());
+        eprintln!(
+            "trace measurement: {steps} rows, {builds} row JSON builds, {:.6} builds/row; wall {:?}",
+            builds as f64 / work.steps as f64,
+            start.elapsed()
+        );
         assert_eq!(work.steps, steps as u64);
     }
 }
@@ -397,7 +409,9 @@ impl Run {
             checked(bennett_run_snapshot(self.program, self.id, &mut snapshot));
             let mut n = 0;
             let bytes = bennett_snapshot_jcs(snapshot, &mut n);
-            let report = json::parse(std::str::from_utf8(std::slice::from_raw_parts(bytes, n)).unwrap()).unwrap();
+            let report =
+                json::parse(std::str::from_utf8(std::slice::from_raw_parts(bytes, n)).unwrap())
+                    .unwrap();
             bennett_snapshot_free(snapshot);
             report
         }
@@ -418,11 +432,36 @@ fn trace_off_builds_no_step_json() {
         assert!(on_builds > 0, "observed denominator must be positive");
         assert_eq!(off_work.steps, on_work.steps);
         assert_eq!(off_work.steps, steps as u64);
+        let before_export = trace_builds();
+        let export_start = Instant::now();
         let off_snapshot = off.snapshot();
+        let export_wall = export_start.elapsed();
+        let export_builds = trace_builds() - before_export;
+        let before_observed_export = trace_builds();
         let on_snapshot = on.snapshot();
-        assert_eq!(off_snapshot, on_snapshot, "complete legacy snapshot at {steps}");
-        assert!(!off_snapshot.get("trace").unwrap().as_arr().unwrap().is_empty());
-        eprintln!("{steps} rows: off={} on={on_builds}, Rtrace={:.6}", after_off-before_off, (after_off-before_off) as f64 / on_builds as f64);
-        assert_eq!(after_off, before_off, "trace-off execution constructed row JSON at {steps} rows");
+        assert_eq!(trace_builds(), before_observed_export, "observed snapshot only clones its encoded rows");
+        assert_eq!(export_builds, off_snapshot.get("history_length").unwrap().as_u64().unwrap());
+        eprintln!("lazy snapshot: {export_builds} row JSON builds; wall {export_wall:?}");
+        assert_eq!(
+            off_snapshot, on_snapshot,
+            "complete legacy snapshot at {steps}"
+        );
+        assert!(
+            !off_snapshot
+                .get("trace")
+                .unwrap()
+                .as_arr()
+                .unwrap()
+                .is_empty()
+        );
+        eprintln!(
+            "{steps} rows: off={} on={on_builds}, Rtrace={:.6}",
+            after_off - before_off,
+            (after_off - before_off) as f64 / on_builds as f64
+        );
+        assert_eq!(
+            after_off, before_off,
+            "trace-off execution constructed row JSON at {steps} rows"
+        );
     }
 }

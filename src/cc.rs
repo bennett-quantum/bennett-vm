@@ -89,6 +89,8 @@ struct Segment {
     args: Vec<Value>,
     results: Vec<Value>,
 }
+mod trace;
+use trace::TraceLog;
 #[derive(Clone)]
 struct Machine {
     program: Option<std::sync::Arc<crate::jit::Program>>,
@@ -101,7 +103,7 @@ struct Machine {
     stack: Seq<Activation>,
     history: Seq<Frame>,
     segments: Seq<Segment>,
-    trace: Seq<Json>,
+    trace: TraceLog,
     next_activation: u64,
     steps: u64,
     fault: Option<u64>,
@@ -116,7 +118,6 @@ struct Machine {
     stateful: bool,
     register_changes: BTreeMap<Key, Option<Value>>,
     nan_registers: Map<Key, ()>,
-    trace_enabled: bool,
     unavailable_handle: Option<u64>,
 }
 /// The execution journal is deliberately outside reversible device state: uncall
@@ -688,68 +689,9 @@ impl Machine {
             self.results.clear();
         }
         let addresses = self.data.writes.clone();
-        if self.trace_enabled {
-            #[cfg(test)]
-            crate::step_scaling::record_trace_json_build();
-            let mut keys: BTreeSet<Key> = self.definitions.iter().map(|(k, _)| k.clone()).collect();
-            keys.extend(
-                self.register_changes
-                    .iter()
-                    .filter(|(k, pre)| **pre != current(&self.env, k))
-                    .map(|(k, _)| k.clone()),
-            );
-            keys.extend(self.nan_registers.keys().cloned());
-            let regs = keys
-                .into_iter()
-                .map(|k| {
-                    Json::obj(vec![
-                        ("activation", Json::u64(k.0)),
-                        ("name", Json::Str(k.1.clone())),
-                        (
-                            "pre",
-                            self.register_changes
-                                .get(&k)
-                                .cloned()
-                                .unwrap_or_else(|| current(&self.env, &k))
-                                .map(|v| v.to_json())
-                                .unwrap_or(Json::Null),
-                        ),
-                        (
-                            "post",
-                            current(&self.env, &k)
-                                .map(|v| v.to_json())
-                                .unwrap_or(Json::Null),
-                        ),
-                    ])
-                })
-                .collect();
-            let mem = addresses
-                .iter()
-                .cloned()
-                .filter_map(|a| {
-                    let p = *before.memory.get(&a).unwrap_or(&0);
-                    let q = *self.data.memory.get(&a).unwrap_or(&0);
-                    (p != q).then(|| {
-                        Json::obj(vec![
-                            ("address", Json::u(&a)),
-                            ("pre", Json::u64(p as u64)),
-                            ("post", Json::u64(q as u64)),
-                        ])
-                    })
-                })
-                .collect();
-            self.trace.push(Json::obj(vec![
-                ("step", Json::u64(self.steps)),
-                ("function", Json::Str(a.function)),
-                ("block", Json::Str(block.name.clone())),
-                ("index", Json::u64(a.index as u64)),
-                ("line", Json::u64(ins.line as u64)),
-                ("op", Json::Str(ins.op.to_string())),
-                ("lhs", strs(&ins.lhs)),
-                ("operands", strs(&ins.operands)),
-                ("registers", Json::Arr(regs)),
-                ("memory", Json::Arr(mem)),
-            ]));
+        if !matches!(self.trace, TraceLog::Disabled) {
+            self.trace
+                .record(self.trace_row(&a, &before, &addresses), &obj);
         }
         self.history.push(Frame {
             classes_before,
@@ -950,9 +892,9 @@ impl Machine {
             }
             "call" => {
                 let name = xs[0].trim_start_matches('@');
-                let f = obj.function(name).ok_or_else(|| {
-                    format!("unimplemented: unresolved call @{name}")
-                })?;
+                let f = obj
+                    .function(name)
+                    .ok_or_else(|| format!("unimplemented: unresolved call @{name}"))?;
                 let values = get!(self.operands(&xs[1..]));
                 get!(self.transfer(&values, &f.lists[0]));
                 let id = self.next_activation;
@@ -1760,7 +1702,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         .collect(),
         history: Seq::new(),
         segments: Seq::new(),
-        trace: Seq::new(),
+        trace: TraceLog::cli(&mode)?,
         next_activation: 1,
         steps: 0,
         fault: None,
@@ -1774,7 +1716,6 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         definitions: vec![],
         stateful: false,
         register_changes: BTreeMap::new(),
-        trace_enabled: mode != Mode::Program,
         unavailable_handle: None,
     };
     let entry_stack = m.stack.clone();
@@ -1870,7 +1811,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
                 ),
             ),
             ("measurements", Json::Arr(m.data.measurements.to_vec())),
-            ("trace", Json::Arr(m.trace.to_vec())),
+            ("trace", Json::Arr(m.trace.project(&m.obj))),
         ]);
     } else {
         out.extend(vec![
@@ -2180,7 +2121,7 @@ impl RuntimeRun {
                 .collect(),
                 history: Seq::new(),
                 segments: Seq::new(),
-                trace: Seq::new(),
+                trace: TraceLog::new(false),
                 next_activation: 1,
                 steps: 0,
                 fault: None,
@@ -2194,13 +2135,16 @@ impl RuntimeRun {
                 definitions: vec![],
                 stateful: true,
                 register_changes: BTreeMap::new(),
-                trace_enabled: true,
                 unavailable_handle: None,
             },
         })
     }
     pub(crate) fn collect_trace(mut self, enabled: bool) -> Self {
-        self.machine.trace_enabled = enabled;
+        assert_eq!(
+            self.machine.steps, 0,
+            "trace configuration requires an unstarted run"
+        );
+        self.machine.trace = TraceLog::new(enabled);
         self
     }
     pub(crate) fn sync(&mut self, r: &Resources) {
@@ -2539,7 +2483,10 @@ impl RuntimeRun {
             ),
             ("history_length", Json::u64(self.history_len() as u64)),
             ("memory_digest", Json::Str(self.machine.data.digest())),
-            ("trace", Json::Arr(self.machine.trace.to_vec())),
+            (
+                "trace",
+                Json::Arr(self.machine.trace.project(&self.machine.obj)),
+            ),
             ("tape", Json::Arr(self.tape())),
             ("host_requests", Json::Arr(self.records(|d| &d.hosts))),
         ];
@@ -2878,7 +2825,7 @@ mod scaling_tests {
     #[test]
     fn repeated_definitions_share_tails_and_reverse_all_forty_thousand_rows() {
         let mut run = run_for("n = const.i64 1\nbr ^entry()");
-        run.machine.trace_enabled = false;
+        run.machine.trace = TraceLog::Disabled;
         for end in [20000, 40000] {
             REGISTER_READS.with(|n| n.set(0));
             run.machine.drive(Some(end), end).unwrap();
@@ -2955,7 +2902,8 @@ mod scaling_tests {
         while !run.terminal() {
             run.step().unwrap();
         }
-        let registers = run.machine.trace[4].get("registers").unwrap();
+        let trace = run.machine.trace.project(&run.machine.obj);
+        let registers = trace[4].get("registers").unwrap();
         let Json::Arr(entries) = registers else {
             panic!("expected register array")
         };
@@ -3037,6 +2985,7 @@ mod scaling_tests {
     #[should_panic(expected = "RFC 8785: nonfinite JSON number")]
     fn nan_registers_keep_the_existing_per_row_trace_diagnostic() {
         let mut run = run_for("n = const.i64 1\nret");
+        run.machine.trace = TraceLog::new(true);
         run.machine.define_at(0, "f", Value::F64(f64::NAN));
         // The former full-map comparison sees NaN != NaN and attempts to
         // serialize it even on an unrelated row. Preserve that diagnostic.

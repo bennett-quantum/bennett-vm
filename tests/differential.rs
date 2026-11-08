@@ -34,16 +34,37 @@ fn vm() -> &'static str {
 }
 
 fn raw_run(bin: &Path, args: &[String], mode: &str) -> Output {
-    Command::new(bin)
-        .args(args)
-        .env("BENNETT_VM_ENGINE", mode)
-        .env("BENNETT_JIT_AUDIT", "1")
-        .env_remove("DISPLAY")
-        .env_remove("WAYLAND_DISPLAY")
-        .env_remove("DBUS_SESSION_BUS_ADDRESS")
-        .env_remove("BROWSER")
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run {}: {e}", bin.display()))
+    let invoke = |trace: &str| {
+        Command::new(bin)
+            .args(args)
+            .env("BENNETT_VM_ENGINE", mode)
+            .env("BENNETT_VM_TRACE", trace)
+            .env("BENNETT_JIT_AUDIT", "1")
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("BROWSER")
+            .output()
+            .unwrap_or_else(|e| panic!("cannot run {}: {e}", bin.display()))
+    };
+    let observed = invoke("on");
+    if bin == Path::new(vm()) {
+        let deferred = invoke("off");
+        assert_eq!(
+            observed.status.code(),
+            deferred.status.code(),
+            "trace mode status {mode} {args:?}"
+        );
+        assert_eq!(
+            observed.stdout, deferred.stdout,
+            "complete trace projection {mode} {args:?}"
+        );
+        assert_eq!(
+            observed.stderr, deferred.stderr,
+            "trace diagnostic {mode} {args:?}"
+        );
+    }
+    observed
 }
 
 // The unchanged reference comparison now obliges every pass separately and
@@ -2812,6 +2833,33 @@ fn assert_coherent_fixture(args: &[String], linked: bool) {
             assert_eq!(out.status.code(), Some(1), "{args:?}: {}", show(&out));
             assert!(out.stdout.is_empty());
             assert!(String::from_utf8_lossy(&out.stderr).contains("§9.3"), "{args:?}: {}", show(&out));
+        }
+    }
+}
+
+#[test]
+#[ignore = "fresh-process replay matrix; mandatory in the gate"]
+fn trace_modes_preserve_saved_journal_replay_and_reversal() {
+    // Run each mode/engine in a fresh process: engine selection is cached.
+    // Reuse the complete corruption, cancellation, host and reset assertions.
+    for engine in ["interpreter", "jit"] {
+        for trace in ["off", "on"] {
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args(["saved_tape::", "--test-threads=1"])
+                .env("BENNETT_VM_ENGINE", engine)
+                .env("BENNETT_VM_TRACE", trace)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{engine} trace={trace}: {}",
+                show(&out)
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stdout).contains("6 passed"),
+                "{}",
+                show(&out)
+            );
         }
     }
 }

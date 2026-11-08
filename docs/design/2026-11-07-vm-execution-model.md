@@ -707,5 +707,306 @@ The `bennett-vm-bjm` CPU plan, captured verbatim in
 `.tmp/s1-resources/receipts/dense-plan.stdout`, leaves GPU implementation for a
 follow-up; inventory does not authorize that exception.
 
-Profiles, allocation/phase observations, parallel decompositions, dependency-aware
-slice order and reproducibility results follow in the next research checkpoint.
+
+### Measurement setup and scope
+
+All further evidence files in this section are under `.tmp/s1-resources/` unless
+an absolute source path is given. `guard.py` and `timeouts.toml` implement the
+census model's process-tree guards and wait4 wall/CPU/RSS receipts. The table
+cites Spiral measurements, then this job's own command receipts, uses machine
+factor **1.0**, and treats a trip as UNKNOWN/124. Bootstrap envelopes are labelled;
+guards are not performance assertions. No full VM or sibling gate ran in this
+child: T3CHILD assigns the landing gate to the orchestrator. No ISA reference
+source was changed, and no change or parallelization of that interpreter is proposed.
+
+`machine-profile.json` derives **11** build jobs and CPU affinity **0–10** from
+measured `nproc` and `MemAvailable`, reserving at least **16** threads and **16 GiB**
+for neighbors. Workloads run serially on CPU **0**. Host readings are retained in
+`meminfo.initial.txt` and `meminfo.during.txt`. `receipts/release-build.json` records
+`cargo build --release --offline -j 11` under that affinity: **20.934893 wall s**,
+**88.316226 CPU s**, **1098672 KiB** high-water. This is the normal release build,
+without production instrumentation or new crate dependencies.
+
+The external `phase_probe.rs` links the unchanged release rlib. A `System`
+allocator wrapper counts allocation/zero-allocation requests, reallocations,
+requested bytes and deallocations separately, before formatting phase receipts.
+Requested bytes include the new size on realloc; they are neither live nor
+copied bytes. CPU uses the Linux process CPU clock. Phase high-water is cumulative
+VmHWM; command RSS uses wait4's child-tree maximum, which can differ slightly on
+WSL. CLI allocation counts stop when the command API returns, before thread-local
+JIT-cache teardown. These VM-only counts do not supply reference work ratios.
+
+### Sampled hot functions
+
+Record with `perf record -e cpu-clock:u -F 499 -o $J/<label>.data -- <command>`;
+report with `perf report --stdio --no-children --percent-limit 0 --sort dso,symbol --show-nr-samples`.
+Exact argv, wall/CPU, RSS and output are in `receipts/<label>.*`. Hardware and
+software event probes both completed; software events make this study repeatable
+on WSL. The host perf lacks libelf (`receipts/perf-build-options.stdout`).
+`symbolicate.py` translates recorded **file offsets through ELF PT_LOAD segments**
+before `addr2line -f -C`; direct use as virtual addresses would misname Rust
+functions. Raw reports, ELF maps and symbolication receipts are retained.
+
+`*-functions.json` and `*-top20.md` hold complete per-function top twenties for
+all three CLI objects on both engines and for both ABI profiles. Percentages
+are exclusive leaf samples divided by all user samples in that profile;
+seconds are sample-count/recording-frequency estimates. They are not inclusive
+time, wall time, deterministic work or an attainable optimization gain. Sampling
+and inlining limit attribution; no allocation call-site shares are inferred.
+
+Generated JIT mappings have no function map: unassigned native-code leaves total
+**0.31% / 0.33% / 0.55%** in printf/basic/grow CLI profiles and **10.11%** in the
+ABI JIT profile (`jit-symbol-coverage.json`). Their raw IPs are retained and stay
+in each percentage denominator; named-function tables do not assign that work
+to a helper. Resolving those mappings is an open profiling measurement, and the
+ABI dispatch-versus-arithmetic split cannot be inferred from them.
+
+Printf CLI top twenty: full names in `r3-interpreter-perf-functions.json` and
+`r3-jit-perf-functions.json`; display aliases in `profile-aliases.json`.
+
+| Rank | Interpreter leaf function | Self % | User s estimate | JIT leaf function | Self % | User s estimate |
+|---|---|---:|---:|---|---:|---:|
+| 1 | `malloc_consolidate` | 13.29 | 0.2445 | `native::Code::run::helper (drive)` | 18.69 | 0.4790 |
+| 2 | `unlink_chunk` | 11.55 | 0.2124 | `malloc_consolidate` | 10.32 | 0.2645 |
+| 3 | `__GI___libc_free` | 7.19 | 0.1323 | `unlink_chunk` | 8.52 | 0.2184 |
+| 4 | `__memcmp_avx2_movbe` | 5.12 | 0.0942 | `__GI___libc_free` | 5.55 | 0.1423 |
+| 5 | `_int_malloc` | 4.14 | 0.0762 | `__memcmp_avx2_movbe` | 4.46 | 0.1142 |
+| 6 | `_int_free` | 4.03 | 0.0741 | `_int_malloc` | 3.44 | 0.0882 |
+| 7 | `Seq<Event>::iter/fold (target export)` | 3.59 | 0.0661 | `__memcpy_avx_unaligned_erms` | 3.21 | 0.0822 |
+| 8 | `__memcpy_avx_unaligned_erms` | 3.49 | 0.0641 | `_int_free` | 2.97 | 0.0762 |
+| 9 | `Rc<Node<Frame>>::drop_slow` | 3.05 | 0.0561 | `Seq<Event>::iter/fold (target export)` | 2.27 | 0.0581 |
+| 10 | `__GI___libc_malloc` | 2.61 | 0.0481 | `Rc<Node<Frame>>::drop_slow` | 2.27 | 0.0581 |
+| 11 | `Rc<Node<Event>>::drop_slow` | 2.07 | 0.0381 | `Rc<Node<Event>>::drop_slow` | 1.95 | 0.0501 |
+| 12 | `Rc<Node<Activation>>::drop_slow` | 1.74 | 0.0321 | `__GI___libc_malloc` | 1.80 | 0.0461 |
+| 13 | `Rc<Node<Frame>>::make_mut` | 1.74 | 0.0321 | `Rc<Node<Frame>>::make_mut` | 1.49 | 0.0381 |
+| 14 | `Rc<Node<Event>>::make_mut` | 1.63 | 0.0301 | `Machine::exec` | 1.41 | 0.0361 |
+| 15 | `persistent::balance<Event>` | 1.63 | 0.0301 | `Rc<Node<Event>>::make_mut` | 1.17 | 0.0301 |
+| 16 | `Rc<Node<Value>>::drop_slow` | 1.42 | 0.0261 | `persistent::balance<Event>` | 1.02 | 0.0261 |
+| 17 | `Machine::note_register` | 1.31 | 0.0240 | `drop_glue<Frame>` | 1.02 | 0.0261 |
+| 18 | `Machine::step_row` | 1.20 | 0.0220 | `Machine::read` | 0.94 | 0.0240 |
+| 19 | `Machine::read` | 1.09 | 0.0200 | `persistent::balance<Frame>` | 0.94 | 0.0240 |
+| 20 | `persistent::balance<Frame>` | 0.98 | 0.0180 | `Machine::step_row` | 0.94 | 0.0240 |
+
+Other profiles' leading leaves follow. Each label names its receipt, `.data`,
+`-functions.json` and `-top20.md` under this job directory.
+
+| Profile label / command variant | Wall s | CPU s | Peak RSS KiB | Leading three leaf functions (self %) |
+|---|---:|---:|---:|---|
+| `ht_basic-interpreter-perf` | 2.226477 | 2.152507 | 695516 | `__GI___libc_free` 6.53%; `Rc<Node<Value>>::drop_slow` 6.25%; `__memcmp_avx2_movbe` 6.25% |
+| `ht_basic-jit-perf` | 2.377178 | 2.285730 | 696016 | `native::Code::run::helper (drive)` 14.07%; `__memcmp_avx2_movbe` 6.54%; `Rc<Node<Value>>::drop_slow` 5.45% |
+| `ht_grow-interpreter-perf` | 6.293803 | 6.202671 | 1820936 | `__GI___libc_free` 7.34%; `Rc<Node<Value>>::drop_slow` 6.47%; `__memcmp_avx2_movbe` 6.23% |
+| `ht_grow-jit-perf` | 6.492873 | 6.475552 | 1822332 | `native::Code::run::helper (drive)` 15.90%; `__memcmp_avx2_movbe` 7.76%; `__GI___libc_free` 5.25% |
+| `abi-interpreter-perf` | 7.946328 | 7.888685 | 1834300 | `malloc_consolidate` 7.81%; `unlink_chunk` 6.46%; `<std::alloc::System>::alloc_impl` 4.74% |
+| `abi-jit-perf` | 9.050124 | 9.006911 | 1854524 | `malloc_consolidate` 8.06%; `unlink_chunk` 6.22%; `__GI___libc_free` 4.36% |
+
+CLI profile commands are the corpus commands above. ABI commands are
+`$J/phase_probe $J/corpus/r3 snapshot 0 false` under the selected engine; zero
+means complete execution. ABI profiles include allocator instrumentation,
+full snapshot, verification hash and teardown. Their allocator atomics/System
+wrapper and SHA256 verification are harness work. The two printf CLI profiles
+have **918 / 1279** samples (`r3-*-perf-functions.json`). The JIT continuing helper
+has **18.69%** self samples; `src/jit.rs:653` performs a linear successor-membership
+scan on continuing `drive` calls. This supports a dispatch investigation;
+samples do not count its comparisons.
+
+### Compile, execute, observe and release
+
+For `BENNETT_VM_ENGINE=<engine> taskset -c 0 $J/phase_probe $J/corpus/r3 snapshot 0 false`,
+reading 2 from `receipts/phase-<engine>-snapshot-0-false-2.stderr` is parsed into
+`phases.json`. The ABI run includes target accounting, the host reply, cooperative
+row transactions, retained history and the full legacy snapshot.
+
+| Phase | Interpreter wall / CPU s | JIT wall / CPU s | Interpreter allocations | JIT allocations | Interpreter / JIT requested bytes |
+|---|---:|---:|---:|---:|---:|
+| load | 0.025722 / 0.025723 | 0.025065 / 0.025066 | 196150 | 196150 | 20723714 / 20723714 |
+| start | 0.001398 / 0.001399 | 0.036800 / 0.036793 | 19272 | 352978 | 956175 / 53623057 |
+| host_reply | 0.004596 / 0.004599 | 0.003041 / 0.003043 | 58254 | 58257 | 2869157 / 2869169 |
+| execute | 2.605340 / 2.604767 | 3.725317 / 3.710785 | 43455002 | 43652653 | 4057356072 / 4057701516 |
+| snapshot | 2.977791 / 2.976574 | 3.041948 / 3.040245 | 25118243 | 25118243 | 1636887478 / 1636887478 |
+| snapshot_hash | 0.280666 / 0.280552 | 0.285883 / 0.285591 | 1 | 1 | 232610127 / 232610127 |
+| snapshot_free | 0.008414 / 0.008416 | 0.007165 / 0.007167 | 0 | 0 | 0 / 0 |
+| teardown | 1.134229 / 1.132878 | 1.125882 / 1.124942 | 0 | 0 | 0 / 0 |
+
+Snapshots are **77536709 bytes**, with identical SHA256 across both engines and
+repeats (`receipts/phase-*-snapshot-0-false-{2,3}.stdout`). ABI high-water rises
+from **643444 / 663316 KiB** after interpreter/JIT execution to
+**1834800 / 1854480 KiB** during snapshot (`phases.json`). Deferring trace encoding
+retains a substantial export obligation; do not count moving work into export
+as removing it. Teardown is separately measured.
+
+The independent native compile probe
+`$J/phase_probe $J/corpus/r3 compile 0 false` records **0.030007 wall / 0.030009 CPU s**,
+**309728 allocations** and **46949819 requested bytes**, after parse/validation
+(`receipts/phase-interpreter-compile-0-false-1.stderr`). A JIT ABI start additionally
+hashes/looks up the object and constructs run state. CLI audit records
+**225956 native rows / 28644 native arithmetic operations**
+(`receipts/r3-jit-cli-1.stderr`). Compilation is too small on this object to
+explain its CLI slowdown; continuing dispatch and shared runtime work remain candidates.
+
+For the CLI allocation view, the harness invokes the same API as the release
+CLI. Values come from `receipts/<corpus>-<engine>-allocations.stderr` and `phases.json`:
+
+| Corpus | Interpreter allocations / requested bytes | JIT allocations / requested bytes |
+|---|---:|---:|
+| r3 | 19972118 / 890891117 | 20503478 / 943903455 |
+| ht_basic | 15480630 / 1116016499 | 15809037 / 1121995022 |
+| ht_grow | 38954545 / 2803154788 | 39743053 / 2814557398 |
+
+Request totals plus allocator/persistent-node samples motivate reducing allocation
+frequency, history turnover and environment updates before adding workers to one
+classical run. They do not identify each allocation's owner or promise that
+pages/journals remove all allocator time. CLI and C ABI differ in observation
+and ownership work; their time ratio does not isolate one mechanism.
+
+### Parallel decompositions and dense resource phases
+
+**Interpreter.** One row's preflight, budget/fault decision, SSA/activation update,
+memory/device publication, history append and replay/reply cursor advancement
+depend on source order. Commit each row atomically; reversal remains LIFO.
+Dividing these small steps adds synchronization to measured metadata work.
+Independent launches/objects, independent differential cases and read-only
+analysis are coarse parallel units when ownership is disjoint. Construct a
+program/runtime inside each worker: persistent `Rc` structures do not become
+thread-safe through an `Arc` wrapper. A frozen snapshot could encode disjoint
+row ranges and join in source order, preserving deterministic JSON; first
+measure encoding/allocator contention. The ISA reference remains single-threaded
+and unchanged.
+
+**JIT.** Separate immutable analysis/compilation from running row transactions.
+Independent objects can compile concurrently; per-function compilation needs
+stable canonical IDs and deterministic joining before publication. Sharing
+compiled programs also requires valid cache identity and suitable ownership;
+today's cache is thread-local. The small measured compile phase favors dispatch
+and shared runtime work over parallel compilation for this corpus. Across runs,
+workers still obey memory/device ownership. Inside one run, native code crosses
+the same row transaction and host-visible yield/fault/reply boundaries. A
+dispatch-only change can retain those boundaries and be measured independently
+of prepared transactions.
+
+**Dense CPU plan.** `bennett-vm-bjm` specifies a binary64 state vector,
+cache-blocked in-place kernels, fusion and branch-enumerated classical oracles
+(`receipts/dense-plan.stdout`). The primary paper supports the bandwidth/cache
+rationale, not a Spiral speedup claim:
+[qHiPSTER, Smelyanskiy, Sawaya and Aspuru-Guzik](https://arxiv.org/abs/1601.07195v2).
+The reading's scope is recorded in `literature.txt`. These classical objects
+exercise no dense amplitude kernels: dense phase times and hot-function ranking
+remain **unmeasured**.
+
+`dense-cost-model.json` contains this **analytical** byte model from the bead's
+binary64 layout. Write `A=2^n`, `S=16A` bytes. A full read/write traversal moves
+`2S` bytes before cache reuse; a lower bound is `2S / sustainable_bandwidth`,
+whose denominator this study has not measured.
+
+| Dense phase | Work / traffic model | Candidate decomposition and constraints |
+|---|---|---|
+| Allocate/initialize | One state vector, `S` payload; initialization writes `S`; metadata/small worker accumulators separately counted | Static amplitude blocks with `std::thread::scope`; workers first-touch their pages. Avoid a second amplitude-sized buffer. |
+| Generic/fused gate group | Read/write `2S` per full traversal; fusion amortizes traversals with small local gate scratch | Partition pairs/tiles, not arbitrary amplitude halves: high target bits couple blocks. Each pair has one writer; synchronize dependent groups. Choose block size from target stride and measured cache behavior. |
+| Permutation/diagonal | Index remap or phase update; control-dependent touched fraction | In-place pair ownership for swaps; disjoint selected amplitudes for phases. Preserve bijectivity and fault-bit semantics. |
+| Lifted oracle | Project distinct inputs, run the existing classical oracle per cache miss, then XOR-remap amplitudes | Worker-local oracle state; deterministic memo-result coordination. Measure hit rate and classical rows separately from amplitude traversal. |
+| Born probabilities | Read `S`, bounded partial reductions | Fixed partition/reduction order; finalize the draw decision serially in published ISA order. |
+| Collapse/renormalize | A further read/write pass, `2S` | Disjoint blocks after selecting one outcome; synchronize before the next action and retain explicit numerical error bounds. |
+| Export/certificate | Requested projection and error metadata; full vector export costs `S` before encoding | Preserve complete requested observations; certificates remain numerical with a bound, never exact/exhaustive. |
+
+| Qubits | State GiB (`S`) | Full read/write pass GiB (`2S`) |
+|---:|---:|---:|
+| 20 | 0.015625 | 0.03125 |
+| 24 | 0.25 | 0.5 |
+| 28 | 4 | 8 |
+| 30 | 16 | 32 |
+| 31 | 32 | 64 |
+
+`numa-cache.json` reports one WSL-visible NUMA node; this host cannot establish
+cross-node scaling. Retain first-touch/block affinity for multi-node hosts.
+Use the smaller of available parallelism and a fresh memory/neighbor budget;
+this build's worker count is not a dense bandwidth optimum. Sysfs cache sizes
+are inventory, not calibrated tile sizes.
+
+**GPU follow-up.** Keep amplitudes device-resident across fused groups. Measure
+context startup, host/device transfer, kernel time, synchronization, reduction
+and requested readback separately. Transferring a full vector moves `S` each
+way; CPU kernel costs omit that traffic. Avoid round trips after every gate.
+Measured free memory fits the analytical **30-qubit / 16-GiB** vector but not
+**31 qubits / 32 GiB**, before backend/context/scratch demands (`dense-cost-model.json`).
+That is capacity evidence, not a supported size or backend benchmark. Requery
+availability when running. Backend implementation requires the explicitly named
+maintainer-ratified std-only exception above; CPU std-thread work needs none.
+
+### Slice priority per unit of implementation work
+
+Trace slice **1** and indexed-ownership slice **5** already landed at **4f49792**
+(`receipts/production-log.stdout`, `receipts/current-design-paths.stdout`). The
+current lock code preserves empty-range semantics and **does not merge adjacency**;
+do not apply §5's older adjacency suggestion over those semantics.
+
+Residual order: **1 and 5 retained as landed → 2 → 6a dispatch only → 3 → 4 → 6b
+cooperative integration**. Extract 6a as a review-sized dispatch change that
+retains the row transaction; 6b keeps the publication-boundary dependencies.
+This changes priority, not semantic obligations.
+
+Implementation effort means §5's estimated review-sized round, not measured
+engineer hours. Only the trace-mode comparison measures a realized throughput
+difference. For unimplemented changes, measurements rank **opportunity per round**;
+candidate builds and counter deltas must precede any claimed measured gain/work.
+
+| Slice / placement | Measurement justifying placement | Gain or limit per estimated round |
+|---|---|---|
+| 1, retain landed | `trace-comparison.json`: same-prefix deferred/eager CPU 0.145843/0.200758 s (interpreter), 0.189718/0.257619 s (JIT), identical complete snapshots | Realized prefix stepping ratios **1.3765× / 1.3579×** for the landed mechanism; **694279** fewer execution allocation requests and **46738094** fewer requested bytes in either engine. Not a whole-object speedup or zero-retention claim. |
+| 2, first residual | Full ABI snapshot makes **25118243** allocation requests; records traversal is sampled in `abi-*-perf-functions.json`; history/target turnover appears in both CLI profiles | Shared log/event-index/export work addresses both engines. Exact removable share and gain per round remain open. |
+| 6a, promote before 3/4 | Continuing helper is **18.69%** of printf JIT user samples, while compile CPU is **0.030009 s**; JIT CLI is slower on every measured object | A direct successor/dispatch lookup targets a measured term with a contained change, keeping transaction checks. No gain claimed without a candidate; native arithmetic already runs. |
+| 3, after contained dispatch work | Byte-memory COW is visible in grow; allocation totals are high (`phases.json`, `ht_grow-*-perf-functions.json`) | Retain page/journal work before slice 4 as its dependency. Store-span/call-site attribution is missing; no measured gain supports a broad page rewrite ahead of localized dispatch. |
+| 4, after 2/3 | ABI execution makes **43455002 / 43652653** allocation requests and retains checkpoints (`receipts/current-design-paths.stdout`) | Counts include more than checkpoints, so cannot price their removal. Preserve diagnostic/quantum rollback and measure row families before sizing rounds. |
+| 5, retain landed | Indexed locks are in this measured tree and absent from leading leaf samples | No repeat rewrite on a stale baseline. Sampling absence is not a zero-cost proof; multi-owner work counts remain open. |
+| 6b, last | ABI JIT audit re-enters native dispatch per row (`receipts/phase-jit-snapshot-0-false-2.stderr`); CLI uses one continuing run | Batch only after publication/ownership prerequisites. ABI/CLI times mix mechanisms and cannot be called batching gain. |
+
+### Repeatability, verification and §6 obligations
+
+The two largest workload commands are full interpreter/JIT ABI execution plus
+snapshot. Final-harness readings 2 and 3 use the same binary and inputs.
+`repeatability.json` defines relative difference as `abs(second-first)/first`.
+
+| Command | Wall readings 2 / 3 s | CPU readings 2 / 3 s | Wall difference | CPU difference |
+|---|---:|---:|---:|---:|
+| full ABI interpreter | 7.690843 / 7.587536 | 7.641501 / 7.568916 | 1.343% | 0.950% |
+| full ABI jit | 8.996545 / 8.945308 | 8.976201 / 8.883670 | 0.570% | 1.031% |
+
+The observed final-pair envelope is **1.4% wall / 1.1% CPU**. Every per-phase
+allocation/reallocation/requested-byte/deallocation count and full snapshot hash
+agrees exactly. These are observed variation, not acceptance limits or statistical
+confidence intervals. Pilot `phase-*-snapshot-0-false-1.*` is retained: interpreter
+wall **9.297237 s** versus final-pair **7.690843 / 7.587536 s**. That wider spread
+is not hidden; startup/cache/load conditions and pilot harness layout differed.
+The tight final pair is not a general host-variance bound.
+
+The largest construction command was repeated from a clean **owned** release
+target: **20.934893 / 21.339878 wall s**, **88.316226 / 87.434635 CPU s**, within
+**2.0% wall / 1.1% CPU** (`receipts/release-build{,-2}.json`). The binary was
+byte-identical (`rebuild-binary-equality.json`). Grow CLI repeats are retained
+in `receipts/ht_grow-*-cli-correct-{1,2}.json`; their wider load-sensitive spread
+does not alter output/work verdicts.
+
+`python3 .tmp/s1-resources/guard.py short focused-verification python3 .tmp/s1-resources/verify.py`
+completed with PASS (`verification.json`, `receipts/focused-verification.*`).
+It checks corpus hashes, full engine JSON equality, the independent printf oracle
+and retained native hashtable answers, complete saved-tape replay equality,
+eligible reversal including memory and empty console/tape, corrupted-tape
+rejection, repeated counts/snapshot hashes, sample conservation, cited guard
+margins and preserved §§1–6. Negative replay probes explicitly reject mismatches;
+they are expected negative controls. This is not a full landing-gate claim.
+
+| §6 request | Closed here | Still open |
+|---|---|---|
+| Same-object work vector | VM allocation requests/bytes, wall/CPU/RSS and self samples on both engines and corpora | Comparable independently obtained reference work counts, operation/path-copy/copied-byte definitions and numeric work ceilings. No oracle source changes are authorized or proposed. |
+| Trace demand | Eager/deferred prefix allocations, bytes, CPU and identical snapshots; complete deferred export cost | Constructor counts, broader trace families, retained pre-values and fitted retention bounds. |
+| History/query | History/target node and records/export samples; export/teardown priced separately | Exact frame/index/event visits, repeated export/rewind/cancellation and fixed-footprint scaling. |
+| Pages/journal | Real-object request totals and memory high-water | Resident/nonzero/store spans, pointer widths, cross-page/copy/metadata counts and calibrated page size. |
+| Prepared transactions/Q helpers | Classical ABI execution allocation baseline | Checkpoint-field/target-log work by row family, Q-state costs and failure-injection/publication invariants. Classical corpora do not price dense gates. |
+| Locks | Current index identified; stale vector rewrite removed from priority | Multi-owner, point/adjacency, allocator/device and close-time deterministic work shapes. |
+| Compiled execution | Compile/run split, native audits and both entry-path profiles | Dispatch/setup/successor counts, unused-program scaling and measured candidate gain/work. |
+| Guards/reproducibility | Cited Spiral guards, headless isolated targets, derived concurrency, command receipts, clean rebuild and repeated largest workloads | New instrumentation/fixtures/phases need their own calibration; timing is never a work ceiling. |
+
+Remaining VM measurements are **bennett-vm-3ol** (`receipts/followup-bead.stdout`);
+dense implementation remains **bennett-vm-bjm**. Official whole formatted rung-3
+objects and both-major profiles await conformance artifacts; the precise request
+is in `cross-repo-beads.md`. GPU inventory is closed; dense CPU/GPU bandwidth,
+transfer/kernel phases, scaling, numerical error and actual optimization gain
+per unit of implementation work remain measurements to perform.

@@ -450,6 +450,30 @@ pub unsafe extern "C" fn bennett_run(
     entropy_len: usize,
     out: *mut u64,
 ) -> i32 {
+    RunOptions::default().collect_trace(true).start(p, entry, args, entropy, entropy_len, out)
+}
+
+/// Per-run Rust launch options; the published C launch signatures are unchanged.
+#[derive(Default)]
+pub struct RunOptions {
+    collect_trace: bool,
+}
+impl RunOptions {
+    /// Encode each diagnostic row during execution instead of at snapshot time.
+    pub fn collect_trace(mut self, enabled: bool) -> Self {
+        self.collect_trace = enabled;
+        self
+    }
+    /// Start a run with the same pointer and lifetime requirements as `bennett_run`.
+    pub unsafe fn start(
+        self,
+        p: *mut bennett_program_t,
+        entry: *const c_char,
+        args: *const bennett_args_t,
+        entropy: *const u8,
+        entropy_len: usize,
+        out: *mut u64,
+    ) -> i32 {
     status(|| {
         let p = get_mut(p)?;
         let name = text(entry)?.trim_start_matches('@');
@@ -497,7 +521,8 @@ pub unsafe extern "C" fn bennett_run(
         let entropy = bytes(entropy, entropy_len)?.to_vec();
         let r = id();
         let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy)
-            .map_err(|e| error(INVALID, e))?;
+            .map_err(|e| error(INVALID, e))?
+            .collect_trace(self.collect_trace);
         for q in regs {
             p.locks.insert(q, r);
         }
@@ -512,7 +537,9 @@ pub unsafe extern "C" fn bennett_run(
         *out = r;
         Ok(())
     })
+    }
 }
+
 impl bennett_result_t {
     fn from_run(p: &mut bennett_program_t, r: u64) -> Self {
         let run = &p.runs[&r];

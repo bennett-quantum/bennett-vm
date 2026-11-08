@@ -689,6 +689,8 @@ impl Machine {
         }
         let addresses = self.data.writes.clone();
         if self.trace_enabled {
+            #[cfg(test)]
+            crate::step_scaling::record_trace_json_build();
             let mut keys: BTreeSet<Key> = self.definitions.iter().map(|(k, _)| k.clone()).collect();
             keys.extend(
                 self.register_changes
@@ -2196,6 +2198,10 @@ impl RuntimeRun {
                 unavailable_handle: None,
             },
         })
+    }
+    pub(crate) fn collect_trace(mut self, enabled: bool) -> Self {
+        self.machine.trace_enabled = enabled;
+        self
     }
     pub(crate) fn sync(&mut self, r: &Resources) {
         let local = &self.machine.data;

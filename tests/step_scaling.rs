@@ -790,6 +790,7 @@ fn compiled_step_dispatch_is_independent_of_unused_rows() {
 #[ignore = "informational printf dispatch work receipt"]
 fn printf_dispatch_work() {
     reset_dispatch_work();
+    let execution = crate::execution_work::Probe::start();
     let args = [
         fixture("launch.bennett").to_str().unwrap().to_owned(),
         "main".into(),
@@ -801,7 +802,17 @@ fn printf_dispatch_work() {
     crate::cc::cmd_program(&args).unwrap();
     let work = dispatch_work();
     let rows = expected().get("steps").unwrap().as_u64().unwrap();
-    assert!(rows > 0 && work.probes > 0);
+    assert_eq!(
+        execution.snapshot().steps,
+        rows,
+        "published printf row count"
+    );
+    let compiled = crate::jit::selection().unwrap().is_some();
+    assert_eq!(
+        work.probes == 0,
+        !compiled,
+        "compiled dispatch must be observed exactly when selected"
+    );
     eprintln!(
         "PRINTF_DISPATCH rows={rows} probes={} probes_per_row={:.9} initialization_visits={}",
         work.probes,

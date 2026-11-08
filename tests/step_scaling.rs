@@ -439,8 +439,19 @@ fn trace_off_builds_no_step_json() {
         let export_builds = trace_builds() - before_export;
         let before_observed_export = trace_builds();
         let on_snapshot = on.snapshot();
-        assert_eq!(trace_builds(), before_observed_export, "observed snapshot only clones its encoded rows");
-        assert_eq!(export_builds, off_snapshot.get("history_length").unwrap().as_u64().unwrap());
+        assert_eq!(
+            trace_builds(),
+            before_observed_export,
+            "observed snapshot only clones its encoded rows"
+        );
+        assert_eq!(
+            export_builds,
+            off_snapshot
+                .get("history_length")
+                .unwrap()
+                .as_u64()
+                .unwrap()
+        );
         eprintln!("lazy snapshot: {export_builds} row JSON builds; wall {export_wall:?}");
         assert_eq!(
             off_snapshot, on_snapshot,
@@ -464,4 +475,165 @@ fn trace_off_builds_no_step_json() {
             "trace-off execution constructed row JSON at {steps} rows"
         );
     }
+}
+
+fn history_run(functions: &str) -> crate::cc::RuntimeRun {
+    let source = format!(
+        "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n\nsection layout\n{{\"A_tab\":16,\"H\":16,\"S_cells\":0,\"globals\":{{}},\"heap_base\":16,\"heap_limit_max\":1024,\"interface_regions\":{{}},\"null_size\":1,\"ptr_width\":64}}\n"
+    );
+    let object = std::sync::Arc::new(crate::object::parse(&source).unwrap());
+    let resources = crate::cc::Resources::new(&object).unwrap();
+    crate::cc::RuntimeRun::new(object, &resources, "main", vec![], vec![]).unwrap()
+}
+
+#[test]
+fn history_lookup_does_not_walk_its_prefix() {
+    let mut samples = vec![];
+    // Reuse the measured short/long fixture checkpoints on this 12-core host,
+    // 2026-11-07 (see CHECKPOINTS); equality is an exact traversal invariant.
+    for prefix in [CHECKPOINTS[0], CHECKPOINTS[2]] {
+        let pure_prefix = "unused = const.i8 0\n".repeat(prefix);
+        let mut run = history_run(&format!(
+            "fn r @id () () () () ()\n^entry():\nret\nfn cc @main () () () () ()\n^entry():\n{pure_prefix}call @id\nuncall @id () ()\nret"
+        ));
+        for _ in 0..prefix + 2 {
+            run.step().unwrap();
+        }
+        let probe = crate::history_work::Probe::start();
+        probe.query_prefix(prefix);
+        let before = probe.snapshot();
+        run.step().unwrap();
+        let after = probe.snapshot();
+        assert_eq!(run.fault(), None);
+        eprintln!("query prefix={prefix}: {after:?}");
+        samples.push((before, after));
+    }
+    eprintln!(
+        "Rprefix[index_probes]={}/{}; undo payload frames={}/{}",
+        samples[1].1.index_probes,
+        samples[0].1.index_probes,
+        samples[1].1.undo_frames,
+        samples[0].1.undo_frames
+    );
+    for (before, after) in samples {
+        assert_eq!(
+            after.undo_frames - before.undo_frames,
+            2,
+            "call and ret undo payload"
+        );
+        assert_eq!(
+            after.prefix_frame_visits, before.prefix_frame_visits,
+            "query walked retained prefix"
+        );
+    }
+}
+
+#[test]
+fn effect_export_work_is_linear() {
+    for count in [CHECKPOINTS[0], CHECKPOINTS[1]] {
+        let effects = "effect clock.read p\n".repeat(count);
+        let mut run = history_run(&format!(
+            "fn cc @main () () () () ()\n^entry():\nn = const.i64 8\np = alloc n\n{effects}ret"
+        ));
+        while !run.terminal() {
+            run.step().unwrap();
+        }
+        for _ in 0..2 {
+            let probe = crate::history_work::Probe::start();
+            let before = probe.snapshot();
+            let events = run.tape();
+            let after = probe.snapshot();
+            assert_eq!(events.len(), count);
+            eprintln!(
+                "export count={count}: visited_event_refs/published_event_refs={}/{}",
+                after.event_refs - before.event_refs,
+                events.len(),
+            );
+            assert_eq!(
+                after.event_refs - before.event_refs,
+                events.len() as u64,
+                "export visited entries beyond its published events"
+            );
+        }
+
+        // Execute a reference export that deliberately walks every retained
+        // prefix. Its output is still linear; the work oracle must reject it.
+        let mut tape = crate::persistent::Seq::new();
+        let mut prefixes = vec![];
+        for row in 0..count {
+            tape.push(Json::u64(row as u64));
+            prefixes.push(tape.clone());
+        }
+        let probe = crate::history_work::Probe::start();
+        let before = probe.snapshot();
+        let mut events = vec![];
+        for (prefix_len, prefix) in prefixes.iter().enumerate() {
+            for (row, entry) in prefix.iter().enumerate() {
+                if row >= prefix_len {
+                    events.push(entry.clone());
+                }
+            }
+        }
+        let after = probe.snapshot();
+        let expected: Vec<_> = (0..count).map(|row| Json::u64(row as u64)).collect();
+        assert_eq!(events, expected);
+        let visited = after.event_refs - before.event_refs;
+        // Prefix lengths 1..=count sum to count*(count+1)/2 visits;
+        // subtracting the count emitted entries leaves count*(count-1)/2.
+        let expected_visits = (count * (count + 1) / 2) as u64;
+        eprintln!(
+            "prefix-walking control count={count}: visited={visited}; expected={expected_visits}"
+        );
+        assert_eq!(visited, expected_visits, "oracle missed prefix visits");
+        assert_ne!(
+            visited,
+            events.len() as u64,
+            "oracle accepted a prefix walk"
+        );
+        assert_eq!(
+            visited - events.len() as u64,
+            (count * (count - 1) / 2) as u64,
+            "skipped prefix visits"
+        );
+    }
+}
+
+#[test]
+fn tail_rewind_reexecution_preserves_row_instances_and_snapshot() {
+    // This measured fixture prefix also crosses several history chunks.
+    let prefix = CHECKPOINTS[0];
+    let pure_prefix = "x = const.i8 1\n".repeat(prefix);
+    let mut run = history_run(&format!(
+        "fn cc @main () (v:i8) () () ()\n^entry():\n{pure_prefix}x = call @id\nsaved = const.i8 2\nx = const.i8 9\nuncall @id () (saved)\nret x\nfn r @id () (v:i8) () () ()\n^entry():\nv = const.i8 2\nret v"
+    ));
+    while !run.terminal() {
+        run.step().unwrap();
+    }
+    let expected = run.snapshot("COMPLETED").unwrap();
+    for _ in 0..3 {
+        run.reverse_to(prefix).unwrap();
+        assert_eq!(run.history_len(), prefix);
+        while !run.terminal() {
+            run.step().unwrap();
+        }
+        assert_eq!(run.fault(), None);
+        assert_eq!(
+            run.values(),
+            &[crate::value::Value::int(
+                8,
+                crate::bigint::BigUint::from_u64(9)
+            )]
+        );
+        assert_eq!(run.snapshot("COMPLETED").unwrap(), expected);
+    }
+    run.reverse_to(0).unwrap();
+    assert!(
+        run.snapshot("REVERSED")
+            .unwrap()
+            .get("instances")
+            .unwrap()
+            .as_arr()
+            .unwrap()
+            .is_empty()
+    );
 }

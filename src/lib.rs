@@ -99,6 +99,7 @@ mod tests {
     }
 }
 
+mod history;
 mod persistent;
 
 // Private work probes need cfg(test); integration libraries do not receive it.
@@ -112,3 +113,6 @@ mod pins;
 #[cfg(test)]
 #[path = "../tests/step_scaling.rs"]
 mod step_scaling;
+
+#[cfg(test)]
+mod history_work;

@@ -4,6 +4,7 @@ use crate::{
     action::{self, QuantumState, RegionWires},
     bigint::{BigUint, sign_extend},
     cliargs,
+    history::History,
     json::{self, Json},
     object::{FnKind, Instr, Object, Type},
     persistent::{Map, Seq},
@@ -61,6 +62,12 @@ struct Activation {
     call_start: Option<usize>,
     args: Vec<Value>,
 }
+#[derive(Clone, Default)]
+struct FrameEvents {
+    tape: Vec<std::rc::Rc<Json>>,
+    hosts: Vec<std::rc::Rc<Json>>,
+    measurements: Vec<std::rc::Rc<Json>>,
+}
 #[cfg_attr(not(test), derive(Clone))]
 struct Frame {
     classes_before: Map<usize, String>,
@@ -74,7 +81,7 @@ struct Frame {
     after: Option<Data>,
     control: Seq<Activation>,
     pure: bool,
-    reversed: bool,
+    events: FrameEvents,
     marker: bool,
     measured: bool,
     tokens_created: Vec<u64>,
@@ -101,8 +108,7 @@ struct Machine {
     data: Data,
     env: Environment,
     stack: Seq<Activation>,
-    history: Seq<Frame>,
-    segments: Seq<Segment>,
+    history: History<Frame, Segment>,
     trace: TraceLog,
     next_activation: u64,
     steps: u64,
@@ -518,14 +524,18 @@ impl Machine {
         Ok(self.data.handle(id).unwrap().wires.clone())
     }
     fn undo(&mut self, index: usize, control: bool) -> Result<(), String> {
-        if self.history[index].reversed || self.history[index].marker {
+        if self.history.reversed(index) || self.history.get(index).marker {
             if control {
-                self.stack = self.history[index].control.clone();
-                self.next_activation = self.history[index].next_activation;
+                self.stack = self.history.get(index).control.clone();
+                self.next_activation = self.history.get(index).next_activation;
             }
             return Ok(());
         }
-        let keys: Vec<_> = self.history[index]
+        #[cfg(test)]
+        crate::history_work::record(crate::history_work::Operation::UndoFrame, 1);
+        let keys: Vec<_> = self
+            .history
+            .get(index)
             .definitions
             .iter()
             .map(|(k, _)| k.clone())
@@ -533,7 +543,7 @@ impl Machine {
         for key in keys {
             self.note_register(&key);
         }
-        let frame = &mut self.history[index];
+        let frame = self.history.get(index);
         self.quantum.classical_event()?;
         if let Some(invocation) = &frame.region {
             let inverse = invocation.inverse();
@@ -594,7 +604,7 @@ impl Machine {
             self.stack = frame.control.clone();
             self.next_activation = frame.next_activation;
         }
-        frame.reversed = true;
+        self.history.mark_reversed(index);
         Ok(())
     }
     fn step(&mut self) -> Result<(), String> {
@@ -657,6 +667,7 @@ impl Machine {
         if result.is_err()
             && let Some(before) = checkpoint
         {
+            before.history.restore();
             *self = before;
         }
         result
@@ -693,28 +704,48 @@ impl Machine {
             self.trace
                 .record(self.trace_row(&a, &before, &addresses), &obj);
         }
-        self.history.push(Frame {
-            classes_before,
-            classes_after: self.quantum.wire_classes.clone(),
-            wire_boundary,
-            region: self.pending_region.take(),
-            definitions: self.definitions.clone(),
-            next_activation,
-            memory_keys: addresses,
-            tokens_created: before
-                .tokens
-                .changed_keys(&self.data.tokens)
-                .into_iter()
-                .filter(|id| !before.tokens.contains_key(id) && self.data.tokens.contains_key(id))
-                .collect(),
-            data: (!pure(&ins.op)).then_some(before),
-            after: self.stateful.then(|| self.data.clone()),
-            control,
-            pure: pure(&ins.op) && fault.is_none(),
-            reversed: false,
-            marker: ins.op == "uncall" && fault.is_none(),
-            measured: is_measure(&ins.op) && fault.is_none(),
-        });
+        let events = if self.stateful && !pure(&ins.op) && ins.op != "uncall" {
+            FrameEvents {
+                tape: self.data.tape.shared_from(before.tape.len()),
+                hosts: self.data.hosts.shared_from(before.hosts.len()),
+                measurements: self
+                    .data
+                    .measurements
+                    .shared_from(before.measurements.len()),
+            }
+        } else {
+            FrameEvents::default()
+        };
+        let frame_pure = pure(&ins.op) && fault.is_none();
+        let measured = is_measure(&ins.op) && fault.is_none();
+        self.history.push(
+            Frame {
+                classes_before,
+                classes_after: self.quantum.wire_classes.clone(),
+                wire_boundary,
+                region: self.pending_region.take(),
+                definitions: self.definitions.clone(),
+                next_activation,
+                memory_keys: addresses,
+                tokens_created: before
+                    .tokens
+                    .changed_keys(&self.data.tokens)
+                    .into_iter()
+                    .filter(|id| {
+                        !before.tokens.contains_key(id) && self.data.tokens.contains_key(id)
+                    })
+                    .collect(),
+                data: (!pure(&ins.op)).then_some(before),
+                after: self.stateful.then(|| self.data.clone()),
+                control,
+                pure: frame_pure,
+                events,
+                marker: ins.op == "uncall" && fault.is_none(),
+                measured,
+            },
+            frame_pure,
+            measured,
+        );
         self.steps += 1;
         #[cfg(test)]
         crate::execution_work::record(crate::execution_work::Operation::Step, 1);
@@ -918,13 +949,17 @@ impl Machine {
                 get!(self.transfer(&values, &function.lists[1]));
                 let a = self.stack.pop().unwrap();
                 if let Some(start) = a.call_start {
-                    self.segments.push(Segment {
+                    self.history.complete(
                         start,
-                        end: self.history.len(),
-                        name: a.function,
-                        args: a.args,
-                        results: values.clone(),
-                    });
+                        self.history.len(),
+                        Segment {
+                            start,
+                            end: self.history.len(),
+                            name: a.function,
+                            args: a.args,
+                            results: values.clone(),
+                        },
+                    );
                     let caller = self.stack.last().unwrap().id;
                     for (n, v) in a.dest.iter().zip(values) {
                         self.define_at(caller, n, v);
@@ -936,24 +971,15 @@ impl Machine {
             "uncall" => {
                 let av = get!(self.operands(&crate::validate::list_operand(&xs[1])?));
                 let rv = get!(self.operands(&crate::validate::list_operand(&xs[2])?));
-                let Some(seg) = self
-                    .segments
-                    .iter()
-                    .rev()
-                    .find(|s| !self.history[s.start].reversed)
-                else {
+                let Some(completed) = self.history.latest_segment() else {
                     return Ok(Some(4));
                 };
+                let seg = &completed.value;
                 if seg.name != xs[0].trim_start_matches('@')
                     || seg.args != av
                     || seg.results != rv
-                    || self.history.iter().skip(seg.end + 1).any(|f| !f.pure)
-                    || self
-                        .history
-                        .iter()
-                        .skip(seg.start)
-                        .take(seg.end - seg.start + 1)
-                        .any(|f| f.measured)
+                    || self.history.impure_from(seg.end + 1)
+                    || self.history.measured_in(seg.start, seg.end + 1)
                 {
                     return Ok(Some(4));
                 }
@@ -961,6 +987,7 @@ impl Machine {
                 for i in (start..=end).rev() {
                     self.undo(i, false)?;
                 }
+                self.history.retire(start);
             }
             "effect" => {
                 return self.effect(xs);
@@ -1700,8 +1727,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         }]
         .into_iter()
         .collect(),
-        history: Seq::new(),
-        segments: Seq::new(),
+        history: History::new(),
         trace: TraceLog::cli(&mode)?,
         next_activation: 1,
         steps: 0,
@@ -1762,7 +1788,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         if mode == Mode::Program && m.fault.is_some() && obj.isa == "0.8" {
             return Err("§10: E_INVALID_STATE: cannot reverse a FAILED run".into());
         }
-        if m.history.iter().any(|f| f.measured) {
+        if m.history.measured_in(0, m.history.len()) {
             return Err("§10: E_NOT_REVERSIBLE: run contains measure".into());
         }
         for i in (0..m.history.len()).rev() {
@@ -2119,8 +2145,7 @@ impl RuntimeRun {
                 }]
                 .into_iter()
                 .collect(),
-                history: Seq::new(),
-                segments: Seq::new(),
+                history: History::new(),
                 trace: TraceLog::new(false),
                 next_activation: 1,
                 steps: 0,
@@ -2165,20 +2190,18 @@ impl RuntimeRun {
         r.data.measurements.clear();
         r.quantum = self.machine.quantum.clone();
     }
-    fn records(&self, field: fn(&Data) -> &Seq<Json>) -> Vec<Json> {
+    fn records(&self, field: fn(&FrameEvents) -> &[std::rc::Rc<Json>]) -> Vec<Json> {
         self.machine
             .history
             .iter()
-            .filter(|f| !f.reversed && !f.marker)
-            .flat_map(|f| match (&f.data, &f.after) {
-                (Some(before), Some(after)) if field(after).len() > field(before).len() => {
-                    field(after)
-                        .iter()
-                        .skip(field(before).len())
-                        .cloned()
-                        .collect()
-                }
-                _ => vec![],
+            .enumerate()
+            .filter(|(row, frame)| !self.machine.history.reversed(*row) && !frame.marker)
+            .flat_map(|(_, frame)| {
+                (0..field(&frame.events).len()).map(move |index| {
+                    #[cfg(test)]
+                    crate::history_work::record(crate::history_work::Operation::EventRef, 1);
+                    field(&frame.events)[index].as_ref().clone()
+                })
             })
             .collect()
     }
@@ -2212,7 +2235,7 @@ impl RuntimeRun {
         self.machine
             .history
             .iter()
-            .flat_map(|f| f.tokens_created.iter().copied())
+            .flat_map(|f| f.tokens_created.clone())
             .collect()
     }
     pub(crate) fn unavailable_handle(&mut self, id: Option<u64>) {
@@ -2227,13 +2250,15 @@ impl RuntimeRun {
             .flatten()
     }
     pub(crate) fn measured(&self) -> bool {
-        self.machine.history.iter().any(|f| f.measured)
+        self.machine
+            .history
+            .measured_in(0, self.machine.history.len())
     }
     pub(crate) fn tape(&self) -> Vec<Json> {
-        self.records(|d| &d.tape)
+        self.records(|events| &events.tape)
     }
     pub(crate) fn measurements(&self) -> Vec<Json> {
-        self.records(|d| &d.measurements)
+        self.records(|events| &events.measurements)
     }
     pub(crate) fn history_len(&self) -> usize {
         self.machine.history.len()
@@ -2393,6 +2418,7 @@ impl RuntimeRun {
         }
         let checkpoint = self.machine.clone();
         if let Err(e) = self.machine.step() {
+            checkpoint.history.restore();
             self.machine = checkpoint;
             return Err(e);
         }
@@ -2402,18 +2428,16 @@ impl RuntimeRun {
         if n > self.machine.history.len() {
             return Err("§7.4: history index beyond current prefix".into());
         }
-        if self.machine.history.iter().skip(n).any(|f| f.measured) {
+        if self
+            .machine
+            .history
+            .measured_in(n, self.machine.history.len())
+        {
             return Err("§10: E_NOT_REVERSIBLE: measure".into());
         }
         // Reject a cut through a retired segment: its control checkpoint refers
         // to instances already removed by uncall. Whole-prefix reversal is valid.
-        if n != 0
-            && self
-                .machine
-                .segments
-                .iter()
-                .any(|s| s.start < n && n <= s.end && self.machine.history[s.start].reversed)
-        {
+        if n != 0 && self.machine.history.cuts_cancelled_segment(n) {
             return Err("§7.4: snapshot lies inside cancelled segment".into());
         }
         for i in (n..self.machine.history.len()).rev() {
@@ -2421,7 +2445,6 @@ impl RuntimeRun {
         }
         self.machine.history.truncate(n);
         self.machine.trace.truncate(n);
-        self.machine.segments.retain(|s| s.end < n);
         self.machine.steps = n as u64;
         self.machine.fault = None;
         self.machine.results.clear();
@@ -2463,7 +2486,7 @@ impl RuntimeRun {
                         .map(|(i, f)| {
                             Json::obj(vec![
                                 ("index", Json::u64(i as u64)),
-                                ("reversed", Json::Bool(f.reversed)),
+                                ("reversed", Json::Bool(self.machine.history.reversed(i))),
                                 ("uncall", Json::Bool(f.marker)),
                                 ("pure", Json::Bool(f.pure)),
                                 ("measured", Json::Bool(f.measured)),
@@ -2488,7 +2511,10 @@ impl RuntimeRun {
                 Json::Arr(self.machine.trace.project(&self.machine.obj)),
             ),
             ("tape", Json::Arr(self.tape())),
-            ("host_requests", Json::Arr(self.records(|d| &d.hosts))),
+            (
+                "host_requests",
+                Json::Arr(self.records(|events| &events.hosts)),
+            ),
         ];
         if self.machine.quantum.target.is_some() {
             out.push((
@@ -2573,7 +2599,7 @@ mod scaling_tests {
                 assert!(run.machine.quantum.exact_equals(&quantum));
                 assert_eq!(run.machine.data.handles, handles);
                 assert!(run.machine.quantum_events.is_empty());
-                assert!(run.machine.history[0].region.is_none());
+                assert!(run.machine.history.get(0).region.is_none());
                 run.reverse_to(0).unwrap();
                 assert_eq!(run.fault(), None);
                 assert_eq!(run.machine.data.handles, handles);
@@ -3031,8 +3057,54 @@ mod scaling_tests {
         assert!(run.created_regs().unwrap().is_empty());
         run.step().unwrap();
         assert_eq!(run.created_regs().unwrap().len(), 1);
-        run.machine.history.last_mut().unwrap().after = None;
+        run.machine.history.edit_last(|frame| frame.after = None);
         assert!(run.created_regs().unwrap_err().contains("both snapshots"));
+    }
+
+    fn assert_nested_reversal(run: &mut RuntimeRun, initial: &Data, snapshot: &Json) {
+        let frames = snapshot.get("frames").unwrap().as_arr().unwrap();
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|f| f.get("uncall") == Some(&Json::Bool(true)))
+                .count(),
+            2
+        );
+        run.reverse_to(0).unwrap();
+        assert_eq!(run.machine.data.memory, initial.memory);
+        assert_eq!(run.machine.data.table, initial.table);
+        assert_eq!(run.machine.data.bump, initial.bump);
+        assert_eq!(run.machine.data.block, initial.block);
+        assert_eq!(run.machine.data.console, initial.console);
+        assert_eq!(run.machine.data.clock, initial.clock);
+        assert_eq!(run.machine.data.handles, initial.handles);
+        assert_eq!(run.machine.data.tokens, initial.tokens);
+        assert!(run.machine.env.is_empty());
+    }
+
+    #[test]
+    fn repeated_nested_marker_rewind_keeps_cancelled_saved_events_and_exact_bytes() {
+        let raw = std::fs::read_to_string(
+            crate::pins::isa().join("reference-interpreter/tests/fixtures/classical.bisa"),
+        )
+        .unwrap();
+        let obj = std::sync::Arc::new(crate::load(&raw, false).unwrap().0);
+        let resources = Resources::new(&obj).unwrap();
+        let initial = resources.data.clone();
+        let mut run = RuntimeRun::new(obj, &resources, "nested", vec![], vec![]).unwrap();
+        let mut expected = None;
+        for executed in 1..=3 {
+            while !run.terminal() {
+                run.step().unwrap();
+            }
+            assert_eq!(run.fault(), None);
+            assert_eq!(run.values(), &[Value::int(64, u(0))]);
+            assert!(run.tape().is_empty());
+            assert_eq!(run.machine.effects.saved.len(), executed);
+            let snapshot = run.snapshot("COMPLETED").unwrap();
+            assert_eq!(expected.get_or_insert_with(|| snapshot.clone()), &snapshot);
+            assert_nested_reversal(&mut run, &initial, &snapshot);
+        }
     }
 
     #[test]

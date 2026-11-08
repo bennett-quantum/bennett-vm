@@ -15,7 +15,7 @@ impl Clone for Frame {
             after: self.after.clone(),
             control: self.control.clone(),
             pure: self.pure,
-            reversed: self.reversed,
+            events: self.events.clone(),
             marker: self.marker,
             measured: self.measured,
             tokens_created: self.tokens_created.clone(),

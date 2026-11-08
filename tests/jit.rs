@@ -4,7 +4,8 @@ use bennett_vm::{
     object,
 };
 fn fixture(name: &str) -> object::Object {
-    let p = crate::pins::isa().join("reference-interpreter/tests/fixtures")
+    let p = crate::pins::isa()
+        .join("reference-interpreter/tests/fixtures")
         .join(name);
     bennett_vm::load(&std::fs::read_to_string(p).unwrap(), false)
         .unwrap()
@@ -34,14 +35,47 @@ fn transformations_change_private_graph_without_changing_reference_body() {
     // Four recursive reads add 1 + 3 + 7 + 11 = 22, modulo 256.
     // This observes transformed execution, rather than statistics alone.
     let path = crate::pins::isa().join("reference-interpreter/tests/fixtures/sum_db.bisa");
-    for mode in ["interpreter", "baseline", "inline", "structure", "reindex", "simplify", "optimised", "jit"] {
+    for mode in [
+        "interpreter",
+        "baseline",
+        "inline",
+        "structure",
+        "reindex",
+        "simplify",
+        "optimised",
+        "jit",
+    ] {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_bennett-vm"))
-            .arg("run-oracle").arg(&path).args(["sum_db", "--input", "4", "--budget", "128", "--mem", "db=0103070b000000000000000000000000"])
-            .env("BENNETT_VM_ENGINE", mode).output().unwrap();
-        assert!(out.status.success(), "{mode}: {}", String::from_utf8_lossy(&out.stderr));
+            .arg("run-oracle")
+            .arg(&path)
+            .args([
+                "sum_db",
+                "--input",
+                "4",
+                "--budget",
+                "128",
+                "--mem",
+                "db=0103070b000000000000000000000000",
+            ])
+            .env("BENNETT_VM_ENGINE", mode)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{mode}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let json = bennett_vm::json::parse(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
-        assert_eq!(json.get("code").and_then(bennett_vm::json::Json::as_u64), Some(0), "{mode}");
-        assert_eq!(json.get("payload").and_then(bennett_vm::json::Json::as_u64), Some(22), "{mode}");
+        assert_eq!(
+            json.get("code").and_then(bennett_vm::json::Json::as_u64),
+            Some(0),
+            "{mode}"
+        );
+        assert_eq!(
+            json.get("payload").and_then(bennett_vm::json::Json::as_u64),
+            Some(22),
+            "{mode}"
+        );
     }
 }
 #[test]
@@ -232,4 +266,43 @@ fn arithmetic_reports_invalid_kernels_as_errors() {
             .unwrap_err()
             .contains("invalid")
     );
+}
+
+#[test]
+fn canonical_dispatch_preserves_interior_rows_and_rejects_the_first_missing_row() {
+    let object = fixture("inc8.bisa");
+    let original = &object.functions[0].blocks[0].instrs;
+    assert_eq!(original.len(), 3, "published three-row increment fixture");
+    for native in [false, true] {
+        for passes in [Passes::default(), Passes::all()] {
+            let program = Program::compile(&object, passes, native).unwrap();
+            let first = program.row("inc8", 0, 0).unwrap();
+            let interior = program.row("inc8", 0, 1).unwrap();
+            let last = program.row("inc8", 0, 2).unwrap();
+            let order = [interior, first, last];
+            let mut seen = vec![];
+            program
+                .run(interior, |id, instruction| {
+                    assert_eq!(instruction.line, original[id - first].line);
+                    assert_eq!(instruction.raw, original[id - first].raw);
+                    seen.push(id);
+                    Ok(order.get(seen.len()).copied())
+                })
+                .unwrap();
+            assert_eq!(seen, order);
+            assert!(program.row("inc8", 0, 3).is_err());
+            assert_eq!(
+                program
+                    .run(interior, |_, _| Ok(Some(last + 1)))
+                    .unwrap_err(),
+                "§5.7: successor outside dispatch",
+            );
+            assert_eq!(
+                program
+                    .run(last + 1, |_, _| panic!("invalid entry executed"))
+                    .unwrap_err(),
+                "§5.7: compiled entry outside dispatch",
+            );
+        }
+    }
 }

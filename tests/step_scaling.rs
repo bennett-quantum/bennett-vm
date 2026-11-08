@@ -637,3 +637,186 @@ fn tail_rewind_reexecution_preserves_row_instances_and_snapshot() {
             .is_empty()
     );
 }
+
+// Count canonical table slots/comparisons and table-construction node visits.
+// Native comparison probes are emitted into the test-only machine code.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DispatchWork {
+    pub probes: u64,
+    pub initialization_visits: u64,
+}
+thread_local! {
+    static DISPATCH_WORK: std::cell::Cell<DispatchWork> = const {
+        std::cell::Cell::new(DispatchWork { probes: 0, initialization_visits: 0 })
+    };
+}
+pub(crate) fn dispatch_probe() {
+    record_dispatch_probes(1);
+}
+pub(crate) fn record_dispatch_probes(count: u64) {
+    DISPATCH_WORK.with(|work| {
+        let mut next = work.get();
+        next.probes += count;
+        work.set(next);
+    });
+}
+pub(crate) fn dispatch_initialization_visit() {
+    DISPATCH_WORK.with(|work| {
+        let mut next = work.get();
+        next.initialization_visits += 1;
+        work.set(next);
+    });
+}
+fn reset_dispatch_work() {
+    DISPATCH_WORK.with(|work| work.set(DispatchWork::default()));
+}
+fn dispatch_work() -> DispatchWork {
+    DISPATCH_WORK.with(std::cell::Cell::get)
+}
+
+#[test]
+fn compiled_step_dispatch_is_independent_of_unused_rows() {
+    use crate::jit::{Passes, Program};
+    // Existing calibrated program-size checkpoints; only unreachable rows vary.
+    // The executed body is at high canonical IDs, with an interior-row backedge
+    // deliberately absent from the recovered CFG.
+    let mut comparisons = vec![];
+    for passes in [
+        Passes::default(),
+        Passes {
+            inline: true,
+            ..Passes::default()
+        },
+        Passes {
+            structure: true,
+            ..Passes::default()
+        },
+        Passes {
+            reindex: true,
+            ..Passes::default()
+        },
+        Passes {
+            simplify: true,
+            ..Passes::default()
+        },
+        Passes::all(),
+    ] {
+        for native in [false, true] {
+            let mut samples = vec![];
+            for unused in [CHECKPOINTS[0], CHECKPOINTS[2]] {
+                let dead = "unused = const.i8 0\n".repeat(unused);
+                let functions = format!(
+                    "fn cc @unused () () () () ()\n^entry():\n{dead}ret\nfn cc @main () () () () ()\n^entry():\na = const.i8 1\nb = const.i8 2\nc = add a b\nret"
+                );
+                let source = format!(
+                    "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=64\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n"
+                );
+                let object = crate::object::parse(&source).unwrap();
+                let program = Program::compile(&object, passes, native).unwrap();
+                let rows = [0, 2, 1, 2, 3].map(|row| program.row("main", 0, row).unwrap());
+                let mut traces = vec![];
+                for cooperative in [false, true] {
+                    reset_dispatch_work();
+                    let mut trace = vec![];
+                    if cooperative {
+                        for row in rows {
+                            program
+                                .step(row, |ins| {
+                                    trace.push((row - rows[0], ins.raw.clone()));
+                                    Ok(())
+                                })
+                                .unwrap();
+                        }
+                    } else {
+                        program
+                            .run(rows[0], |id, ins| {
+                                trace.push((id - rows[0], ins.raw.clone()));
+                                Ok(rows.get(trace.len()).copied())
+                            })
+                            .unwrap();
+                    }
+                    let work = dispatch_work();
+                    assert_eq!(trace.len(), rows.len());
+                    traces.push(trace);
+                    samples.push((cooperative, work));
+                }
+                assert_eq!(traces[0], traces[1]);
+            }
+            for mode in 0..2 {
+                let short = samples[mode].1;
+                let long = samples[mode + 2].1;
+                eprintln!(
+                    "dispatch native={native} passes={passes:?} cooperative={} short={short:?} long={long:?} probes/row={}/{} -> {}/{} Rwork={:.6}",
+                    samples[mode].0,
+                    short.probes,
+                    5,
+                    long.probes,
+                    5,
+                    long.probes as f64 / short.probes as f64
+                );
+            }
+            for mode in 0..2 {
+                comparisons.push((
+                    native,
+                    samples[mode].0,
+                    samples[mode].1,
+                    samples[mode + 2].1,
+                ));
+            }
+        }
+    }
+    for (native, cooperative, short, long) in comparisons {
+        assert_eq!(
+            long.probes, short.probes,
+            "dispatch probes per identical executed row depend on unused rows: native={native} cooperative={cooperative}"
+        );
+        assert_eq!(
+            long.initialization_visits, short.initialization_visits,
+            "per-step dispatch initialization depends on unused rows"
+        );
+        assert_eq!(
+            short.probes,
+            if cooperative { 5 } else { 9 },
+            "one canonical entry, plus membership and successor lookups for each continuation"
+        );
+        assert_eq!(
+            short.initialization_visits, 0,
+            "compiled tables must be built before entry"
+        );
+    }
+}
+
+#[test]
+#[ignore = "informational printf dispatch work receipt"]
+fn printf_dispatch_work() {
+    reset_dispatch_work();
+    let execution = crate::execution_work::Probe::start();
+    let args = [
+        fixture("launch.bennett").to_str().unwrap().to_owned(),
+        "main".into(),
+        "--replies".into(),
+        fixture("replies.json").to_str().unwrap().to_owned(),
+        "--target".into(),
+        fixture("target.json").to_str().unwrap().to_owned(),
+    ];
+    crate::cc::cmd_program(&args).unwrap();
+    let work = dispatch_work();
+    let rows = expected().get("steps").unwrap().as_u64().unwrap();
+    assert_eq!(
+        execution.snapshot().steps,
+        rows,
+        "published printf row count"
+    );
+    let compiled = crate::jit::selection().unwrap().is_some();
+    assert_eq!(
+        work.probes == 0,
+        !compiled,
+        "compiled dispatch must be observed exactly when selected"
+    );
+    eprintln!(
+        "PRINTF_DISPATCH rows={rows} probes={} probes_per_row={:.9} initialization_visits={}",
+        work.probes,
+        work.probes as f64 / rows as f64,
+        work.initialization_visits
+    );
+}

@@ -9,6 +9,7 @@ pub mod bigint;
 mod call_matching;
 pub mod cc;
 pub mod certificate;
+mod classical_memory;
 mod cleanup_discipline;
 pub mod cliargs;
 mod coherent_typing;

@@ -854,11 +854,14 @@ fn memory_work() -> MemoryWork {
 fn reset_memory_work() {
     MEMORY_WORK.with(|cell| cell.set(MemoryWork::default()));
 }
-fn memory_run(functions: &str) -> crate::cc::RuntimeRun {
+fn memory_object(functions: &str) -> crate::object::Object {
     let source = format!(
         "bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=128\n\nsection symbols\n{{}}\n\nsection functions\n{functions}\n\nsection layout\n{{\"A_tab\":16,\"H\":128,\"S_cells\":0,\"globals\":{{}},\"heap_base\":16,\"heap_limit_max\":\"340282366920938463463374607431768211439\",\"interface_regions\":{{}},\"null_size\":1,\"ptr_width\":128}}\n"
     );
-    let object = std::sync::Arc::new(crate::object::parse(&source).unwrap());
+    crate::object::parse(&source).unwrap()
+}
+fn memory_run(functions: &str) -> crate::cc::RuntimeRun {
+    let object = std::sync::Arc::new(memory_object(functions));
     let resources = crate::cc::Resources::new(&object).unwrap();
     crate::cc::RuntimeRun::new(object, &resources, "main", vec![], vec![]).unwrap()
 }
@@ -873,28 +876,67 @@ fn memory_journal_retention_tracks_changed_bytes() {
             "store.i128 p b\nstore.i128 p a\n".repeat(CHECKPOINTS[0] / 2),
         );
         let mut run = memory_run(&functions);
-        for _ in 0..prefix + 5 { run.step().unwrap(); }
+        for _ in 0..prefix + 5 {
+            run.step().unwrap();
+        }
         reset_memory_work();
         let probe = crate::execution_work::Probe::start();
-        for _ in 0..CHECKPOINTS[0] { run.step().unwrap(); }
+        for _ in 0..CHECKPOINTS[0] {
+            run.step().unwrap();
+        }
         let work = memory_work();
         assert_eq!(probe.snapshot().steps, CHECKPOINTS[0] as u64);
         drop(probe);
         assert_eq!(run.fault(), None);
         samples.push(work);
-        eprintln!("memory prefix={prefix}, committed_rows={}, committed_bytes={}: {work:?}", CHECKPOINTS[0], CHECKPOINTS[0] * 16);
-        run.step().unwrap(); run.step().unwrap();
-        assert_eq!(run.values(), &[crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap())]);
+        eprintln!(
+            "memory prefix={prefix}, committed_rows={}, committed_bytes={}: {work:?}; page_allocations/write_bytes={}/{}, copied_bytes/write_bytes={}/{}",
+            CHECKPOINTS[0],
+            CHECKPOINTS[0] * 16,
+            work.page_allocations,
+            CHECKPOINTS[0] * 16,
+            work.copied_bytes,
+            CHECKPOINTS[0] * 16
+        );
+        run.step().unwrap();
+        run.step().unwrap();
+        assert_eq!(
+            run.values(),
+            &[crate::value::Value::int(
+                128,
+                crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097")
+                    .unwrap()
+            )]
+        );
         run.reverse_to(prefix + 5).unwrap();
-        while !run.terminal() { run.step().unwrap(); }
+        while !run.terminal() {
+            run.step().unwrap();
+        }
         assert_eq!(run.fault(), None);
-        assert_eq!(run.values(), &[crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap())]);
+        assert_eq!(
+            run.values(),
+            &[crate::value::Value::int(
+                128,
+                crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097")
+                    .unwrap()
+            )]
+        );
     }
-    eprintln!("Rprefix[memory_metadata_probes]={}/{}", samples[1].metadata_probes, samples[0].metadata_probes);
+    eprintln!(
+        "Rprefix[memory_metadata_probes]={}/{}",
+        samples[1].metadata_probes, samples[0].metadata_probes
+    );
     for work in &samples {
-        assert_eq!(work.byte_tree_nodes, 0, "byte-memory AVL-node allocations per committed store must be zero");
+        assert_eq!(
+            work.byte_tree_nodes, 0,
+            "byte-memory AVL-node allocations per committed store must be zero"
+        );
         assert_eq!(work.byte_tree_operations, 0, "byte-memory tree operations");
-        assert_eq!(work.journal_bytes, (CHECKPOINTS[0] * 16) as u64, "original journal bytes must equal committed write bytes");
+        assert_eq!(
+            work.journal_bytes,
+            (CHECKPOINTS[0] * 16) as u64,
+            "original journal bytes must equal committed write bytes"
+        );
     }
     assert_eq!(samples[0].metadata_probes, samples[1].metadata_probes);
 }
@@ -903,15 +945,197 @@ fn memory_journal_retention_tracks_changed_bytes() {
 fn large_sparse_image_uses_only_touched_pages() {
     // A 2^25-byte allocation is zero-filled without resident byte storage.
     // Four nonzero 16-byte spans are widely separated within it.
-    let mut run = memory_run("fn cc @main () (a:i128, b:i128, c:i128, d:i128) () () ()\n^entry():\nn = const.i128 33554432\np = alloc n\nv = const.i128 22685491128062564230891640495451214097\np0 = const.i128 16\np1 = const.i128 10000\np2 = const.i128 16777216\np3 = const.i128 33554432\nstore.i128 p0 v\nstore.i128 p1 v\nstore.i128 p2 v\nstore.i128 p3 v\na = load.i128 p0\nb = load.i128 p1\nc = load.i128 p2\nd = load.i128 p3\nret a b c d");
+    let mut run = memory_run(
+        "fn cc @main () (a:i128, b:i128, c:i128, d:i128) () () ()\n^entry():\nn = const.i128 33554432\np = alloc n\nv = const.i128 22685491128062564230891640495451214097\np0 = const.i128 16\np1 = const.i128 10000\np2 = const.i128 16777216\np3 = const.i128 33554432\nstore.i128 p0 v\nstore.i128 p1 v\nstore.i128 p2 v\nstore.i128 p3 v\na = load.i128 p0\nb = load.i128 p1\nc = load.i128 p2\nd = load.i128 p3\nret a b c d",
+    );
     reset_memory_work();
-    while !run.terminal() { run.step().unwrap(); }
+    while !run.terminal() {
+        run.step().unwrap();
+    }
     assert_eq!(run.fault(), None);
-    let value = crate::value::Value::int(128, crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap());
-    assert_eq!(run.values(), &[value.clone(), value.clone(), value.clone(), value]);
+    let value = crate::value::Value::int(
+        128,
+        crate::bigint::BigUint::parse_decimal("22685491128062564230891640495451214097").unwrap(),
+    );
+    assert_eq!(
+        run.values(),
+        &[value.clone(), value.clone(), value.clone(), value]
+    );
     let work = memory_work();
     eprintln!("sparse 2^25-byte image, four touched pages: {work:?}");
-    assert_eq!(work.resident_units, 4, "resident memory units must be pages, independent of zero-filled image extent");
+    assert_eq!(
+        work.resident_units, 4,
+        "resident memory units must be pages, independent of zero-filled image extent"
+    );
     run.reverse_to(0).unwrap();
     assert_eq!(run.history_len(), 0);
+}
+
+#[test]
+fn sparse_global_image_allocates_only_nonzero_pages() {
+    use crate::{bigint::BigUint, object::Global};
+    let size = 1 << 25;
+    let mut image = vec![0; size];
+    for offset in [0, 1 << 20, 1 << 24, size - 1] {
+        image[offset] = 0x5a;
+    }
+    let mut object = memory_object(
+        "fn cc @main () (v:i8) () () ()\n^entry():\np = const.i128 33554447\nv = load.i8 p\nret v",
+    );
+    object.layout.as_mut().unwrap().globals.insert(
+        "image".into(),
+        Global {
+            base: BigUint::from_u64(16),
+            size: BigUint::from_u64(size as u64),
+            image: "image".into(),
+        },
+    );
+    object
+        .data
+        .insert("image".into(), crate::sha256::to_hex(&image));
+    let object = std::sync::Arc::new(object);
+    reset_memory_work();
+    let resources = crate::cc::Resources::new(&object).unwrap();
+    let initialized = memory_work();
+    assert_eq!(initialized.page_allocations, 4);
+    assert_eq!(initialized.resident_units, 4);
+    assert_eq!(
+        initialized.journal_bytes, 0,
+        "initial images are not row writes"
+    );
+    let mut run = crate::cc::RuntimeRun::new(object, &resources, "main", vec![], vec![]).unwrap();
+    while !run.terminal() {
+        run.step().unwrap();
+    }
+    assert_eq!(run.fault(), None);
+    assert_eq!(
+        run.values(),
+        &[crate::value::Value::int(8, BigUint::from_u64(0x5a))]
+    );
+    eprintln!("2^25-byte global image, four nonzero pages: {initialized:?}");
+}
+
+#[test]
+fn sparse_pages_preserve_wide_cross_page_versions_and_unrelated_bytes() {
+    use crate::{
+        bigint::BigUint,
+        classical_memory::{Memory, PAGE_SIZE},
+    };
+    use std::collections::BTreeMap;
+    let mut memory = Memory::default();
+    let mut expected = BTreeMap::new();
+    let base = BigUint::from_u64(1)
+        .shl(96)
+        .add(&BigUint::from_u64((PAGE_SIZE - 7) as u64));
+    let mut snapshots = vec![];
+    // i80/i128 footprints straddle page boundaries above u64::MAX. Vary
+    // insertion order to exercise both children of compressed radix branches.
+    for index in [31, 0, 12, 5, 22, 2, 15, 8] {
+        let address = base.add(&BigUint::from_u64((index * PAGE_SIZE) as u64));
+        for width in [10, 16] {
+            let bytes: Vec<_> = (0..width).map(|i| (index + i + 1) as u8).collect();
+            snapshots.push((memory.clone(), expected.clone()));
+            memory.write(&address, &bytes);
+            for (i, b) in bytes.into_iter().enumerate() {
+                expected.insert(address.add(&BigUint::from_u64(i as u64)), b);
+            }
+            assert_eq!(
+                memory.ordered_bytes(),
+                expected
+                    .iter()
+                    .map(|(a, b)| (a.clone(), *b))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    for (snapshot, expected) in snapshots {
+        assert_eq!(
+            snapshot.ordered_bytes(),
+            expected.into_iter().collect::<Vec<_>>()
+        );
+    }
+    let before = memory.clone();
+    memory.write(&base, &[0; 16]);
+    let after = memory.clone();
+    // A disjoint write within the same page survives restoration of this row.
+    let untouched = base.add(&BigUint::from_u64(100));
+    memory.write(&untouched, &[0xa5]);
+    memory.undo_delta(&before, &after);
+    let mut bytes = [0; 16];
+    memory.read(&base, &mut bytes);
+    assert_eq!(
+        bytes,
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    );
+    assert_eq!(memory.get(&untouched), Some(&0xa5));
+    memory.write(&base, &[0; 16]);
+    assert!((0..16).all(|i| memory.get(&base.add(&BigUint::from_u64(i))).is_none()));
+}
+
+#[test]
+fn overlapping_span_journal_restores_only_changed_row_bytes() {
+    use crate::{bigint::BigUint, classical_memory::Memory};
+    let address = BigUint::from_u64(4095);
+    let mut memory = Memory::default();
+    memory.write(&address, &[1, 2, 3]);
+    let before = memory.clone();
+    memory.write(&address, &[8, 9]);
+    memory.write(&address, &[1]);
+    let after = memory.clone();
+    memory.write(&address, &[7]);
+    memory.write(&address.add(&BigUint::from_u64(2)), &[99]);
+    memory.undo_delta(&before, &after);
+    let mut bytes = [0; 3];
+    memory.read(&address, &mut bytes);
+    assert_eq!(bytes, [7, 2, 99]);
+}
+
+#[test]
+fn faulted_store_retains_no_displaced_bytes() {
+    let mut run = memory_run(
+        "fn cc @main () () () () ()\n^entry():\nn = const.i128 16\np = alloc n\nv = const.i128 22685491128062564230891640495451214097\nstore.i128 p v\nbad = const.i128 24\nstore.i128 bad v\nret",
+    );
+    for _ in 0..5 {
+        run.step().unwrap();
+    }
+    let before = run.snapshot("RUNNING").unwrap();
+    reset_memory_work();
+    run.step().unwrap();
+    assert_eq!(run.fault(), Some(7));
+    let work = memory_work();
+    assert_eq!(work.journal_bytes, 0);
+    assert_eq!(work.page_allocations, 0);
+    assert_eq!(
+        before.get("memory_digest"),
+        run.snapshot("FAILED").unwrap().get("memory_digest")
+    );
+    run.reverse_to(5).unwrap();
+    run.step().unwrap();
+    assert_eq!(run.fault(), Some(7));
+}
+
+#[test]
+fn unchanged_writes_retain_original_bytes_and_release_long_journal() {
+    use crate::{bigint::BigUint, classical_memory::Memory};
+    let mut memory = Memory::default();
+    let address = BigUint::from_u64(1);
+    memory.write(&address, &[1]);
+    reset_memory_work();
+    for _ in 0..CHECKPOINTS[2] {
+        memory.write(&address, &[1]);
+    }
+    let work = memory_work();
+    assert_eq!(work.journal_bytes, CHECKPOINTS[2] as u64);
+    assert_eq!(work.page_allocations, 0);
+    assert_eq!(memory.get(&address), Some(&1));
+    drop(memory);
+    let mut zero = Memory::default();
+    zero.write(&address, &[5]);
+    zero.write(&address, &[0]);
+    assert_eq!(zero, Memory::default());
+    assert_eq!(
+        memory_work().resident_units,
+        0,
+        "empty pages must be removed"
+    );
 }

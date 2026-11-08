@@ -279,12 +279,12 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 1
     },
     "src/cc.rs": {
-      "branch_mass": 1337,
+      "branch_mass": 1317,
       "max_lines": 415,
       "over_100": 4,
       "over_25": 25,
       "over_300": 2,
-      "trivial_wrappers": 27
+      "trivial_wrappers": 28
     },
     "src/cc/frame_work.rs": {
       "branch_mass": 1,
@@ -317,6 +317,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_25": 2,
       "over_300": 0,
       "trivial_wrappers": 0
+    },
+    "src/classical_memory.rs": {
+      "branch_mass": 181,
+      "max_lines": 58,
+      "over_100": 0,
+      "over_25": 2,
+      "over_300": 0,
+      "trivial_wrappers": 1
     },
     "src/cleanup_discipline.rs": {
       "branch_mass": 449,

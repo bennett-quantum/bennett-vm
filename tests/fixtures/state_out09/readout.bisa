@@ -1,0 +1,50 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"3aec0952acb7045a6af334caa2ba5db5627af280df49babc8ae5985c12ffd66b","kind":"action","name":"prepare","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"action","mem":[],"mut":[2,1,68],"tier":"q"}},"1":{"interface_hash":"2ed1b789c39f83e2bdb16f1c8a89f3079db8117d9dc1933ce10d079cee964534","kind":"cc","name":"sample","signature":{"abi":"0.9","kind":"cc","params":[],"results":["i2"],"tier":"cc"}},"2":{"interface_hash":"4177efd4b53870b570c94b87206d740aa5d61e2836fb94aa353aed7e2bbc960c","kind":"cc","name":"unmeasured","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"3":{"interface_hash":"cc686e0e6909c6552d596b789cba4e2b16a355aa6526dc5061fa7b7ecc7a3093","kind":"cc","name":"views","signature":{"abi":"0.9","kind":"cc","params":[],"results":["i2"],"tier":"cc"}},"4":{"interface_hash":"a84b012a52a7cb7747f18f2a3be64a3fd517164d0ac2e617f2308540c04e2bea","kind":"cc","name":"skipped","signature":{"abi":"0.9","kind":"cc","params":[],"results":["i2"],"tier":"cc"}}}
+
+section functions
+action @prepare (q:wire[2] mut, t:wire mut, image:wire[68] mut) () () () ()
+^entry():
+x q[1]
+h q[0]
+s q[0]
+x t
+h t
+x image[0]
+x image[67]
+fn cc @sample () (r:i2) () () ()
+^entry():
+q = qreg.new any 2
+t = qreg.new any 1
+image = qreg.new any 68
+zero = qreg.new any 1
+action_call @prepare (q, t, image) () () ()
+r = measure.i2 q
+s = measure t
+v = measure image
+z = measure zero
+ret r
+fn cc @unmeasured () () () () ()
+^entry():
+q = qreg.new any 1
+qreg.free q
+ret
+fn cc @views () (r:i2) () () ()
+^entry():
+a = qreg.new any 1
+b = qreg.new any 1
+ab = qreg.concat a b
+r = measure.i2 ab
+ret r
+fn cc @skipped () (r:i2) () () ()
+^entry():
+no = const.i1 0
+br no ^unused() ^actual()
+^unused():
+q = qreg.new any 2
+r = measure.i2 q
+ret r
+^actual():
+r = call @sample
+ret r

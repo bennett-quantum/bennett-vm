@@ -83,6 +83,7 @@ struct Allocation {
 #[derive(Clone, Debug, PartialEq)]
 struct Handle {
     wires: Vec<usize>,
+    allocation: bool,
     live: bool,
     parent: Option<u64>,
     viewed: bool,
@@ -469,6 +470,7 @@ impl Data {
             id,
             Handle {
                 wires,
+                allocation: parent.is_none(),
                 live: true,
                 parent,
                 viewed: false,
@@ -1138,8 +1140,7 @@ impl Machine {
                     result = Some(Value::Qreg(v));
                 }
                 "qreg.concat" => {
-                    let a = get!(self.id(&xs[0]));
-                    let b = get!(self.id(&xs[1]));
+                    let (a, b) = (get!(self.id(&xs[0])), get!(self.id(&xs[1])));
                     let ha = self.data.handle(a).unwrap();
                     let hb = self.data.handle(b).unwrap();
                     if a == b || ha.parent.is_some() || hb.parent.is_some() {
@@ -1149,6 +1150,7 @@ impl Machine {
                     self.data.handles.get_mut(&a).unwrap().live = false;
                     self.data.handles.get_mut(&b).unwrap().live = false;
                     let id = self.data.new_handle(ws, None);
+                    self.data.handles.get_mut(&id).unwrap().allocation = false;
                     result = Some(Value::Qreg(id));
                 }
                 "qreg.width" | "qreg.id" if obj.isa == "0.9" => {
@@ -1187,21 +1189,21 @@ impl Machine {
                 }
                 let ws = h.wires.clone();
                 if ins.op != "measure" {
-                    let width = ins
-                        .op
+                    let opcode = &ins.op;
+                    let width = opcode
                         .strip_prefix("measure.i")
-                        .ok_or_else(|| err("invalid measurement opcode"))?
-                        .parse::<usize>()
-                        .map_err(|_| err("invalid typed measurement width"))?;
-                    if width == 0 {
-                        return Err(err("invalid typed measurement width"));
-                    }
+                        .and_then(|text| text.parse::<usize>().ok())
+                        .filter(|width| *width != 0)
+                        .ok_or_else(|| err("invalid typed measurement width"))?;
                     if width != ws.len() {
                         return Ok(Some(4));
                     }
                 }
                 let draw = *self.draws.get(self.draw_pos).unwrap_or(&0.0);
                 self.draw_pos += 1;
+                let handles = self.data.handles.values();
+                let bundles = handles.filter(|h| h.allocation).map(|h| &h.wires[..]);
+                self.quantum.state_output.capture(&self.quantum, bundles)?;
                 let (v, bits) = self.quantum.measure(&ws, draw);
                 self.quantum.target_release(&ws);
                 self.data.handles.get_mut(&id).unwrap().live = false;
@@ -1572,6 +1574,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             "steps",
             "target",
             "tape-out",
+            "state-out",
             "replay-tape",
         ],
         &["reverse"],
@@ -1579,6 +1582,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     if opts.positional.len() != 2 {
         return Err("command requires <object> <entry>".into());
     }
+    let state_output = cliargs::state_output(&opts)?;
     let tape_out = opts.one("tape-out")?;
     let effects = EffectJournal::read(opts.one("replay-tape")?)?;
     let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
@@ -1626,6 +1630,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     };
     let mut data = Data::new(&obj)?;
     let mut quantum = QuantumState::new();
+    quantum.state_output = state_output;
     quantum.target = target.map(std::sync::Arc::new);
     for raw in opts.all("mem") {
         let (n, h) = raw.split_once('=').ok_or("--mem requires global=hex")?;

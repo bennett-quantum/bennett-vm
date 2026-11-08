@@ -1,0 +1,16 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"8989232c1b82e68c80f00854ec9440ec2754845d355d068ff7842164b1b48264","kind":"cc","name":"sample","signature":{"abi":"0.9","kind":"cc","params":[],"results":["i1"],"tier":"cc"}}}
+
+section functions
+fn cc @sample () (r:i1) () () ()
+^entry():
+n = const.i64 0
+first = qreg.new any n
+second = qreg.new any n
+view = qreg.concat first second
+q = qreg.new any 1
+r = measure q
+qreg.free view
+ret r

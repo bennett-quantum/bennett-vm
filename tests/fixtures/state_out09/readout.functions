@@ -1,0 +1,44 @@
+action @prepare (q:wire[2] mut, t:wire mut, image:wire[68] mut) () () () ()
+^entry():
+x q[1]
+h q[0]
+s q[0]
+x t
+h t
+x image[0]
+x image[67]
+fn cc @sample () (r:i2) () () ()
+^entry():
+q = qreg.new any 2
+t = qreg.new any 1
+image = qreg.new any 68
+zero = qreg.new any 1
+action_call @prepare (q, t, image) () () ()
+r = measure.i2 q
+s = measure t
+v = measure image
+z = measure zero
+ret r
+fn cc @unmeasured () () () () ()
+^entry():
+q = qreg.new any 1
+qreg.free q
+ret
+fn cc @views () (r:i2) () () ()
+^entry():
+a = qreg.new any 1
+b = qreg.new any 1
+ab = qreg.concat a b
+r = measure.i2 ab
+ret r
+fn cc @skipped () (r:i2) () () ()
+^entry():
+no = const.i1 0
+br no ^unused() ^actual()
+^unused():
+q = qreg.new any 2
+r = measure.i2 q
+ret r
+^actual():
+r = call @sample
+ret r

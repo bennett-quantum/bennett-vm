@@ -9,6 +9,7 @@
 
 use crate::bigint::BigUint;
 use crate::exact::Exact;
+use crate::json::Json;
 use crate::object::{Function, Instr, Object};
 use crate::persistent::Seq;
 use crate::value::{Budget, Value};
@@ -59,6 +60,7 @@ pub struct QuantumState {
     peak: BTreeMap<String, usize>,
     dirty: BTreeSet<usize>,
     requests: Option<VecDeque<GateRequest>>,
+    pub(crate) state_output: StateOutput,
 }
 
 impl QuantumState {
@@ -80,6 +82,7 @@ impl QuantumState {
             peak: BTreeMap::new(),
             dirty: BTreeSet::new(),
             requests: None,
+            state_output: StateOutput::default(),
         }
     }
     pub fn wire_count(&self) -> usize {
@@ -304,8 +307,7 @@ impl QuantumState {
         ordered.sort_by_key(|(v, _)| (0..wires.len()).map(|i| v.bit(i)).collect::<Vec<_>>());
         let threshold = draw * total;
         let mut cumulative = 0.0;
-        let mut chosen = None;
-        for (index, (v, p)) in ordered.iter().enumerate() {
+        let chosen = ordered.iter().enumerate().find_map(|(index, (v, p))| {
             cumulative += **p;
             // Binary64 settles every comparison away from a tie; the exact
             // weights settle the rest.
@@ -316,11 +318,8 @@ impl QuantumState {
                 let outcomes = &ordered[..=index];
                 self.exact_weight_above_draw(wires, outcomes.iter().map(|(v, _)| *v), draw)
             };
-            if above {
-                chosen = Some((*v).clone());
-                break;
-            }
-        }
+            above.then_some(*v).cloned()
+        });
         // The last cumulative weight is the total, and draw < 1.
         let value = chosen
             .or_else(|| ordered.last().map(|(v, _)| (*v).clone()))
@@ -368,6 +367,209 @@ impl QuantumState {
         (value, bits)
     }
 }
+
+/// The representation fixes the engine label and the JSON component types.
+/// Exact amplitudes carry a numerator and its positive squared normalization;
+/// dense amplitudes carry binary64 real and imaginary components.
+/// Each exact JSON component is numerator / sqrt(normalization), where both
+/// arrays contain c * sqrt(2)^s * i^j * exp(i * phase) terms with rational c/phase.
+pub trait ReadoutAmplitude {
+    const ENGINE: &'static str;
+    fn components(self) -> Result<(Json, Json), String>;
+}
+
+impl ReadoutAmplitude for (Exact, Exact) {
+    const ENGINE: &'static str = "exact";
+    fn components(self) -> Result<(Json, Json), String> {
+        let (amplitude, normalization) = self;
+        let conjugate = amplitude.conj();
+        let real = amplitude.add(&conjugate).scale_pow2(-1);
+        let imaginary = amplitude
+            .add(&conjugate.neg())
+            .mul(&Exact::pair(0.0, -1.0))
+            .scale_pow2(-1);
+        let component = |numerator: Exact| {
+            Json::obj(vec![
+                ("numerator", readout_terms(&numerator)),
+                ("normalization", readout_terms(&normalization)),
+            ])
+        };
+        Ok((component(real), component(imaginary)))
+    }
+}
+
+impl ReadoutAmplitude for Amp {
+    const ENGINE: &'static str = "dense";
+    fn components(self) -> Result<(Json, Json), String> {
+        let (re, im) = self;
+        [re, im]
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some((Json::Num(re.to_string()), Json::Num(im.to_string())))
+            .ok_or("--state-out: engine returned a non-finite amplitude".into())
+    }
+}
+
+fn readout_dyadic((negative, magnitude, scale): (bool, &BigUint, usize)) -> Json {
+    let (numerator, denominator) =
+        crate::rational::Rational::from_dyadic(negative, magnitude.clone(), scale).fraction();
+    let fraction = format!("{numerator}/{denominator}");
+    Json::Str(fraction.strip_suffix("/1").unwrap_or(&fraction).to_owned())
+}
+
+fn readout_terms(value: &Exact) -> Json {
+    Json::Arr(
+        value
+            .terms()
+            .map(|(coefficient, sqrt2, imaginary, phase)| {
+                Json::obj(vec![
+                    ("coefficient", readout_dyadic(coefficient)),
+                    ("sqrt2", Json::Bool(sqrt2)),
+                    ("imaginary", Json::Bool(imaginary)),
+                    ("phase", readout_dyadic(phase)),
+                ])
+            })
+            .collect(),
+    )
+}
+
+/// A quantum engine supplies its amplitude representation without changing state.
+pub trait QuantumReadout {
+    type Amplitude: ReadoutAmplitude;
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Self::Amplitude));
+}
+
+impl QuantumReadout for QuantumState {
+    type Amplitude = (Exact, Exact);
+    fn visit_amplitudes(&self, visit: &mut dyn FnMut(&BigUint, Self::Amplitude)) {
+        self.exact.iter().for_each(|(basis, amplitude)| {
+            let value = (amplitude.clone(), self.normalization.clone());
+            visit(basis, value);
+        });
+    }
+}
+
+/// Shared across execution checkpoints: restoring one cannot emit a second dump.
+/// No pending path means either output is disabled or it has already been written.
+#[derive(Clone, Debug, Default)]
+pub struct StateOutput {
+    pub(crate) pending: std::rc::Rc<std::cell::RefCell<Option<std::path::PathBuf>>>,
+}
+
+impl StateOutput {
+    /// Capture once, immediately before collapse. Bundles name original
+    /// allocations in their creation order, including zero-width allocations.
+    pub fn capture<'a>(
+        &self,
+        engine: &impl QuantumReadout,
+        bundles: impl Iterator<Item = &'a [usize]>,
+    ) -> Result<(), String> {
+        let mut pending = self.pending.borrow_mut();
+        let Some(path) = &*pending else {
+            return Ok(());
+        };
+        let state = state_readout(engine, bundles)?;
+        std::fs::write(path, state.to_jcs())
+            .map_err(|e| format!("--state-out {}: {e}", path.display()))?;
+        *pending = None;
+        Ok(())
+    }
+}
+
+fn state_readout<'a, E: QuantumReadout>(
+    engine: &E,
+    bundles: impl Iterator<Item = &'a [usize]>,
+) -> Result<Json, String> {
+    let registers: Vec<_> = bundles.collect();
+    let amplitudes = readout_amplitudes(engine)?;
+    let constant = registers
+        .iter()
+        .enumerate()
+        .filter_map(|(reg, wires)| {
+            readout_constant(wires, &amplitudes).map(|value| (reg.to_string(), value))
+        })
+        .collect();
+    let rows = amplitudes
+        .into_iter()
+        .map(|(basis, amp)| readout_row(&registers, &constant, basis, amp))
+        .collect();
+    Ok(Json::obj(vec![
+        ("engine", Json::Str(E::Amplitude::ENGINE.into())),
+        ("registers", readout_metadata(&registers)),
+        ("constant", Json::Obj(constant)),
+        ("amps", Json::Arr(rows)),
+    ]))
+}
+
+type ReadoutRow = (BigUint, (Json, Json));
+
+fn readout_amplitudes<E: QuantumReadout>(engine: &E) -> Result<Vec<ReadoutRow>, String> {
+    let mut amplitudes = Vec::new();
+    engine.visit_amplitudes(&mut |basis, value| {
+        amplitudes.push(value.components().map(|value| (basis.clone(), value)));
+    });
+    let mut amplitudes = amplitudes.into_iter().collect::<Result<Vec<_>, _>>()?;
+    amplitudes
+        .first()
+        .ok_or("--state-out: engine returned an empty quantum state")?;
+    amplitudes.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(amplitudes)
+}
+
+// Keep ordinary integer registers in basis rows. Wide fixed images use byte hex
+// so the consumer need not parse enormous decimal integers.
+fn readout_constant(wires: &[usize], amplitudes: &[ReadoutRow]) -> Option<Json> {
+    let value = QuantumState::extract(&amplitudes[0].0, wires);
+    let fixed = Some(value)
+        .filter(|_| wires.len() > u64::BITS as usize)
+        .filter(|value| {
+            amplitudes
+                .iter()
+                .all(|(basis, _)| QuantumState::extract(basis, wires) == *value)
+        });
+    let value = fixed?;
+    let bytes: Vec<u8> = (0..wires.len().div_ceil(8))
+        .map(|byte| (0..8).fold(0, |v, bit| v | (u8::from(value.bit(byte * 8 + bit)) << bit)))
+        .collect();
+    Some(Json::Str(crate::sha256::to_hex(&bytes)))
+}
+
+fn readout_row(
+    registers: &[&[usize]],
+    constant: &BTreeMap<String, Json>,
+    basis: BigUint,
+    (re, im): (Json, Json),
+) -> Json {
+    let values = registers
+        .iter()
+        .enumerate()
+        .filter(|(reg, _)| !constant.contains_key(&reg.to_string()))
+        .map(|(reg, wires)| {
+            let value = QuantumState::extract(&basis, wires).to_decimal();
+            (reg.to_string(), Json::Str(value))
+        })
+        .collect();
+    Json::obj(vec![("basis", Json::Obj(values)), ("re", re), ("im", im)])
+}
+
+fn readout_metadata(registers: &[&[usize]]) -> Json {
+    Json::Arr(
+        registers
+            .iter()
+            .enumerate()
+            .map(|(reg, wires)| {
+                Json::obj(vec![
+                    ("reg", Json::u64(reg as u64)),
+                    ("width", Json::u64(wires.len() as u64)),
+                ])
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+#[path = "../tests/state_out09.rs"]
+mod state_out09;
 
 /// How far from a tie, relative to the total weight, binary64 Born weights
 /// decide a draw. Far above their rounding error, far below any exact gap the

@@ -105,6 +105,24 @@ impl Dyad {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Exact(BTreeMap<(Dyad, bool, bool), Dyad>);
 impl Exact {
+    /// Lossless terms in their stable stored order: coefficient, sqrt(2) flag,
+    /// imaginary-unit flag, phase. Each dyadic is (negative, magnitude, scale)
+    /// and denotes (-1)^negative * magnitude / 2^scale.
+    pub fn terms(
+        &self,
+    ) -> impl Iterator<Item = ((bool, &BigUint, usize), bool, bool, (bool, &BigUint, usize))> {
+        self.0
+            .iter()
+            .map(|((phase, sqrt2, imaginary), coefficient)| {
+                (
+                    (coefficient.neg, &coefficient.mag, coefficient.scale),
+                    *sqrt2,
+                    *imaginary,
+                    (phase.neg, &phase.mag, phase.scale),
+                )
+            })
+    }
+
     pub fn zero() -> Self {
         Self::default()
     }

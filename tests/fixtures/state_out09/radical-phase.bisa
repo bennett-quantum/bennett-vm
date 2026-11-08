@@ -1,0 +1,16 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"0fb6f365ba3994f7d9af90c9fff686ad28c35803b6b92661ee52a317f2b4f7e0","kind":"action","name":"prepare","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"action","mem":[],"mut":[1],"tier":"q"}},"1":{"interface_hash":"cb4caa16881de9df1aaf375b624cad1a0546ae7ff2ef993c375dde33e2e9f390","kind":"cc","name":"sample","signature":{"abi":"0.9","kind":"cc","params":[],"results":["i1"],"tier":"cc"}}}
+
+section functions
+action @prepare (q:wire mut) () () () ()
+^entry():
+h q
+s q
+fn cc @sample () (r:i1) () () ()
+^entry():
+q = qreg.new any 1
+action_call @prepare (q) () () ()
+r = measure q
+ret r

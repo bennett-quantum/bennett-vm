@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, HashMap},
     sync::{Arc, OnceLock},
 };
 
@@ -42,7 +42,7 @@ struct Node {
     inlined: bool,
     ins: Instr,
     // (canonical successor, private node). A miss always dispatches canonically.
-    edges: Vec<(usize, usize)>,
+    edges: HashMap<usize, usize>,
 }
 static NATIVE_ROWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static NATIVE_ARITHMETIC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -67,7 +67,9 @@ pub fn native_binop(op: &str, a: u64, b: u64, width: usize) -> Result<u64, Strin
     native::arithmetic(op, a, b, width)
 }
 pub struct Program {
-    keys: BTreeMap<(String, usize, usize), usize>,
+    functions: HashMap<String, usize>,
+    rows: Vec<Vec<Vec<usize>>>,
+    canonical: Vec<usize>,
     nodes: Vec<Node>,
     stats: Stats,
     native: Option<native::Code>,
@@ -121,9 +123,7 @@ fn read_selection() -> Result<Option<(Passes, bool)>, String> {
         "optimised" => Some((Passes::all(), false)),
         "jit" => Some((Passes::all(), true)),
         _ => {
-            return Err(format!(
-                "unimplemented: execution engine {mode}"
-            ));
+            return Err(format!("unimplemented: execution engine {mode}"));
         }
     })
 }
@@ -156,7 +156,10 @@ pub fn for_object(obj: &Object) -> Result<Option<Arc<Program>>, String> {
             return Ok(Some(entry.program.clone()));
         }
         let p = Arc::new(Program::compile(obj, passes, native)?);
-        *cache.borrow_mut() = Some(CachedProgram { key, program: p.clone() });
+        *cache.borrow_mut() = Some(CachedProgram {
+            key,
+            program: p.clone(),
+        });
         Ok(Some(p))
     })
 }
@@ -202,20 +205,43 @@ impl Program {
         &self.stats
     }
     pub fn row(&self, function: &str, block: usize, index: usize) -> Result<usize, String> {
-        self.keys
-            .get(&(function.into(), block, index))
-            .copied()
-            .ok_or_else(|| format!("§5.7: no compiled row @{function}/{block}/{index}"))
+        let Some(&function_index) = self.functions.get(function) else {
+            return Err(format!("§5.7: no compiled function @{function}"));
+        };
+        self.row_at(function_index, block, index)
+    }
+    pub(crate) fn row_at(
+        &self,
+        function: usize,
+        block: usize,
+        index: usize,
+    ) -> Result<usize, String> {
+        let Some(&row) = self
+            .rows
+            .get(function)
+            .and_then(|f| f.get(block))
+            .and_then(|b| b.get(index))
+        else {
+            return Err(format!("§5.7: no compiled row {function}/{block}/{index}"));
+        };
+        Ok(row)
     }
     pub fn compile(obj: &Object, passes: Passes, host: bool) -> Result<Self, String> {
         let mut p = Self {
-            keys: BTreeMap::new(),
+            functions: obj
+                .functions
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (f.name.clone(), i))
+                .collect(),
+            rows: vec![vec![]; obj.functions.len()],
+            canonical: vec![],
             nodes: vec![],
             stats: Stats::default(),
             native: None,
         };
         let mut ranges = BTreeMap::new();
-        for f in &obj.functions {
+        for (fi, f) in obj.functions.iter().enumerate() {
             if !matches!(
                 f.kind,
                 FnKind::Cc | FnKind::R | FnKind::Oracle | FnKind::Lproc
@@ -223,20 +249,26 @@ impl Program {
                 continue;
             }
             let start = p.nodes.len();
+            p.rows[fi] = f
+                .blocks
+                .iter()
+                .map(|b| Vec::with_capacity(b.instrs.len()))
+                .collect();
             for (b, block) in f.blocks.iter().enumerate() {
-                for (i, ins) in block.instrs.iter().enumerate() {
+                for ins in &block.instrs {
                     let id = p.nodes.len();
-                    p.keys.insert((f.name.clone(), b, i), id);
+                    p.rows[fi][b].push(id);
                     p.nodes.push(Node {
                         source: id,
                         inlined: false,
                         ins: ins.clone(),
-                        edges: vec![],
+                        edges: HashMap::new(),
                     });
                 }
             }
             ranges.insert(f.name.clone(), start..p.nodes.len());
         }
+        let canonical_count = p.nodes.len();
         // Recover CFG continuations, including both arms and bounded/irreducible
         // cycles. Dynamic returns/jumpr retain the canonical dispatch escape.
         if passes.structure || passes.inline {
@@ -293,78 +325,22 @@ impl Program {
                 let mut clones = p.nodes[range.clone()].to_vec();
                 for node in &mut clones {
                     node.inlined = true;
-                    node.edges.retain(|(_, target)| range.contains(target));
-                    for (_, target) in &mut node.edges {
+                    node.edges.retain(|_, target| range.contains(target));
+                    for target in node.edges.values_mut() {
                         *target = offset + *target - range.start;
                     }
                     if matches!(node.ins.op.as_str(), "ret" | "lift.ret") && id + 1 < original {
-                        node.edges.push((id + 1, id + 1));
+                        node.edges.insert(id + 1, id + 1);
                     }
                 }
                 p.stats.inlined_rows += clones.len();
                 p.nodes.extend(clones);
-                p.nodes[id]
-                    .edges
-                    .retain(|(source, _)| *source != range.start);
-                p.nodes[id].edges.push((range.start, offset));
+                p.nodes[id].edges.retain(|source, _| *source != range.start);
+                p.nodes[id].edges.insert(range.start, offset);
             }
         }
         if passes.simplify {
-            for f in &obj.functions {
-                if !ranges.contains_key(&f.name) {
-                    continue;
-                }
-                for (b, block) in f.blocks.iter().enumerate() {
-                    let mut known: BTreeMap<String, (usize, BigUint)> = BTreeMap::new();
-                    for (i, ins) in block.instrs.iter().enumerate() {
-                        let base = ins.op.strip_prefix("lift.").unwrap_or(&ins.op);
-                        let folded = if let Some(w) = base.strip_prefix("const.i") {
-                            let w = w.parse::<usize>().map_err(|e| e.to_string())?;
-                            Some((w, crate::oracle::parse_const(&ins.operands[0], w)?))
-                        } else if matches!(
-                            base,
-                            "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr"
-                        ) {
-                            match (known.get(&ins.operands[0]), known.get(&ins.operands[1])) {
-                                (Some((w, a)), Some((v, b))) if w == v => {
-                                    Some((*w, value::binop(base, a, b, *w)?))
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        };
-                        // Calls can overwrite any lifted location via activation
-                        // aliasing; parmov reads all old sources before writes.
-                        if matches!(base, "call" | "oracle_call" | "oracle_uncall" | "perm_call") {
-                            known.clear();
-                        }
-                        for name in &ins.lhs {
-                            known.remove(name);
-                        }
-                        if ins.lhs.len() == 1
-                            && let Some((w, value)) = folded
-                        {
-                            known.insert(ins.lhs[0].clone(), (w, value.clone()));
-                            if !base.starts_with("const.") {
-                                let source = p.row(&f.name, b, i)?;
-                                for node in p.nodes.iter_mut().filter(|n| n.source == source) {
-                                    node.ins.op = format!(
-                                        "{}const.i{w}",
-                                        if ins.op.starts_with("lift.") {
-                                            "lift."
-                                        } else {
-                                            ""
-                                        }
-                                    ).into();
-                                    node.ins.operands = vec![value.to_decimal()];
-                                }
-                                p.stats.simplified_rows += 1;
-                            }
-                        }
-                    }
-                }
-            }
+            p.simplify(obj, &ranges)?;
         }
         if passes.reindex {
             // Private indices deliberately oppose canonical text order. Source
@@ -372,16 +348,104 @@ impl Program {
             let n = p.nodes.len();
             p.nodes.reverse();
             for node in &mut p.nodes {
-                for (_, target) in &mut node.edges {
+                for target in node.edges.values_mut() {
                     *target = n - 1 - *target;
                 }
             }
             p.stats.reindexed_rows = n;
         }
+        p.canonical = canonical_dispatch(&p.nodes, canonical_count);
         if host {
-            p.native = Some(native::Code::compile(&p.nodes, p.keys.len())?);
+            p.native = Some(native::Code::compile(&p.nodes)?);
         }
         Ok(p)
+    }
+    fn simplify(
+        &mut self,
+        obj: &Object,
+        ranges: &BTreeMap<String, std::ops::Range<usize>>,
+    ) -> Result<(), String> {
+        for f in &obj.functions {
+            if !ranges.contains_key(&f.name) {
+                continue;
+            }
+            for (b, block) in f.blocks.iter().enumerate() {
+                let mut known: BTreeMap<String, (usize, BigUint)> = BTreeMap::new();
+                for (i, ins) in block.instrs.iter().enumerate() {
+                    let base = ins.op.strip_prefix("lift.").unwrap_or(&ins.op);
+                    let folded = if let Some(w) = base.strip_prefix("const.i") {
+                        let w = w.parse::<usize>().map_err(|e| e.to_string())?;
+                        Some((w, crate::oracle::parse_const(&ins.operands[0], w)?))
+                    } else if matches!(
+                        base,
+                        "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr"
+                    ) {
+                        match (known.get(&ins.operands[0]), known.get(&ins.operands[1])) {
+                            (Some((w, a)), Some((v, b))) if w == v => {
+                                Some((*w, value::binop(base, a, b, *w)?))
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    // Calls can overwrite any lifted location via activation
+                    // aliasing; parmov reads all old sources before writes.
+                    if matches!(base, "call" | "oracle_call" | "oracle_uncall" | "perm_call") {
+                        known.clear();
+                    }
+                    for name in &ins.lhs {
+                        known.remove(name);
+                    }
+                    if ins.lhs.len() == 1
+                        && let Some((w, value)) = folded
+                    {
+                        known.insert(ins.lhs[0].clone(), (w, value.clone()));
+                        if !base.starts_with("const.") {
+                            let source = self.row(&f.name, b, i)?;
+                            for node in self.nodes.iter_mut().filter(|n| n.source == source) {
+                                node.ins.op = format!(
+                                    "{}const.i{w}",
+                                    if ins.op.starts_with("lift.") {
+                                        "lift."
+                                    } else {
+                                        ""
+                                    }
+                                )
+                                .into();
+                                node.ins.operands = vec![value.to_decimal()];
+                            }
+                            self.stats.simplified_rows += 1;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn step(
+        &self,
+        start: usize,
+        mut step: impl FnMut(&Instr) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let index = self.entry(start)?;
+        if let Some(code) = &self.native {
+            NATIVE_RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return code.run(index, &self.nodes, &self.canonical, &mut |_, ins| {
+                NATIVE_ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                step(ins)?;
+                Ok(None)
+            });
+        }
+        step(&self.nodes[index].ins)
+    }
+    fn entry(&self, start: usize) -> Result<usize, String> {
+        #[cfg(test)]
+        crate::step_scaling::dispatch_probe();
+        self.canonical
+            .get(start)
+            .copied()
+            .ok_or_else(|| "§5.7: compiled entry outside dispatch".into())
     }
     /// Callback executes one reference-row boundary and returns its canonical
     /// successor, or None to yield/halt. Every error and panic is transported
@@ -391,39 +455,46 @@ impl Program {
         start: usize,
         mut step: impl FnMut(usize, &Instr) -> Result<Option<usize>, String>,
     ) -> Result<(), String> {
-        if start >= self.keys.len() {
-            return Err("§5.7: compiled entry outside dispatch".into());
-        }
+        let mut index = self.entry(start)?;
         if let Some(code) = &self.native {
             NATIVE_RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return code.run(start, &self.nodes, &mut |id, ins| {
+            return code.run(index, &self.nodes, &self.canonical, &mut |id, ins| {
                 NATIVE_ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 step(id, ins)
             });
         }
-        let mut defaults = vec![usize::MAX; self.keys.len()];
-        for (i, n) in self.nodes.iter().enumerate() {
-            if !n.inlined {
-                defaults[n.source] = i;
-            }
-        }
-        let mut index = defaults[start];
         loop {
-            let n = &self.nodes[index];
-            let Some(next) = step(n.source, &n.ins)? else {
+            let node = &self.nodes[index];
+            let Some(next) = step(node.source, &node.ins)? else {
                 return Ok(());
             };
-            if next >= defaults.len() {
-                return Err("§5.7: successor outside dispatch".into());
-            }
-            index = n
-                .edges
-                .iter()
-                .find(|(source, _)| *source == next)
-                .map(|(_, i)| *i)
-                .unwrap_or(defaults[next]);
+            index = successor(node, next, &self.canonical)?;
         }
     }
+}
+
+fn canonical_dispatch(nodes: &[Node], canonical_count: usize) -> Vec<usize> {
+    let mut canonical = vec![usize::MAX; canonical_count];
+    for (index, node) in nodes.iter().enumerate() {
+        #[cfg(test)]
+        crate::step_scaling::dispatch_initialization_visit();
+        if !node.inlined {
+            canonical[node.source] = index;
+        }
+    }
+    assert!(canonical.iter().all(|index| *index != usize::MAX));
+    canonical
+}
+
+fn successor(node: &Node, next: usize, canonical: &[usize]) -> Result<usize, String> {
+    #[cfg(test)]
+    crate::step_scaling::dispatch_probe();
+    let default = canonical
+        .get(next)
+        .ok_or("§5.7: successor outside dispatch")?;
+    #[cfg(test)]
+    crate::step_scaling::dispatch_probe();
+    Ok(node.edges.get(&next).copied().unwrap_or(*default))
 }
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -448,6 +519,7 @@ mod native {
     pub struct Code {
         ptr: *mut c_void,
         len: usize,
+        entries: Vec<usize>,
     }
     // Mapping is immutable RX after construction; no pointer into a runtime is
     // embedded. All invocations own their context on the invoking thread.
@@ -534,9 +606,7 @@ mod native {
                         ]);
                     }
                     _ => {
-                        return Err(format!(
-                            "unimplemented: native integer kernel {op}"
-                        ));
+                        return Err(format!("unimplemented: native integer kernel {op}"));
                     }
                 }
                 a.emit(&[0x48, 0x83, 0xfa, 0x40]); // width == 64: avoid x86 masked shift
@@ -580,62 +650,51 @@ mod native {
                 }
                 return Err(format!("§5.7: JIT mprotect RX: {error}"));
             }
-            Ok(Self { ptr, len })
+            Ok(Self {
+                ptr,
+                len,
+                entries: vec![],
+            })
         }
-        pub fn compile(nodes: &[Node], canonical_count: usize) -> Result<Self, String> {
-            // SysV fn(context:rdi, helper:rsi, start:rdx). r12/r13 survive
+        pub fn compile(nodes: &[Node]) -> Result<Self, String> {
+            // SysV fn(context:rdi, helper:rsi, entry:rdx). r12/r13 survive
             // helper calls; stack is 16-byte aligned at each call instruction.
-            let dispatch = nodes.len();
-            let exit = dispatch + 1;
+            let exit = nodes.len();
             let mut a = Asm {
                 bytes: vec![],
-                labels: vec![0; nodes.len() + 2],
+                labels: vec![0; nodes.len() + 1],
                 fixups: vec![],
             };
             a.emit(&[
                 0xf3, 0x0f, 0x1e, 0xfa, 0x41, 0x54, 0x41, 0x55, 0x48, 0x83, 0xec, 0x08, 0x49, 0x89,
-                0xfc, 0x49, 0x89, 0xf5, 0x48, 0x89, 0xd0,
+                0xfc, 0x49, 0x89, 0xf5, 0xff, 0xe2, // jmp rdx
             ]);
-            a.branch(&[0xe9], dispatch);
-            for (id, node) in nodes.iter().enumerate() {
+            for id in 0..nodes.len() {
                 a.label(id);
-                a.emit(&[0x4c, 0x89, 0xe7, 0x48, 0xbe]);
+                a.emit(&[0xf3, 0x0f, 0x1e, 0xfa, 0x4c, 0x89, 0xe7, 0x48, 0xbe]);
                 a.imm(id);
-                a.emit(&[0x41, 0xff, 0xd5]); // call r13
-                for (canonical, target) in &node.edges {
-                    a.emit(&[0x48, 0xb9]);
-                    a.imm(*canonical);
-                    a.emit(&[0x48, 0x39, 0xc8]);
-                    a.branch(&[0x0f, 0x84], *target);
-                }
-                a.branch(&[0xe9], dispatch);
+                a.emit(&[0x41, 0xff, 0xd5, 0x48, 0x85, 0xc0]); // call r13; test rax,rax
+                a.branch(&[0x0f, 0x84], exit);
+                a.emit(&[0xff, 0xe0]); // jmp rax: validated compiled row entry
             }
-            a.label(dispatch);
-            // Deterministic canonical dispatch. Linear comparisons are baseline
-            // codegen; recovered edges bypass this even for cyclic control flow.
-            let mut seen = BTreeSet::new();
-            for (id, n) in nodes.iter().enumerate() {
-                if n.inlined || !seen.insert(n.source) {
-                    continue;
-                }
-                a.emit(&[0x48, 0xb9]);
-                a.imm(n.source);
-                a.emit(&[0x48, 0x39, 0xc8]);
-                a.branch(&[0x0f, 0x84], id);
-            }
-            assert_eq!(seen.len(), canonical_count);
             a.label(exit);
             a.emit(&[0x48, 0x83, 0xc4, 0x08, 0x41, 0x5d, 0x41, 0x5c, 0xc3]);
-            Self::allocate(&a.finish()?)
+            let entries = a.labels[..nodes.len()].to_vec();
+            let mut code = Self::allocate(&a.finish()?)?;
+            code.entries = entries;
+            Ok(code)
         }
-        pub fn run(
+        pub fn run<F: FnMut(usize, &Instr) -> Result<Option<usize>, String>>(
             &self,
             start: usize,
             nodes: &[Node],
-            step: &mut impl FnMut(usize, &Instr) -> Result<Option<usize>, String>,
+            canonical: &[usize],
+            step: &mut F,
         ) -> Result<(), String> {
             struct Context<'a, F> {
+                code: &'a Code,
                 nodes: &'a [Node],
+                canonical: &'a [usize],
                 step: &'a mut F,
                 error: Option<String>,
                 panic: Option<Box<dyn std::any::Any + Send>>,
@@ -646,56 +705,55 @@ mod native {
                 ctx: *mut c_void,
                 id: usize,
             ) -> usize {
-                // Only generated node immediates reach this helper.
                 let ctx = unsafe { &mut *ctx.cast::<Context<'_, F>>() };
                 let node = &ctx.nodes[id];
-                match catch_unwind(AssertUnwindSafe(|| (ctx.step)(node.source, &node.ins))) {
-                    Ok(Ok(Some(next))) if ctx.nodes.iter().any(|n| n.source == next) => next,
-                    Ok(Ok(Some(_))) => {
-                        ctx.error = Some("§5.7: successor outside dispatch".into());
-                        usize::MAX
-                    }
-                    Ok(Ok(None)) => usize::MAX,
-                    Ok(Err(e)) => {
-                        ctx.error = Some(e);
-                        usize::MAX
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    let Some(next) = (ctx.step)(node.source, &node.ins)? else {
+                        return Ok(None);
+                    };
+                    successor(node, next, ctx.canonical).map(Some)
+                }));
+                match result {
+                    Ok(Ok(Some(index))) => ctx.code.ptr as usize + ctx.code.entries[index],
+                    Ok(Ok(None)) => 0,
+                    Ok(Err(error)) => {
+                        ctx.error = Some(error);
+                        0
                     }
                     Err(panic) => {
                         ctx.panic = Some(panic);
-                        usize::MAX
+                        0
                     }
                 }
             }
-            fn call<F: FnMut(usize, &Instr) -> Result<Option<usize>, String>>(
-                code: &Code,
-                start: usize,
-                nodes: &[Node],
-                step: &mut F,
-            ) -> Result<(), String> {
-                let mut ctx = Context {
-                    nodes,
-                    step,
-                    error: None,
-                    panic: None,
-                };
-                type Entry = unsafe extern "C" fn(
-                    *mut c_void,
-                    unsafe extern "C" fn(*mut c_void, usize) -> usize,
-                    usize,
+            let mut ctx = Context {
+                code: self,
+                nodes,
+                canonical,
+                step,
+                error: None,
+                panic: None,
+            };
+            type Entry = unsafe extern "C" fn(
+                *mut c_void,
+                unsafe extern "C" fn(*mut c_void, usize) -> usize,
+                usize,
+            );
+            let entry: Entry = unsafe { std::mem::transmute(self.ptr) };
+            unsafe {
+                entry(
+                    (&mut ctx as *mut Context<'_, F>).cast(),
+                    helper::<F>,
+                    self.ptr as usize + self.entries[start],
                 );
-                let entry: Entry = unsafe { std::mem::transmute(code.ptr) };
-                unsafe {
-                    entry((&mut ctx as *mut Context<'_, F>).cast(), helper::<F>, start);
-                }
-                if let Some(panic) = ctx.panic {
-                    resume_unwind(panic);
-                }
-                if let Some(error) = ctx.error {
-                    return Err(error);
-                }
-                Ok(())
             }
-            call(self, start, nodes, step)
+            if let Some(panic) = ctx.panic {
+                resume_unwind(panic);
+            }
+            if let Some(error) = ctx.error {
+                return Err(error);
+            }
+            Ok(())
         }
     }
 }
@@ -707,13 +765,14 @@ mod native {
         Err("unimplemented: JIT host arithmetic for this host".into())
     }
     impl Code {
-        pub fn compile(_: &[Node], _: usize) -> Result<Self, String> {
+        pub fn compile(_: &[Node]) -> Result<Self, String> {
             Err("unimplemented: JIT host codegen for this host".into())
         }
         pub fn run(
             &self,
             _: usize,
             _: &[Node],
+            _: &[usize],
             _: &mut impl FnMut(usize, &Instr) -> Result<Option<usize>, String>,
         ) -> Result<(), String> {
             unreachable!("unsupported host rejected at compilation")

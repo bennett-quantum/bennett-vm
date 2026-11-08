@@ -13,6 +13,61 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Indices belong to an installed executable, after any private expansion.
+/// Keeping them separate leaves the public, mutable object representation intact.
+pub(crate) struct ExecutionIndex {
+    pub functions: std::collections::HashMap<String, usize>,
+    pub bodies: Vec<FunctionIndex>,
+}
+pub(crate) struct FunctionIndex {
+    pub blocks: std::collections::HashMap<String, usize>,
+    pub operands: Vec<Vec<Vec<String>>>,
+}
+
+impl ExecutionIndex {
+    pub fn new(object: &Object) -> Self {
+        Self {
+            functions: object
+                .functions
+                .iter()
+                .enumerate()
+                .map(|(index, function)| (function.name.clone(), index))
+                .collect(),
+            bodies: object.functions.iter().map(FunctionIndex::new).collect(),
+        }
+    }
+}
+impl FunctionIndex {
+    fn new(function: &crate::object::Function) -> Self {
+        Self {
+            blocks: function
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(index, block)| (block.name.clone(), index))
+                .collect(),
+            operands: function
+                .blocks
+                .iter()
+                .map(|block| block.instrs.iter().map(resource_operands).collect())
+                .collect(),
+        }
+    }
+}
+
+fn resource_operands(ins: &Instr) -> Vec<String> {
+    ins.operands
+        .iter()
+        .flat_map(|text| {
+            text.split(|c: char| match c {
+                '_' | '.' | '%' => false,
+                _ => !c.is_ascii_alphanumeric(),
+            })
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 type Key = (u64, String);
 // Entry arguments use row zero. Executed definitions use their retained
 // history row and position within that row, independent of later cancellation.
@@ -56,6 +111,7 @@ struct Data {
 struct Activation {
     id: u64,
     function: String,
+    function_index: usize,
     block: usize,
     index: usize,
     dest: Vec<String>,
@@ -101,6 +157,7 @@ use trace::TraceLog;
 #[derive(Clone)]
 struct Machine {
     program: Option<std::sync::Arc<crate::jit::Program>>,
+    indices: std::sync::Arc<ExecutionIndex>,
     quantum: QuantumState,
     quantum_events: Seq<Invocation>,
     pending_region: Option<Invocation>,
@@ -610,11 +667,8 @@ impl Machine {
     fn step(&mut self) -> Result<(), String> {
         if let Some(p) = self.program.clone() {
             let a = self.stack.last().unwrap();
-            let start = p.row(&a.function, a.block, a.index)?;
-            p.run(start, |_, ins| {
-                self.step_row(Some(ins))?;
-                Ok(None)
-            })
+            let start = p.row_at(a.function_index, a.block, a.index)?;
+            p.step(start, |ins| self.step_row(Some(ins)))
         } else {
             self.step_row(None)
         }
@@ -623,7 +677,7 @@ impl Machine {
         let p = self.program.clone();
         if let Some(p) = p {
             let a = self.stack.last().unwrap();
-            let start = p.row(&a.function, a.block, a.index)?;
+            let start = p.row_at(a.function_index, a.block, a.index)?;
             p.run(start, |_, ins| {
                 if limit.is_some_and(|n| self.steps >= n) {
                     return Ok(None);
@@ -637,7 +691,7 @@ impl Machine {
                 }
                 self.stack
                     .last()
-                    .map(|a| p.row(&a.function, a.block, a.index))
+                    .map(|a| p.row_at(a.function_index, a.block, a.index))
                     .transpose()
             })
         } else {
@@ -657,10 +711,10 @@ impl Machine {
         // Replay rejection is a diagnostic before this effect commits, including
         // its control advance and any target classical-step accounting.
         let activation = self.stack.last().unwrap();
-        let row = effective.unwrap_or(
-            &self.obj.function(&activation.function).unwrap().blocks[activation.block].instrs
-                [activation.index],
-        );
+        let row = effective.unwrap_or_else(|| {
+            &self.obj.functions[activation.function_index].blocks[activation.block].instrs
+                [activation.index]
+        });
         let checkpoint =
             (self.effects.replay.is_some() && row.op == "effect").then(|| self.clone());
         let result = self.step_row_inner(effective);
@@ -675,7 +729,7 @@ impl Machine {
     fn step_row_inner(&mut self, effective: Option<&Instr>) -> Result<(), String> {
         let a = self.stack.last().unwrap().clone();
         let obj = self.obj.clone();
-        let f = obj.function(&a.function).unwrap();
+        let f = &obj.functions[a.function_index];
         let block = &f.blocks[a.block];
         let ins = block
             .instrs
@@ -911,8 +965,8 @@ impl Machine {
                 let args = crate::validate::list_operand(&format!("({rest}"))?;
                 let values = get!(self.operands(&args));
                 let a = self.stack.last().unwrap();
-                let f = obj.function(&a.function).unwrap();
-                let bi = f.blocks.iter().position(|b| b.name == label).unwrap();
+                let f = &obj.functions[a.function_index];
+                let bi = self.indices.bodies[a.function_index].blocks[label];
                 get!(self.transfer(&values, &f.blocks[bi].params));
                 for (p, v) in f.blocks[bi].params.iter().zip(values) {
                     self.define(&p.name, v);
@@ -923,9 +977,12 @@ impl Machine {
             }
             "call" => {
                 let name = xs[0].trim_start_matches('@');
-                let f = obj
-                    .function(name)
+                let function_index = *self
+                    .indices
+                    .functions
+                    .get(name)
                     .ok_or_else(|| format!("unimplemented: unresolved call @{name}"))?;
+                let f = &obj.functions[function_index];
                 let values = get!(self.operands(&xs[1..]));
                 get!(self.transfer(&values, &f.lists[0]));
                 let id = self.next_activation;
@@ -936,6 +993,7 @@ impl Machine {
                 self.stack.push(Activation {
                     id,
                     function: name.into(),
+                    function_index,
                     block: 0,
                     index: 0,
                     dest: ins.lhs.clone(),
@@ -945,7 +1003,7 @@ impl Machine {
             }
             "ret" => {
                 let values = get!(self.operands(xs));
-                let function = obj.function(&self.stack.last().unwrap().function).unwrap();
+                let function = &obj.functions[self.stack.last().unwrap().function_index];
                 get!(self.transfer(&values, &function.lists[1]));
                 let a = self.stack.pop().unwrap();
                 if let Some(start) = a.call_start {
@@ -1707,7 +1765,10 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         .collect();
     let entry_data = data.clone();
     let entry_env = env.clone();
+    let indices = std::sync::Arc::new(ExecutionIndex::new(&obj));
+    let function_index = indices.functions[name];
     let mut m = Machine {
+        indices,
         program: crate::jit::for_object(&obj)?,
         quantum,
         quantum_events: Seq::new(),
@@ -1719,6 +1780,7 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
         stack: vec![Activation {
             id: 0,
             function: name.into(),
+            function_index,
             block: 0,
             index: 0,
             dest: vec![],
@@ -2038,6 +2100,7 @@ impl ResourceKey {
 }
 #[derive(Clone)]
 pub(crate) struct Resources {
+    indices: std::sync::Arc<ExecutionIndex>,
     data: Data,
     quantum: QuantumState,
 }
@@ -2065,6 +2128,7 @@ impl Resources {
     }
     pub(crate) fn new(obj: &Object) -> Result<Self, String> {
         Ok(Self {
+            indices: std::sync::Arc::new(ExecutionIndex::new(obj)),
             data: Data::new(obj)?,
             quantum: QuantumState::new(),
         })
@@ -2113,7 +2177,8 @@ impl RuntimeRun {
         entropy: Vec<u8>,
     ) -> Result<Self, String> {
         let program = crate::jit::for_object(&obj)?;
-        let f = obj.function(name).unwrap();
+        let function_index = resources.indices.functions[name];
+        let f = &obj.functions[function_index];
         let env = f.lists[0]
             .iter()
             .zip(&args)
@@ -2126,6 +2191,7 @@ impl RuntimeRun {
             .collect();
         Ok(Self {
             machine: Machine {
+                indices: resources.indices.clone(),
                 program,
                 quantum: resources.quantum.clone(),
                 quantum_events: Seq::new(),
@@ -2137,6 +2203,7 @@ impl RuntimeRun {
                 stack: vec![Activation {
                     id: 0,
                     function: name.into(),
+                    function_index,
                     block: 0,
                     index: 0,
                     dest: vec![],
@@ -2244,7 +2311,7 @@ impl RuntimeRun {
     pub(crate) fn pending_register_lookup(&self) -> Option<u64> {
         let m = &self.machine;
         let a = m.stack.last()?;
-        let instruction = &m.obj.function(&a.function)?.blocks[a.block].instrs[a.index];
+        let instruction = &m.obj.functions[a.function_index].blocks[a.block].instrs[a.index];
         (instruction.op == "qreg.from_id")
             .then(|| m.number(&instruction.operands[0]).ok())
             .flatten()
@@ -2270,7 +2337,7 @@ impl RuntimeRun {
         let Some(a) = m.stack.last() else {
             return Ok((vec![], vec![]));
         };
-        let i = &m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index];
+        let i = &m.obj.functions[a.function_index].blocks[a.block].instrs[a.index];
         let mut memory = vec![];
         let bits = |operand: &str| {
             m.bits(operand).map_err(|code| {
@@ -2335,15 +2402,11 @@ impl RuntimeRun {
         {
             regs.push(id);
         }
-        for text in &i.operands {
-            for name in
-                text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c != '%')
-            {
-                if let Ok(Value::Qreg(id)) = m.read(name) {
-                    regs.push(id);
-                    if let Some(parent) = m.data.handles.get(&id).and_then(|h| h.parent) {
-                        regs.push(parent);
-                    }
+        for name in &m.indices.bodies[a.function_index].operands[a.block][a.index] {
+            if let Ok(Value::Qreg(id)) = m.read(name) {
+                regs.push(id);
+                if let Some(parent) = m.data.handles.get(&id).and_then(|h| h.parent) {
+                    regs.push(parent);
                 }
             }
         }
@@ -2377,7 +2440,7 @@ impl RuntimeRun {
     pub(crate) fn request(&self) -> Option<(String, Vec<u8>)> {
         let m = &self.machine;
         let a = m.stack.last()?;
-        let i = m.obj.function(&a.function)?.blocks[a.block]
+        let i = m.obj.functions[a.function_index].blocks[a.block]
             .instrs
             .get(a.index)?;
         if i.op != "hostcall" || m.reply_pos < m.replies.len() {
@@ -2406,7 +2469,7 @@ impl RuntimeRun {
     pub(crate) fn step(&mut self) -> Result<(), String> {
         let m = &mut self.machine;
         if let Some(a) = m.stack.last()
-            && is_measure(&m.obj.function(&a.function).unwrap().blocks[a.block].instrs[a.index].op)
+            && is_measure(&m.obj.functions[a.function_index].blocks[a.block].instrs[a.index].op)
         {
             use std::io::Read;
             let mut bs = [0u8; 8];

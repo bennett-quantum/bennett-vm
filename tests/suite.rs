@@ -30,6 +30,7 @@ mod measurement_exact09;
 mod memory_address09;
 mod memory_files;
 mod object09;
+mod opcodes;
 mod oracle_address09;
 mod oracle_cleanup09;
 #[path = "support/pins.rs"]
@@ -46,11 +47,10 @@ mod segment_instances09;
 mod source_address09;
 mod target_execution;
 mod targets;
-mod validation_order;
-mod opcodes;
 mod token_partitions09;
+mod validation_order;
 
-#[path = "support/source09.rs"]
-mod source09;
 #[path = "support/device.rs"]
 mod device_fixture;
+#[path = "support/source09.rs"]
+mod source09;

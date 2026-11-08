@@ -39,9 +39,11 @@ pub(crate) struct Completed<S> {
     end: usize,
     pub(crate) value: S,
 }
-enum LiveEdit {
-    Push(usize),
-    Pop(usize),
+enum SegmentEdit {
+    LivePush(usize),
+    LivePop(usize),
+    CancelledPush,
+    CancelledPop((usize, usize)),
 }
 struct Store<F, S> {
     frames: Chunks<F>,
@@ -51,7 +53,8 @@ struct Store<F, S> {
     measured: Vec<usize>,
     segments: Chunks<Completed<S>>,
     live: Vec<usize>,
-    live_edits: Vec<LiveEdit>,
+    segment_edits: Vec<SegmentEdit>,
+    cancelled: Vec<(usize, usize)>,
 }
 /// Cloning this descriptor shares the single writer's directory. Restoring a
 /// checkpoint must call restore before assigning the enclosing machine state.
@@ -62,7 +65,7 @@ pub(crate) struct History<F, S> {
     impure: usize,
     measured: usize,
     marks: usize,
-    live_edits: usize,
+    segment_edits: usize,
 }
 impl<F, S> Clone for History<F, S> {
     fn clone(&self) -> Self {
@@ -73,7 +76,7 @@ impl<F, S> Clone for History<F, S> {
             impure: self.impure,
             measured: self.measured,
             marks: self.marks,
-            live_edits: self.live_edits,
+            segment_edits: self.segment_edits,
         }
     }
 }
@@ -95,14 +98,15 @@ impl<F, S> History<F, S> {
                 measured: vec![],
                 segments: Chunks::new(),
                 live: vec![],
-                live_edits: vec![],
+                segment_edits: vec![],
+                cancelled: vec![],
             })),
             len: 0,
             segments: 0,
             impure: 0,
             measured: 0,
             marks: 0,
-            live_edits: 0,
+            segment_edits: 0,
         }
     }
     #[cfg(test)]
@@ -179,9 +183,9 @@ impl<F, S> History<F, S> {
         let index = store.segments.len;
         store.segments.push(Completed { start, end, value });
         store.live.push(index);
-        store.live_edits.push(LiveEdit::Push(index));
+        store.segment_edits.push(SegmentEdit::LivePush(index));
         self.segments = store.segments.len;
-        self.live_edits = store.live_edits.len();
+        self.segment_edits = store.segment_edits.len();
     }
     pub(crate) fn latest_segment(&self) -> Option<Rc<Completed<S>>> {
         let store = self.owner.borrow();
@@ -190,22 +194,40 @@ impl<F, S> History<F, S> {
     /// Cancelling an outer range also retires its completed nested segments.
     pub(crate) fn retire(&mut self, start: usize) {
         let mut store = self.owner.borrow_mut();
+        let segment = store.segments.get(
+            *store
+                .live
+                .last()
+                .expect("retire requires a completed segment"),
+        );
+        assert_eq!(segment.start, start);
         while store
             .live
             .last()
             .is_some_and(|i| store.segments.get(*i).end >= start)
         {
             let index = store.live.pop().unwrap();
-            store.live_edits.push(LiveEdit::Pop(index));
+            store.segment_edits.push(SegmentEdit::LivePop(index));
         }
-        self.live_edits = store.live_edits.len();
+        // Nested cancellations are absorbed by the enclosing cancellation.
+        // Distinct ranges stay sorted; each absorbed range is removed once.
+        while store.cancelled.last().is_some_and(|(_, end)| *end >= start) {
+            let range = store.cancelled.pop().unwrap();
+            assert!(range.1 <= segment.end);
+            store.segment_edits.push(SegmentEdit::CancelledPop(range));
+        }
+        store.cancelled.push((start, segment.end));
+        store.segment_edits.push(SegmentEdit::CancelledPush);
+        self.segment_edits = store.segment_edits.len();
     }
     pub(crate) fn cuts_cancelled_segment(&self, row: usize) -> bool {
         let store = self.owner.borrow();
-        (0..store.segments.len).any(|i| {
-            let segment = store.segments.get(i);
-            segment.start < row && row <= segment.end && store.reversed[segment.start]
-        })
+        let next = store.cancelled.partition_point(|(start, _)| {
+            #[cfg(test)]
+            crate::history_work::record(crate::history_work::Operation::IndexProbe, 1);
+            *start < row
+        });
+        next > 0 && row <= store.cancelled[next - 1].1
     }
     /// Roll back failed publication, including edits to earlier reversal marks
     /// and completed live segments. Only this owner's unpublished tail is cut.
@@ -215,10 +237,14 @@ impl<F, S> History<F, S> {
             let (row, old) = store.marks.pop().unwrap();
             store.reversed[row] = old;
         }
-        while store.live_edits.len() > self.live_edits {
-            match store.live_edits.pop().unwrap() {
-                LiveEdit::Push(index) => assert_eq!(store.live.pop(), Some(index)),
-                LiveEdit::Pop(index) => store.live.push(index),
+        while store.segment_edits.len() > self.segment_edits {
+            match store.segment_edits.pop().unwrap() {
+                SegmentEdit::LivePush(index) => assert_eq!(store.live.pop(), Some(index)),
+                SegmentEdit::LivePop(index) => store.live.push(index),
+                SegmentEdit::CancelledPush => {
+                    store.cancelled.pop().expect("cancelled interval edit");
+                }
+                SegmentEdit::CancelledPop(range) => store.cancelled.push(range),
             }
         }
         store.segments.truncate(self.segments);
@@ -247,13 +273,15 @@ impl<F, S> History<F, S> {
         // No rollback checkpoint spans an explicit tail rewind. Old journal
         // entries would refer to discarded row identities after re-execution.
         store.marks.clear();
-        store.live_edits.clear();
+        store.segment_edits.clear();
+        let cancelled_len = store.cancelled.partition_point(|(start, _)| *start < len);
+        store.cancelled.truncate(cancelled_len);
         self.len = len;
         self.segments = store.segments.len;
         self.impure = store.impure.len();
         self.measured = store.measured.len();
         self.marks = 0;
-        self.live_edits = 0;
+        self.segment_edits = 0;
     }
 }
 
@@ -293,6 +321,9 @@ mod tests {
         history.mark_reversed(1);
         history.retire(0);
         assert!(history.latest_segment().is_none());
+        assert!(history.cuts_cancelled_segment(2));
+        assert!(!history.cuts_cancelled_segment(0));
+        assert!(!history.cuts_cancelled_segment(4));
         history.push(4, false, true);
         let inner_checkpoint = history.clone();
         history.mark_reversed(0);
@@ -307,8 +338,34 @@ mod tests {
         assert_eq!(history.len(), 4);
         assert_eq!(history.latest_segment().unwrap().value, "outer");
         assert!(!history.reversed(1));
+        assert!(!history.cuts_cancelled_segment(2));
         assert!(!history.impure_from(0));
         assert!(!history.measured_in(0, 5));
+    }
+
+    #[test]
+    fn nested_cancellation_index_matches_all_retired_segment_ranges_after_rewind() {
+        let mut history = History::new();
+        for row in 0..8 {
+            history.push(row, true, false);
+        }
+        history.complete(2, 3, "inner");
+        history.retire(2);
+        history.complete(1, 5, "outer");
+        history.retire(1);
+        history.complete(6, 7, "later");
+        history.retire(6);
+        for row in 0..=8 {
+            let expected = [(2, 3), (1, 5), (6, 7)]
+                .iter()
+                .any(|(start, end)| *start < row && row <= *end);
+            assert_eq!(history.cuts_cancelled_segment(row), expected, "cut {row}");
+        }
+        history.truncate(6);
+        assert!(history.cuts_cancelled_segment(5));
+        assert!(!history.cuts_cancelled_segment(7));
+        history.truncate(1);
+        assert!(!history.cuts_cancelled_segment(2));
     }
 
     #[test]

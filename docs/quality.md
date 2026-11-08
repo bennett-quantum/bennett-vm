@@ -375,10 +375,10 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 5
     },
     "src/history.rs": {
-      "branch_mass": 48,
-      "max_lines": 28,
+      "branch_mass": 61,
+      "max_lines": 32,
       "over_100": 0,
-      "over_25": 2,
+      "over_25": 3,
       "over_300": 0,
       "trivial_wrappers": 6
     },

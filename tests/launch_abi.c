@@ -1,9 +1,15 @@
+/* This consumer exercises the separately named VM 0.8 compatibility entry. */
+#define bennett_estimate_run bennett_estimate_run_0_8
 #include "bennett_vm.h"
 #include <bennett_sched.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#undef bennett_estimate_run
+/* ISA 0.9 §10; the pinned public header still renders only launch 0.8. */
+bennett_status bennett_estimate_run(bennett_program_t*, const char*, bennett_token,
+ const char*, uint32_t, const uint8_t*, size_t, bennett_estimate_t**);
 /* Deciding §10 clauses, grouped by the API entry points exercised below:
  * load/unload/budget/qreg: "Tokens are scoped to the program and destroyed at
  * unload"; "bennett_unload with a run not CLOSED: E_INVALID_STATE"; budgets
@@ -173,7 +179,8 @@ int main(int argc, char** argv) {
     EQ(bennett_wait(p,rb,&result,&request),BENNETT_OK);EQ(bennett_result_get(result,0,&kind,&width,out,8),BENNETT_OK);assert(out[0]==1);
     EQ(bennett_run_close(p,rb),BENNETT_OK);bennett_result_free(result);bennett_args_free(a);
     /* §8.2/§10: no target/resolved request means no estimate; §13 needs producer coverage. */
-    bennett_estimate_t* estimate=(void*)1;EQ(bennett_estimate_run(p,"inc8",token,&estimate),BENNETT_E_TARGET);assert(!estimate&&strstr(bennett_last_error(),"unimplemented:"));
+    bennett_estimate_t* estimate=(void*)1;EQ(bennett_estimate_run_0_8(p,"inc8",token,&estimate),BENNETT_E_TARGET);assert(!estimate&&strstr(bennett_last_error(),"unimplemented:"));
+    estimate=(void*)1;EQ(bennett_estimate_run(p,"inc8",token,"forward",0,(const uint8_t*)"[]",2,&estimate),BENNETT_E_VERSION);assert(!estimate);
     EQ(bennett_estimate_nresources(NULL),0);EQ(bennett_estimate_get(NULL,0,NULL,NULL),BENNETT_E_ARG);assert(!bennett_estimate_certificate(NULL,&len)&&len==0);bennett_estimate_free(NULL);
     bennett_coverage_t* coverage=(void*)1;EQ(bennett_coverage_get(p,&coverage),BENNETT_E_TARGET);assert(!coverage&&strstr(bennett_last_error(),"unimplemented:"));assert(!bennett_coverage_jcs(NULL,&len)&&len==0);bennett_coverage_free(NULL);
     EQ(bennett_unload(p),BENNETT_OK);

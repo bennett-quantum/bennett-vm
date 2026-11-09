@@ -133,7 +133,10 @@ fn fixture() -> String {
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_launch_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tmp = repo.join(".tmp/c-abi");
+    let tmp = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join(".tmp"))
+        .join("c-abi");
     std::fs::create_dir_all(&tmp).unwrap();
     let object = tmp.join("launch.bisa");
     std::fs::write(&object, fixture()).unwrap();
@@ -183,7 +186,10 @@ fn c11_launch_contract() {
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_sched_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tmp = repo.join(".tmp/sched-abi");
+    let tmp = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join(".tmp"))
+        .join("sched-abi");
     std::fs::create_dir_all(&tmp).unwrap();
     let root = crate::pins::isa().join("conformance/cases");
     let raw = std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap();

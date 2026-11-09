@@ -7,11 +7,11 @@
 //! cache is used only for Born probabilities and CLI display; permutations are
 //! executed by branch enumeration without discarding relative or global phase.
 
+use crate::append_log::AppendLog;
 use crate::bigint::BigUint;
 use crate::exact::Exact;
 use crate::json::Json;
 use crate::object::{Function, Instr, Object};
-use crate::persistent::Seq;
 use crate::value::{Budget, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 mod allocation_bindings;
@@ -54,8 +54,8 @@ pub struct QuantumState {
     pub(crate) target: Option<std::sync::Arc<crate::target::Target>>,
     pub(crate) wire_classes: crate::persistent::Map<usize, String>,
     pub emitted: Vec<crate::target::Leaf>,
-    events: Seq<crate::target::Event>,
-    live: Seq<crate::target::LiveInterval>,
+    events: AppendLog<crate::target::Event>,
+    live: AppendLog<crate::target::LiveInterval>,
     time: crate::target::Rational,
     peak: BTreeMap<String, usize>,
     dirty: BTreeSet<usize>,
@@ -76,8 +76,8 @@ impl QuantumState {
             target: None,
             wire_classes: crate::persistent::Map::new(),
             emitted: vec![],
-            events: Seq::new(),
-            live: Seq::new(),
+            events: AppendLog::new(),
+            live: AppendLog::new(),
             time: crate::target::Rational::zero(),
             peak: BTreeMap::new(),
             dirty: BTreeSet::new(),
@@ -2614,14 +2614,27 @@ impl QuantumState {
         });
         self.time = end;
     }
-    pub(crate) fn classical_event(&mut self) -> Result<(), String> {
-        if let Some(t) = &self.target {
-            let duration = crate::target::number(crate::target::field(
-                crate::target::field(&t.document, "capabilities")?,
-                "classical_step_time",
-            )?)?;
+    pub(crate) fn prepare_classical_event(
+        &self,
+    ) -> Result<Option<crate::target::Rational>, String> {
+        self.target
+            .as_ref()
+            .map(|t| {
+                crate::target::number(crate::target::field(
+                    crate::target::field(&t.document, "capabilities")?,
+                    "classical_step_time",
+                )?)
+            })
+            .transpose()
+    }
+    pub(crate) fn publish_classical_event(&mut self, duration: Option<crate::target::Rational>) {
+        if let Some(duration) = duration {
             self.record_event(duration, vec![], BTreeMap::new(), &[]);
         }
+    }
+    pub(crate) fn classical_event(&mut self) -> Result<(), String> {
+        let duration = self.prepare_classical_event()?;
+        self.publish_classical_event(duration);
         Ok(())
     }
     pub fn emit_target_gate(&mut self, g: crate::target::Gate) -> Result<(), String> {

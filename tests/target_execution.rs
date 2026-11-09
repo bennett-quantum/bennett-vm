@@ -448,9 +448,9 @@ fn classical_and_effect_leaves_are_accounted_once_including_inverse_execution() 
     // §8.2: "Classical instructions and effects take classical_step_time".
     // The entry has eight rows, including one effect; reversal executes eight
     // inverse rows, so makespan is 8 forward and 16 forward+reverse.
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let op = repo.join(".tmp/account-device.bisa");
-    let tp = repo.join(".tmp/account-device-target.json");
+    let scratch = std::env::temp_dir();
+    let op = scratch.join("account-device.bisa");
+    let tp = scratch.join("account-device-target.json");
     std::fs::write(&op, device_fixture::block_object(true)).unwrap();
     let mut doc = target("[]").document;
     if let Json::Obj(m) = &mut doc {

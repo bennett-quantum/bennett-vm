@@ -5,11 +5,8 @@ use std::{
     process::{Command, Output},
 };
 
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 fn dir(name: &str) -> PathBuf {
-    let path = root().join(".tmp/saved-tape").join(name);
+    let path = std::env::temp_dir().join("saved-tape").join(name);
     std::fs::create_dir_all(&path).unwrap();
     path
 }

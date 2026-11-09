@@ -83,13 +83,6 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
     pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
-    pub(crate) fn last_key_value(&self) -> Option<(&K, &V)> {
-        let mut node = self.root.as_deref()?;
-        while let Some(right) = node.right.as_deref() {
-            node = right;
-        }
-        Some((&node.key, node.value.as_ref()))
-    }
     fn entry<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&Rc<V>>
     where
         K: Borrow<Q>,
@@ -134,6 +127,8 @@ impl<K: Ord + Clone, V: Clone> Map<K, V> {
         self.get(key).is_some()
     }
     pub(crate) fn insert(&mut self, key: K, value: V) {
+        #[cfg(test)]
+        crate::execution_work::instance_tree_update();
         fn put<K: Ord + Clone, V: Clone>(
             p: Link<K, V>,
             key: K,

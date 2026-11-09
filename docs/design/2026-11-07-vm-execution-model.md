@@ -491,6 +491,61 @@ nondeterministic input on failure; this is the highest-risk slice. Estimate
 **1 round per measured row-family slice**, never one claimed round for an
 unbounded rewrite (`ISA:1173-1212,2458-2487,2511-2518`; **6d96f5c**).
 
+#### Integer-value family implementation (prototype)
+
+The first family migrates constants, integer binary/division/comparison rows,
+select and integer/pointer casts. Each computes a typed definition or terminal
+fault, validates target accounting and reserves fallible history/definition
+capacity before publication. A successful prepared row retains definitions and
+prior control without Machine or Data checkpoint pairs. Faults retain the
+exact cause and failing control point; diagnostic preparation publishes nothing.
+Canonical value-row dispatch is indexed at executable installation; transformed
+JIT rows use the same evaluator and publication boundary.
+
+Per-name instance tails now push/pop without an instance AVL update. Segment
+cancellation below a newer pure suffix shares the older prefix and rebuilds only
+that suffix. Immutable append tails also replace AVL target-event, live-interval
+and diagnostic-trace streams, preserving complete accounting and ordered export.
+Checkpoints share tails; destruction of long unique tails is iterative. Ordered
+export visits every retained record and allocates a temporary reference vector;
+that export work has not disappeared.
+
+Red-first evidence is in .tmp/vm-slice4/receipts/red-prepared-valid.* and
+red-fixed.*: base **99f938c**, with test-only counters, Spiral. The paired
+single-process fixture executes **500 identical rows** behind retained prefixes
+of **500 / 15000** rows, with a target and an idle live qreg. Before migration,
+each measured run performed **500 machine checkpoints / 500 instance-tree
+updates**; map work was **32440 / 42500** and path copies **21452 / 29500**.
+The completed candidate (work-final.*) performs **zero checkpoints, zero
+instance-tree updates and zero retained Frame/Json or target-event clones**.
+Map work is **4000 / 4000**, path copies **500 / 500**: both prefix ratios are
+exactly **1**. Append work is separately **2500 nodes / 332000 inline entry
+payload bytes** per measured run; that byte counter excludes allocator headers
+and allocations owned by values. It is not a total allocation-byte measurement.
+These are exact work invariants, not elapsed-time thresholds or an aggregate
+VM/reference work bound.
+
+Focused receipts cover each preparation-boundary diagnostic and retry, real
+target-accounting rejection, arithmetic fault/reversal, explicit cross-page
+bytes, preserved token/ledger state and exact Q-state equality. The pinned
+reference differential covers integer operations, casts, boundary faults and
+region reversal across private transformation/engine and observation modes.
+The unchanged target-installed full object checks forward output against the
+pinned reference; saved-journal replay/reset runs both engines and trace modes.
+Target execution tests retain the forward-plus-inverse charge and snapshot
+immutability obligations. The landing gate and independent review remain the
+orchestrator's checks.
+
+This is the design-authorized family split, **not completion of every migration
+mechanic**. Branch/load, resource-changing, effect/host and region families keep
+their existing semantic transactions. The outer environment remains a name-keyed
+persistent map; activation slots/name interning, typed touched-resource deltas,
+effective JIT-row metadata caching and the remaining console/effect/tape/reply/
+draw/invocation append streams are tracked in **bennett-vm-6q3**. Ordinary
+fixed-footprint work here is independent of retained instances in one activation;
+no global O(1) claim is made across growing distinct activations or names. The
+parked launch/sched 0.9 capability is unchanged.
+
 ### Slice 5 — interval ownership with exact resource domains
 
 **Dependency/change/ownership:** After slice 4's publication boundary is in

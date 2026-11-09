@@ -4,6 +4,10 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Snapshot {
     pub steps: u64,
+    pub append_nodes: u64,
+    pub append_payload_bytes: u64,
+    pub machine_checkpoints: u64,
+    pub instance_tree_updates: u64,
     pub map_nodes: u64,
     pub path_copies: u64,
     pub target_history_copies: u64,
@@ -15,6 +19,10 @@ pub(crate) struct Snapshot {
 }
 pub(crate) enum Operation {
     Step,
+    AppendNode,
+    AppendPayloadBytes,
+    MachineCheckpoint,
+    InstanceTreeUpdate,
     MapNode,
     PathCopy,
     TargetHistoryCopy,
@@ -25,6 +33,7 @@ pub(crate) enum Operation {
 }
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
+    static INSTANCE_UPDATE: Cell<bool> = const { Cell::new(false) };
     static PATH_COPY: Cell<bool> = const { Cell::new(false) };
     static WORK: Cell<Snapshot> = Cell::new(Snapshot::default());
 }
@@ -34,6 +43,10 @@ pub(crate) fn record(operation: Operation, amount: u64) {
             let mut work = cell.get();
             let count = match operation {
                 Operation::Step => &mut work.steps,
+                Operation::AppendNode => &mut work.append_nodes,
+                Operation::AppendPayloadBytes => &mut work.append_payload_bytes,
+                Operation::MachineCheckpoint => &mut work.machine_checkpoints,
+                Operation::InstanceTreeUpdate => &mut work.instance_tree_updates,
                 Operation::MapNode => &mut work.map_nodes,
                 Operation::PathCopy => &mut work.path_copies,
                 Operation::TargetHistoryCopy => &mut work.target_history_copies,
@@ -104,5 +117,23 @@ impl Clone for crate::target::Event {
             wires: self.wires.clone(),
             cost: self.cost.clone(),
         }
+    }
+}
+
+// Scope only the per-name stack update, separately from the outer name index.
+pub(crate) struct InstanceScope(bool);
+impl InstanceScope {
+    pub(crate) fn enter() -> Self {
+        Self(INSTANCE_UPDATE.with(|active| active.replace(true)))
+    }
+}
+impl Drop for InstanceScope {
+    fn drop(&mut self) {
+        INSTANCE_UPDATE.with(|active| active.set(self.0));
+    }
+}
+pub(crate) fn instance_tree_update() {
+    if INSTANCE_UPDATE.with(Cell::get) {
+        record(Operation::InstanceTreeUpdate, 1);
     }
 }

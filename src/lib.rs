@@ -100,6 +100,7 @@ mod tests {
     }
 }
 
+mod append_log;
 mod history;
 mod persistent;
 

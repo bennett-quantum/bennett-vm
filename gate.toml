@@ -1,7 +1,7 @@
 # Push-gate pins (bennett/tools/gate_README.md). Siblings resolve only to these commits.
 schema = 1
 repo = "bennett-vm"
-tool_sha = "3779522887ace6426f8ba13fb0d55b625b781941"
+tool_sha = "a630f3861426b8b08bcb0725abd2f5cd5dd70a06"
 timeout_s = 14400
 
 [env]
@@ -21,8 +21,8 @@ name = "quality baseline"
 argv = ["python3", "scripts/quality.py"]
 
 [siblings."bennett-isa-spec"]
-sha = "3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1"
-note = "Published ISA main with token-alias CLI support and accepted ISA 0.9 lexical repairs"
+sha = "618b16f805aa26244dd2cfa74938d1394a21ce57"
+note = "Published ISA 0.9 K91 per-role capability queries and token-alias contracts"
 
 [[siblings."bennett-isa-spec".build]]
 name = "reference interpreter (debug)"

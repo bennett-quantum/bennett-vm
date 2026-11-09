@@ -22,6 +22,7 @@ pub(crate) struct ExecutionIndex {
 pub(crate) struct FunctionIndex {
     pub blocks: std::collections::HashMap<String, usize>,
     pub operands: Vec<Vec<Vec<String>>>,
+    value_rows: Vec<Vec<Option<prepared::ValueOp>>>,
 }
 
 impl ExecutionIndex {
@@ -45,6 +46,11 @@ impl FunctionIndex {
                 .iter()
                 .enumerate()
                 .map(|(index, block)| (block.name.clone(), index))
+                .collect(),
+            value_rows: function
+                .blocks
+                .iter()
+                .map(|block| block.instrs.iter().map(prepared::ValueOp::parse).collect())
                 .collect(),
             operands: function
                 .blocks
@@ -72,7 +78,7 @@ type Key = (u64, String);
 // Entry arguments use row zero. Executed definitions use their retained
 // history row and position within that row, independent of later cancellation.
 type InstanceId = (usize, usize);
-type Environment = Map<Key, Map<InstanceId, Value>>;
+type Environment = Map<Key, crate::append_log::AppendLog<(InstanceId, Value)>>;
 #[derive(Clone, Debug, PartialEq)]
 struct Allocation {
     base: BigUint,
@@ -153,9 +159,12 @@ struct Segment {
     args: Vec<Value>,
     results: Vec<Value>,
 }
+#[cfg(test)]
+mod machine_work;
+mod prepared;
 mod trace;
 use trace::TraceLog;
-#[derive(Clone)]
+#[cfg_attr(not(test), derive(Clone))]
 struct Machine {
     program: Option<std::sync::Arc<crate::jit::Program>>,
     indices: std::sync::Arc<ExecutionIndex>,
@@ -271,16 +280,14 @@ fn vals(xs: &[Value]) -> Json {
 fn current(env: &Environment, k: &Key) -> Option<Value> {
     #[cfg(test)]
     REGISTER_READS.with(|n| n.set(n.get() + 1));
-    env.get(k)
-        .and_then(|v| v.last_key_value())
-        .map(|(_, v)| v.clone())
+    env.get(k).and_then(|v| v.last()).map(|(_, v)| v.clone())
 }
 fn is_nan(v: &Value) -> bool {
     matches!(v, Value::F64(f) if f.is_nan())
 }
 fn nan_keys(env: &Environment) -> Map<Key, ()> {
     env.iter()
-        .filter(|(_, vs)| vs.last_key_value().is_some_and(|(_, v)| is_nan(v)))
+        .filter(|(_, vs)| vs.last().is_some_and(|(_, v)| is_nan(v)))
         .map(|(k, _)| (k.clone(), ()))
         .collect()
 }
@@ -550,12 +557,15 @@ impl Machine {
         }
         self.note_register(&key);
         if !self.env.contains_key(&key) {
-            self.env.insert(key.clone(), Map::new());
+            self.env
+                .insert(key.clone(), crate::append_log::AppendLog::new());
         }
         let instance = (self.history.len() + 1, self.definitions.len());
         let vs = self.env.get_mut(&key).unwrap();
         self.definitions.push((key, instance));
-        vs.insert(instance, v);
+        #[cfg(test)]
+        let _instance_scope = crate::execution_work::InstanceScope::enter();
+        vs.push((instance, v));
     }
     fn define(&mut self, name: &str, v: Value) {
         self.define_at(self.stack.last().unwrap().id, name, v);
@@ -616,10 +626,9 @@ impl Machine {
                 .get_mut(key)
                 .expect("active defining frame has a register");
             assert!(
-                vs.contains_key(instance),
+                vs.remove_latest(|(id, _)| id == instance),
                 "active defining frame owns its instance"
             );
-            vs.remove(instance);
             if vs.is_empty() {
                 self.env.remove(key);
             }
@@ -628,7 +637,7 @@ impl Machine {
             if self
                 .env
                 .get(key)
-                .and_then(|vs| vs.last_key_value().map(|(_, v)| v))
+                .and_then(|vs| vs.last().map(|(_, v)| v))
                 .is_some_and(is_nan)
             {
                 self.nan_registers.insert(key.clone(), ());
@@ -708,15 +717,25 @@ impl Machine {
         }
     }
     fn step_row(&mut self, effective: Option<&Instr>) -> Result<(), String> {
-        // Replay rejection is a diagnostic before this effect commits, including
-        // its control advance and any target classical-step accounting.
         let activation = self.stack.last().unwrap();
         let row = effective.unwrap_or_else(|| {
             &self.obj.functions[activation.function_index].blocks[activation.block].instrs
                 [activation.index]
         });
-        let checkpoint =
-            (self.effects.replay.is_some() && row.op == "effect").then(|| self.clone());
+        let op = match effective {
+            Some(row) => prepared::ValueOp::parse(row),
+            None => {
+                self.indices.bodies[activation.function_index].value_rows[activation.block]
+                    [activation.index]
+            }
+        };
+        if let Some(op) = op {
+            let row = row.clone();
+            return self.step_prepared(&row, op);
+        }
+        // Unmigrated launch rows and CLI replay retain their prior transactions.
+        let checkpoint = (self.stateful || (self.effects.replay.is_some() && row.op == "effect"))
+            .then(|| self.clone());
         let result = self.step_row_inner(effective);
         if result.is_err()
             && let Some(before) = checkpoint
@@ -829,53 +848,6 @@ impl Machine {
         };
         let mut result = None;
         match base {
-            "const" => {
-                let w = width()?;
-                result = Some(Value::int(w, crate::oracle::parse_const(&xs[0], w)?));
-            }
-            "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "lshr" | "ashr" | "udiv"
-            | "urem" | "sdiv" | "srem" | "icmp" => {
-                let a = get!(self.read(&xs[0]));
-                let b = get!(self.bits(&xs[1]));
-                let w = a.width(self.obj.ptr_width).unwrap();
-                let bits = a.bits().unwrap();
-                result = Some(if base == "icmp" {
-                    Value::int(
-                        1,
-                        u(value::icmp(op.split('.').nth(1).unwrap(), bits, &b, w) as u64),
-                    )
-                } else if matches!(base, "udiv" | "urem" | "sdiv" | "srem") {
-                    if let Some(c) = value::div_fault(base, bits, &b, w) {
-                        return Ok(Some(c));
-                    }
-                    Value::int(w, value::divop(base, bits, &b, w))
-                } else {
-                    Value::int(w, value::binop(base, bits, &b, w)?)
-                });
-            }
-            "select" => {
-                let p = get!(self.bits(&xs[0]));
-                result = Some(get!(self.read(&xs[if p.is_zero() { 2 } else { 1 }])));
-            }
-            "zext" | "sext" | "trunc" | "ptrtoint" | "inttoptr" => {
-                let a = get!(self.read(&xs[0]));
-                let bits = a.bits().unwrap();
-                let w = if base == "inttoptr" {
-                    self.obj.ptr_width
-                } else {
-                    width()?
-                };
-                let out = if base == "sext" {
-                    sign_extend(bits, a.width(self.obj.ptr_width).unwrap(), w)
-                } else {
-                    bits.mask(w)
-                };
-                result = Some(if base == "inttoptr" {
-                    Value::Ptr(out)
-                } else {
-                    Value::int(w, out)
-                });
-            }
             "load" | "store" => {
                 let w = width()?;
                 let p = get!(self.bits(&xs[0]));
@@ -2276,8 +2248,7 @@ impl RuntimeRun {
             return Ok(vec![]);
         };
         match (&frame.data, &frame.after) {
-            // Pure rows deliberately omit the before snapshot, including
-            // stateful runs that still retain an after snapshot.
+            // Pure rows need only their retained definitions and prior control.
             (None, _) => Ok(vec![]),
             (Some(before), Some(after)) => Ok(before
                 .handles
@@ -2478,13 +2449,7 @@ impl RuntimeRun {
             m.draws
                 .push((u64::from_le_bytes(bs) >> 11) as f64 / ((1u64 << 53) as f64));
         }
-        let checkpoint = self.machine.clone();
-        if let Err(e) = self.machine.step() {
-            checkpoint.history.restore();
-            self.machine = checkpoint;
-            return Err(e);
-        }
-        Ok(())
+        self.machine.step()
     }
     pub(crate) fn reverse_to(&mut self, n: usize) -> Result<(), String> {
         if n > self.machine.history.len() {
@@ -2858,10 +2823,9 @@ mod scaling_tests {
 
     #[test]
     fn replay_mismatch_keeps_effect_entry_state_and_cursor_exactly() {
-        let raw = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../bennett-isa-spec/reference-interpreter/tests/fixtures/classical.bisa"
-        ))
+        let raw = std::fs::read_to_string(
+            crate::pins::isa().join("reference-interpreter/tests/fixtures/classical.bisa"),
+        )
         .unwrap();
         let (obj, _) = crate::load(&raw, false).unwrap();
         let obj = std::sync::Arc::new(obj);

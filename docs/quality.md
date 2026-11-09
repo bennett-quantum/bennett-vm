@@ -252,7 +252,7 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_100": 5,
       "over_25": 27,
       "over_300": 0,
-      "trivial_wrappers": 9
+      "trivial_wrappers": 10
     },
     "src/action/allocation_bindings.rs": {
       "branch_mass": 200,
@@ -261,6 +261,14 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "over_25": 4,
       "over_300": 0,
       "trivial_wrappers": 0
+    },
+    "src/append_log.rs": {
+      "branch_mass": 35,
+      "max_lines": 19,
+      "over_100": 0,
+      "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 6
     },
     "src/bigint.rs": {
       "branch_mass": 148,
@@ -279,18 +287,34 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 1
     },
     "src/cc.rs": {
-      "branch_mass": 1317,
-      "max_lines": 415,
+      "branch_mass": 1257,
+      "max_lines": 400,
       "over_100": 4,
-      "over_25": 25,
+      "over_25": 26,
       "over_300": 2,
-      "trivial_wrappers": 28
+      "trivial_wrappers": 29
     },
     "src/cc/frame_work.rs": {
       "branch_mass": 1,
       "max_lines": 20,
       "over_100": 0,
       "over_25": 0,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/cc/machine_work.rs": {
+      "branch_mass": 1,
+      "max_lines": 31,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/cc/prepared.rs": {
+      "branch_mass": 199,
+      "max_lines": 70,
+      "over_100": 0,
+      "over_25": 5,
       "over_300": 0,
       "trivial_wrappers": 0
     },
@@ -375,15 +399,15 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 11
     },
     "src/execution_work.rs": {
-      "branch_mass": 62,
-      "max_lines": 19,
+      "branch_mass": 80,
+      "max_lines": 23,
       "over_100": 0,
       "over_25": 0,
       "over_300": 0,
-      "trivial_wrappers": 5
+      "trivial_wrappers": 7
     },
     "src/history.rs": {
-      "branch_mass": 61,
+      "branch_mass": 65,
       "max_lines": 32,
       "over_100": 0,
       "over_25": 3,
@@ -519,12 +543,12 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 0
     },
     "src/persistent.rs": {
-      "branch_mass": 257,
+      "branch_mass": 255,
       "max_lines": 68,
       "over_100": 0,
       "over_25": 6,
       "over_300": 0,
-      "trivial_wrappers": 30
+      "trivial_wrappers": 29
     },
     "src/persistent/node_work.rs": {
       "branch_mass": 1,

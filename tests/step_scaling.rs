@@ -1188,3 +1188,76 @@ fn journal_forks_preserve_interleaved_bytes_when_uncall_is_reversed() {
         vec![(a, 11), (b, 22), (c, 33), (d, 44)]
     );
 }
+
+// Equal operation footprints reuse the existing measured prefix sizes above.
+// Exact zero/equality assertions are design invariants, not timing ceilings.
+fn prepared_row_samples() -> Vec<crate::execution_work::Snapshot> {
+    let mut samples = vec![];
+    for prefix in [CHECKPOINTS[0], CHECKPOINTS[2]] {
+        let functions = format!(
+            "fn cc @main () (x:i64) () () ()\n^entry():\n{}ret x",
+            "x = const.i64 37\n".repeat(prefix + CHECKPOINTS[0])
+        );
+        let object = std::sync::Arc::new(memory_object(&functions));
+        let mut resources = crate::cc::Resources::new(&object).unwrap();
+        resources.set_target(
+            crate::target::Target::parse(std::str::from_utf8(TARGET).unwrap()).unwrap(),
+        );
+        // An idle live qreg makes an accidental checkpoint copy real Q payload.
+        resources.new_reg(2, "data").unwrap();
+        let mut run =
+            crate::cc::RuntimeRun::new(object, &resources, "main", vec![], vec![]).unwrap();
+        for _ in 0..prefix {
+            run.step().unwrap();
+        }
+        let probe = crate::execution_work::Probe::start();
+        for _ in 0..CHECKPOINTS[0] {
+            run.step().unwrap();
+        }
+        let work = probe.snapshot();
+        drop(probe);
+        eprintln!(
+            "prepared prefix={prefix} rows={}: {work:?}; checkpoints/row={}/{}; instance_tree_updates/row={}/{}",
+            CHECKPOINTS[0],
+            work.machine_checkpoints,
+            work.steps,
+            work.instance_tree_updates,
+            work.steps
+        );
+        assert_eq!(work.steps, CHECKPOINTS[0] as u64);
+        samples.push(work);
+        run.step().unwrap();
+        assert_eq!(
+            run.values(),
+            &[crate::value::Value::int(
+                64,
+                crate::bigint::BigUint::from_u64(37)
+            )]
+        );
+        run.reverse_to(0).unwrap();
+        assert_eq!(run.history_len(), 0);
+    }
+    samples
+}
+
+#[test]
+fn prepared_pure_steps_copy_no_machine_payload() {
+    for work in prepared_row_samples() {
+        assert_eq!(work.machine_checkpoints, 0, "ordinary pure row checkpoint");
+        assert_eq!(work.instance_tree_updates, 0, "per-instance tree update");
+        assert_eq!(work.payload_clones, 0, "retained payload clones");
+    }
+}
+
+#[test]
+fn fixed_row_cost_is_independent_of_history() {
+    let samples = prepared_row_samples();
+    eprintln!(
+        "Rprefix[map_nodes]={}/{}; Rprefix[path_copies]={}/{}",
+        samples[1].map_nodes, samples[0].map_nodes, samples[1].path_copies, samples[0].path_copies
+    );
+    assert_eq!(samples[0].map_nodes, samples[1].map_nodes);
+    assert_eq!(samples[0].path_copies, samples[1].path_copies);
+    assert_eq!(samples[0].append_nodes, samples[1].append_nodes);
+    assert_eq!(samples[0].append_payload_bytes, samples[1].append_payload_bytes);
+}

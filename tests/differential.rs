@@ -586,9 +586,7 @@ fn classical_control_and_launch_differential() {
 }
 
 fn temp_object(label: &str, text: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(".tmp")
-        .join(format!("{label}-{}.bisa", std::process::id()));
+    let path = std::env::temp_dir().join(format!("{label}-{}.bisa", std::process::id()));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     // Construct only our test objects; all identities are independently checked
     // by the reference binary before execution.
@@ -1482,9 +1480,7 @@ fn signed_object(label: &str, version: &str, functions: &str) -> String {
         text.push_str("\nsection layout\n{\"A_tab\":2,\"H\":6,\"S_cells\":4,\"globals\":{},\"heap_base\":32,\"heap_limit_max\":32,\"interface_regions\":{},\"null_size\":16,\"ptr_width\":32}\n");
         text = source09::sign(&text);
     }
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(".tmp")
-        .join(format!("{label}-{version}-{}.bisa", std::process::id()));
+    let path = std::env::temp_dir().join(format!("{label}-{version}-{}.bisa", std::process::id()));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, text).unwrap();
     let path = path.display().to_string();

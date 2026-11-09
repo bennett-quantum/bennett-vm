@@ -124,6 +124,27 @@ impl<F, S> History<F, S> {
             .unwrap();
         edit(Rc::make_mut(last));
     }
+    pub(crate) fn prepare_push(&mut self, pure: bool) -> Result<(), String> {
+        let mut store = self.owner.borrow_mut();
+        if store.frames.len.is_multiple_of(CHUNK) {
+            store
+                .frames
+                .directory
+                .try_reserve(1)
+                .map_err(|e| format!("history directory capacity: {e}"))?;
+        }
+        store
+            .reversed
+            .try_reserve(1)
+            .map_err(|e| format!("history mark capacity: {e}"))?;
+        if !pure {
+            store
+                .impure
+                .try_reserve(1)
+                .map_err(|e| format!("history fault index capacity: {e}"))?;
+        }
+        Ok(())
+    }
     pub(crate) fn len(&self) -> usize {
         self.len
     }

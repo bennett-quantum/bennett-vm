@@ -64,8 +64,8 @@ impl TraceRow {
 #[derive(Clone)]
 pub(super) enum TraceLog {
     Disabled,
-    Deferred(Seq<TraceRow>),
-    Observed(Seq<Json>),
+    Deferred(crate::append_log::AppendLog<TraceRow>),
+    Observed(crate::append_log::AppendLog<Json>),
 }
 impl TraceLog {
     /// CLI defaults retain eager diagnostic behavior. BENNETT_VM_TRACE=off
@@ -84,9 +84,9 @@ impl TraceLog {
     }
     pub(super) fn new(observed: bool) -> Self {
         if observed {
-            Self::Observed(Seq::new())
+            Self::Observed(crate::append_log::AppendLog::new())
         } else {
-            Self::Deferred(Seq::new())
+            Self::Deferred(crate::append_log::AppendLog::new())
         }
     }
     pub(super) fn record(&mut self, row: TraceRow, obj: &Object) {
@@ -183,7 +183,8 @@ mod tests {
             run.machine.define_at(0, "p", Value::int(1, u(1)));
             run.step().unwrap();
             if let TraceLog::Deferred(rows) = &run.machine.trace {
-                let (_, Some(Value::F64(pre)), Some(Value::F64(post))) = &rows[0].registers[0]
+                let (_, Some(Value::F64(pre)), Some(Value::F64(post))) =
+                    &rows.iter().next().unwrap().registers[0]
                 else {
                     panic!("missing typed floating delta")
                 };

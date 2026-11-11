@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
-# Push gate (no CI). Runs the [[check]]s of gate.toml on the pushed sha in a clean detached
-# worktree, with siblings at the shas pinned there. See bennett/tools/gate_README.md in the
-# meta repo. The tool is run, never imported: it is a dev tool at a pinned commit, like cargo.
+# Push hook (no CI). Maintainer: "fast pushes go immediately and revert if the fast tier fails". As git's pre-push hook
+# (two arguments: remote, url) it starts the fast tier detached for each pushed main and returns at once; a red lands in
+# bennett/.tmp/gates/reds.log. Run any other way (flags, or none: gates HEAD) it runs the gate itself, synchronously.
+# See bennett/tools/gate_README.md. The tool is run, never imported: a dev tool at a pinned commit, like cargo.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
 root="$(git -C "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" rev-parse --show-toplevel)"
 if [ "${BENNETT_GATE_HOOK_PROBE:-}" = 1 ]; then echo "bennett-gate-hook-chained $root"; exit 0; fi
+common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+meta="${BENNETT_GATE_WORKSPACE:-$(dirname "$(dirname "$common")")}/bennett"
+if [ $# -eq 2 ] && [[ "$1" != --* ]]; then
+  while read -r _local_ref local_sha remote_ref _remote_sha; do
+    [ "$remote_ref" = refs/heads/main ] && [[ ! "$local_sha" =~ ^0+$ ]] || continue
+    python3 -I "$meta/tools/gate_launch.py" start --repo "$root" --sha "$local_sha" --tier pre-merge >&2 \
+      || echo "pre-push: fast tier not started for $local_sha; main-health will run it" >&2
+  done
+  exit 0
+fi
 pin="$(git -C "$root" show HEAD:gate.toml 2>/dev/null)" || { echo "pre-push: HEAD has no gate.toml" >&2; exit 3; }
 tool_sha="$(sed -n 's/^tool_sha = "\([0-9a-f]\{40\}\)"$/\1/p' <<<"$pin")"
 [ -n "$tool_sha" ] || { echo "pre-push: gate.toml has no full tool_sha" >&2; exit 3; }
-common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
-meta="${BENNETT_GATE_WORKSPACE:-$(dirname "$(dirname "$common")")}/bennett"
 tool="$root/.tmp/gate/tool/gate_run-$tool_sha.py"
 if [ ! -s "$tool" ]; then
   mkdir -p "$(dirname "$tool")"

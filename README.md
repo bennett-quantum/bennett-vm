@@ -50,25 +50,7 @@ The stateful C library uses [include/bennett_vm.h](include/bennett_vm.h)
 with the published ISA headers. Calls on one program require caller
 synchronization; execution advances at wait or run_step. VM extensions
 provide immutable JCS snapshots and history-prefix reversal. The C consumers
-in tests/launch_abi.c, tests/launch_abi09.c and tests/sched_abi.c exercise the ABI.
-
-C providers select their launch family at build time. The default build keeps
-launch 0.8's four-argument `bennett_estimate_run`, including for existing
-binaries. `scripts/build-abi-providers.sh` builds independent providers under
-`.tmp/abi-providers/0.8/debug/` and `.tmp/abi-providers/0.9/debug/`.
-Select exactly one directory when linking or loading `libbennett_vm`.
-The 0.9 provider is built with `--no-default-features --features abi-0-9`;
-its canonical estimate symbol takes eight arguments. Define
-`BENNETT_ABI_FAMILY=9` before including `bennett_vm.h` and use the pinned
-published 0.9 scheduler header for that provider. Default headers select 0.8.
-Keep both families in separate translation units and loader namespaces when
-needed; object ISA versions do not select a C ABI family.
-
-Only the 0.9 provider exports the K91 role queries. Both manifests have
-empty feature lists: exact alias-aware estimation and scheduler/certificate
-production remain incomplete. Neither an exported additive entry nor an
-empty feature list authorizes alias-aware dispatch. Callers must negotiate
-each selected role with the published K91 rules before issuing such work.
+in tests/launch_abi.c and tests/sched_abi.c exercise the ABI.
 
 Target-backed structured actions and native QRAM execute native operations.
 Actual sequential resource/error ledgers are distinct from resource estimates

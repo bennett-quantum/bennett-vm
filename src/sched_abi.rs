@@ -131,22 +131,14 @@ pub unsafe extern "C" fn bennett_sched_request_set_params(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_sched_request_set_token_aliases(
-    r: *mut bennett_sched_request_t,
-    p: *const u8,
-    n: usize,
+    r: *mut bennett_sched_request_t, p: *const u8, n: usize,
 ) -> i32 {
     status(|| {
         let r = get_mut(r)?;
-        let raw = std::str::from_utf8(bytes(p, n)?)
-            .map_err(|_| error(11, "K91: invalid token_aliases UTF-8"))?;
-        let aliases = crate::token_aliases::parse(Some(raw))
-            .map_err(|e| error(11, e))?
-            .ok_or_else(|| error(11, "K91: missing partition"))?;
-        let count = aliases
-            .as_arr()
-            .ok_or_else(|| error(11, "K91: expected partition array"))?
-            .len();
-        crate::token_aliases::validate(&aliases, count).map_err(|e| error(11, e))?;
+        let raw = std::str::from_utf8(bytes(p, n)?).map_err(|_| error(11, "K91: invalid token_aliases UTF-8"))?;
+        let aliases = crate::token_aliases::parse(Some(raw)).map_err(|e| error(11,e))?.ok_or_else(|| error(11,"K91: missing partition"))?;
+        let count = aliases.as_arr().ok_or_else(|| error(11,"K91: expected partition array"))?.len();
+        crate::token_aliases::validate(&aliases, count).map_err(|e| error(11,e))?;
         r.token_aliases = Some(aliases);
         Ok(())
     })
@@ -227,29 +219,20 @@ pub unsafe extern "C" fn bennett_sched_schedule(
             .as_ref()
             .ok_or(error(11, "§11: request requires budget"))?;
         crate::cliargs::validate_budget(object, budget).map_err(|e| error(6, e))?;
-        let params = r
-            .params
+        let params = r.params
             .as_ref()
             .ok_or(error(11, "§11: request requires params"))?;
         if object.isa == "0.9" {
             let mut invocation = Json::obj(vec![
                 ("args", params.clone()),
-                (
-                    "budget",
-                    Json::Arr(
-                        [budget.steps, budget.heap, budget.stack, budget.depth]
-                            .iter()
-                            .map(|n| Json::Str(n.to_string()))
-                            .collect(),
-                    ),
-                ),
+                ("budget", Json::Arr([budget.steps, budget.heap, budget.stack, budget.depth].iter().map(|n| Json::Str(n.to_string())).collect())),
             ]);
             if let (Some(aliases), Json::Obj(fields)) = (&r.token_aliases, &mut invocation) {
                 fields.insert("token_aliases".into(), aliases.clone());
             }
-            crate::invocation::resolve(object, name, &invocation).map_err(|e| error(11, e))?;
+            crate::invocation::resolve(object, name, &invocation).map_err(|e| error(11,e))?;
         } else if r.token_aliases.is_some() {
-            return Err(error(11, "K91: token_aliases requires ISA 0.9"));
+            return Err(error(11,"K91: token_aliases requires ISA 0.9"));
         }
         r.accuracy
             .as_ref()
@@ -262,10 +245,7 @@ pub unsafe extern "C" fn bennett_sched_schedule(
                 return Err(error(5, format!("§11: unknown capacity class {c}")));
             }
         }
-        let reason = match crate::sched::require_library_version(None, &object.isa) {
-            Err(reason) => reason,
-            Ok(()) => "§11: unimplemented: target schedule realisation and certificate production; the published expansion library is available".into(),
-        };
+        let reason = crate::sched::require_library(None).unwrap_err();
         output(
             out,
             bennett_sched_response_t {

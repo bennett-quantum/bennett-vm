@@ -19,11 +19,11 @@ mod oracle_source;
 pub use cleanup::{ActionExpansion, CleanupCarrier, CleanupEntry, CleanupRealisation};
 pub use oracle_cleanup::OracleCleanupPair;
 mod source;
+pub(crate) use source::token_cleanup_points;
 use crate::{
     json::{self, Json},
     target::{Rational as R, arr, field, keys, string},
 };
-pub(crate) use source::token_cleanup_points;
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
@@ -220,31 +220,9 @@ pub struct Catalog {
 }
 impl Catalog {
     pub fn published() -> Result<Self, String> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let config = include_str!("../gate.toml");
-        let section = config
-            .split("[siblings.\"bennett-isa-spec\"]")
-            .nth(1)
-            .ok_or_else(|| err("missing published ISA pin"))?;
-        let sha = section
-            .lines()
-            .find_map(|line| line.strip_prefix("sha = \"")?.strip_suffix('"'))
-            .ok_or_else(|| err("missing published ISA SHA"))?;
-        if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(err("invalid published ISA SHA"));
-        }
-        let spec = std::env::var_os("BENNETT_ISA_SPEC")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                root.join(format!(
-                    ".tmp/gate/cache/bennett-isa-spec@{}/bennett-isa-spec",
-                    &sha[..12]
-                ))
-            });
-        let path = spec.join("spec/ref-0.9.json");
-        Self::parse(
-            &std::fs::read_to_string(&path).map_err(|e| err(format!("{}: {e}", path.display())))?,
-        )
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bennett-isa-spec/spec");
+        let path = spec.join("ref-0.9.json");
+        Self::parse(&std::fs::read_to_string(path).map_err(err)?)
     }
     pub fn parse(raw: &str) -> Result<Self, String> {
         let doc = json::parse(raw)?;

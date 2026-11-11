@@ -1,8 +1,7 @@
-/* VM extensions to the explicitly selected published launch ABI family. */
-/* Check the family on every inclusion, including after this header's guard. */
-#include <bennett_abi.h>
+/* VM extensions to the published ISA 0.8 launch ABI. */
 #ifndef BENNETT_VM_H
 #define BENNETT_VM_H
+#include <bennett_launch.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

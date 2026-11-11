@@ -1,5 +1,4 @@
 //! VM integration suites, linked once. Slow cases remain mandatory in the gate.
-mod abi_features09;
 mod action_support09;
 mod address09;
 mod admission09;

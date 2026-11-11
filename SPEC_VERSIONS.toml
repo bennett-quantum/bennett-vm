@@ -25,9 +25,3 @@ commit = "3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1"
 # Binding accepted-0.8 interpretation of §5.6; no 0.8 spec-text change.
 frame_domain_erratum = "spec/errata-0.8.md"
 frame_domain_erratum_commit = "3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1"
-
-# A separately selected C ABI family; this does not claim full ISA 0.9 execution.
-[c_abi_0_9]
-feature = "abi-0-9"
-status = "partial-provider-no-token-alias-feature"
-headers_commit = "20ac075c175fd12b2b684186c39c7d44561a353c"

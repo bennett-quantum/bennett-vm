@@ -1,5 +1,4 @@
-//! §10 launch C ABI: default provider 0.8, separately selected abi-0-9 provider 0.9.
-//! Calls on one program must be externally synchronized.
+//! §10 launch 0.8 C ABI. Calls on one program must be externally synchronized.
 //! Cooperative execution: wait drives RUNNING to the next observable boundary.
 #![allow(
     non_camel_case_types,
@@ -186,14 +185,10 @@ impl bennett_program_t {
             .pending_register_lookup()
             .filter(|id| self.locks.get(id).is_some_and(|owner| *owner != r));
         run.runtime.unavailable_handle(unavailable);
-        let (memory, regs) = self.runs[&r]
-            .runtime
-            .touches()
-            .map_err(|s| error(INVALID, s))?;
-        if memory.iter().any(|key| self.memory_locks.conflicts(r, key))
-            || regs
-                .iter()
-                .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
+        let (memory, regs) = self.runs[&r].runtime.touches().map_err(|s| error(INVALID, s))?;
+        if memory.iter().any(|key| self.memory_locks.conflicts(r, key)) || regs
+            .iter()
+            .any(|q| self.locks.get(q).is_some_and(|owner| *owner != r))
         {
             return Err(error(
                 INVALID,
@@ -889,9 +884,8 @@ pub unsafe extern "C" fn bennett_tape_next(
     })
 }
 free!(bennett_tape_free, bennett_tape_iter_t);
-#[cfg_attr(not(feature = "abi-0-9"), unsafe(export_name = "bennett_estimate_run"))]
-#[cfg_attr(feature = "abi-0-9", unsafe(no_mangle))]
-pub unsafe extern "C" fn bennett_estimate_run_0_8(
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bennett_estimate_run(
     p: *mut bennett_program_t,
     region: *const c_char,
     token: u64,
@@ -900,15 +894,18 @@ pub unsafe extern "C" fn bennett_estimate_run_0_8(
     status(|| {
         let p = get(p)?;
         *get_mut(out)? = ptr::null_mut();
-        if p.obj.isa != "0.8" {
-            return Err(error(1, "§10: launch 0.8 estimate requires ISA 0.8"));
-        }
         let name = text(region)?.trim_start_matches('@');
         let f = p
             .obj
             .function(name)
             .filter(|f| matches!(f.kind, FnKind::Oracle | FnKind::Action | FnKind::PermAction))
             .ok_or_else(|| error(ARG, "§10: E_ARG: unknown/non-region estimate subject"))?;
+        if p.obj.isa == "0.9" {
+            let group = if f.kind == FnKind::Oracle { 4 } else { 3 };
+            if f.lists[group].iter().any(|p| p.ty == Type::Token) {
+                return Err(error(ARG,"K91: legacy estimate with token arguments requires token_aliases"));
+            }
+        }
         let (token_region, _budget) = p
             .resources
             .token(token)
@@ -923,145 +920,51 @@ pub unsafe extern "C" fn bennett_estimate_run_0_8(
     })
 }
 fn estimate_unavailable(p: &bennett_program_t, f: &crate::object::Function) -> Fallible<()> {
-    if !p.resources.has_target() {
-        return Err(error(
+        if !p.resources.has_target() {
+            return Err(error(
+                5,
+                "§8/§10: unimplemented: resource estimate requires a named target from bennett-estimate",
+            ));
+        }
+        if f.kind == FnKind::Oracle {
+            return Err(error(
+                10,
+                "§8.2/§11: E_SCHEDULE_INFEASIBLE: unimplemented: padded oracle resource estimate requires ref@0.8; request scheduling from bennett-estimate",
+            ));
+        }
+        Err(error(
             5,
-            "§8/§10: unimplemented: resource estimate requires a named target from bennett-estimate",
-        ));
-    }
-    if p.obj.isa == "0.9" {
-        return Err(error(
-            1,
-            "§10.1: estimate capability unavailable: complete target realisation and estimate certificate production are unimplemented",
-        ));
-    }
-    if f.kind == FnKind::Oracle {
-        return Err(error(
-            10,
-            "§8.2/§11: E_SCHEDULE_INFEASIBLE: unimplemented: padded oracle resource estimate requires ref@0.8; request scheduling from bennett-estimate",
-        ));
-    }
-    Err(error(
-        5,
-        "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding; no simulator run is substituted for an estimate",
-    ))
-}
-
-// The canonical C symbol belongs to exactly one ABI family per provider.
-#[cfg(not(feature = "abi-0-9"))]
-pub use bennett_estimate_run_0_8 as bennett_estimate_run;
-#[cfg(feature = "abi-0-9")]
-pub use bennett_estimate_run_0_9 as bennett_estimate_run;
-
-/// Launch 0.9's legacy request: complete parameters with token-free inference.
-#[cfg_attr(feature = "abi-0-9", unsafe(export_name = "bennett_estimate_run"))]
-#[cfg_attr(not(feature = "abi-0-9"), unsafe(no_mangle))]
-pub unsafe extern "C" fn bennett_estimate_run_0_9(
-    program: *mut bennett_program_t,
-    region: *const c_char,
-    token: u64,
-    variant: *const c_char,
-    inherited_controls: u32,
-    params: *const u8,
-    params_len: usize,
-    out: *mut *mut bennett_estimate_t,
-) -> i32 {
-    status(|| {
-        *get_mut(out)? = ptr::null_mut();
-        let params = crate::invocation::parse_args(text_buffer(params, params_len)?)
-            .map_err(|e| error(ARG, e))?;
-        estimate_request(
-            get(program)?,
-            text(region)?,
-            token,
-            text(variant)?,
-            inherited_controls,
-            params,
-            None,
-        )
-    })
+            "§8.2/§10: unimplemented: bennett-estimate must supply the resolved resource request; launch 0.8 has no classical-argument binding or per-class decimal resource encoding; no simulator run is substituted for an estimate",
+        ))
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_run_with_token_aliases(
-    program: *mut bennett_program_t,
-    region: *const c_char,
-    token: u64,
-    variant: *const c_char,
-    inherited_controls: u32,
-    params: *const u8,
-    params_len: usize,
-    aliases: *const u8,
-    aliases_len: usize,
+    program: *mut bennett_program_t, region: *const c_char, token: u64,
+    variant: *const c_char, _inherited_controls: u32,
+    params: *const u8, params_len: usize, aliases: *const u8, aliases_len: usize,
     out: *mut *mut bennett_estimate_t,
 ) -> i32 {
     status(|| {
         *get_mut(out)? = ptr::null_mut();
-        let params = crate::invocation::parse_args(text_buffer(params, params_len)?)
-            .map_err(|e| error(ARG, e))?;
-        let aliases = crate::token_aliases::parse(Some(text_buffer(aliases, aliases_len)?))
-            .map_err(|e| error(ARG, e))?
-            .ok_or_else(|| error(ARG, "§10.1: missing token_aliases"))?;
-        estimate_request(
-            get(program)?,
-            text(region)?,
-            token,
-            text(variant)?,
-            inherited_controls,
-            params,
-            Some(aliases),
-        )
+        let p = get(program)?;
+        if p.obj.isa != "0.9" { return Err(error(ARG,"K91: token_aliases requires ISA 0.9")); }
+        let name = text(region)?.trim_start_matches('@');
+        let f = p.obj.function(name).ok_or_else(|| error(ARG,"unknown estimate region"))?;
+        if text(variant)?.is_empty() { return Err(error(ARG,"empty estimate variant")); }
+        let (_, budget) = p.resources.token(token).ok_or_else(|| error(ARG,"unknown program-scoped token"))?;
+        let raw = std::str::from_utf8(bytes(params,params_len)?).map_err(|_| error(ARG,"invalid params UTF-8"))?;
+        let params = crate::invocation::parse_args(raw).map_err(|e| error(ARG,e))?;
+        let raw = std::str::from_utf8(bytes(aliases,aliases_len)?).map_err(|_| error(ARG,"invalid token_aliases UTF-8"))?;
+        let aliases = crate::token_aliases::parse(Some(raw)).map_err(|e| error(ARG,e))?.ok_or_else(|| error(ARG,"missing token_aliases"))?;
+        let invocation = Json::obj(vec![
+            ("args",params), ("token_aliases",aliases),
+            ("budget",Json::Arr([budget.steps,budget.heap,budget.stack,budget.depth].iter().map(|n| Json::Str(n.to_string())).collect())),
+        ]);
+        crate::invocation::resolve(&p.obj,name,&invocation).map_err(|e| error(ARG,e))?;
+        estimate_unavailable(p,f)
     })
 }
-
-unsafe fn text_buffer<'a>(buffer: *const u8, len: usize) -> Fallible<&'a str> {
-    std::str::from_utf8(bytes(buffer, len)?)
-        .map_err(|_| error(ARG, "§10.1: invalid UTF-8 request buffer"))
-}
-
-fn estimate_request(
-    p: &bennett_program_t,
-    region: &str,
-    token: u64,
-    variant: &str,
-    _inherited_controls: u32,
-    params: Json,
-    aliases: Option<Json>,
-) -> Fallible<()> {
-    if p.obj.isa != "0.9" {
-        return Err(error(1, "§10.1: launch 0.9 estimate requires ISA 0.9"));
-    }
-    let name = region.trim_start_matches('@');
-    let f = p
-        .obj
-        .function(name)
-        .ok_or_else(|| error(ARG, "§10.1: unknown estimate region"))?;
-    if variant.is_empty() {
-        return Err(error(ARG, "§10.1: empty estimate variant"));
-    }
-    let (_, budget) = p
-        .resources
-        .token(token)
-        .ok_or_else(|| error(ARG, "§10.1: unknown program-scoped token"))?;
-    let mut invocation = Json::obj(vec![
-        ("args", params),
-        (
-            "budget",
-            Json::Arr(
-                [budget.steps, budget.heap, budget.stack, budget.depth]
-                    .iter()
-                    .map(|n| Json::Str(n.to_string()))
-                    .collect(),
-            ),
-        ),
-    ]);
-    if let (Some(aliases), Json::Obj(fields)) = (aliases, &mut invocation) {
-        fields.insert("token_aliases".into(), aliases);
-    }
-    crate::invocation::resolve(&p.obj, name, &invocation).map_err(|e| error(ARG, e))?;
-    estimate_unavailable(p, f)
-}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bennett_estimate_nresources(p: *const bennett_estimate_t) -> usize {
     let mut n = 0;

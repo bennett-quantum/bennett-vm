@@ -242,44 +242,10 @@ unchanged. Source process identifiers remain zero and no litter exception was
 added. This snapshot does not claim the deferred resource-estimation mechanics
 or the loader negotiation that the pinned ISA explicitly leaves undefined.
 
-The 618b16f pin defines K91 negotiation; the preceding undefined-negotiation
-statement records the earlier pin.
-
-K91 negotiation providers expose canonical immutable empty feature lists
-only in the explicitly selected launch/sched 0.9 build. The default provider
-preserves the original four-argument canonical estimate symbol; a separate
-`abi-0-9` build supplies the eight-argument symbol using the published
-20ac075 headers. The C consumers compile the actual published family
-headers without remapping symbols. The unchanged 0.8 consumer failed at
-runtime before restoring the old canonical address; the 0.9 packaging probe
-failed before the separate provider build existed. Symbol checks ensure the
-0.8 provider cannot advertise launch/sched 0.9 through K91 queries.
-
-The scheduler authenticates the object-versioned library before reporting its
-remaining target schedule/certificate mechanics. Source catalog reads resolve
-through the gate pin. Both 0.9 feature lists stay empty while those mechanics
-are pending; no successful estimate is claimed. A standalone five-partition
-native-X estimate witness remains red (expected time/occupancy/peak each 1);
-it is a capability gap, not an estimate result.
-
-Baseline updates cover only src/abi_features.rs, src/launch.rs,
-src/ref_library.rs and src/sched_abi.rs. The two
-feature-query forwarding exports share one pointer-validation implementation;
-the request text decoder is shared by params and partition parsing. All other
-baseline rows and hygiene exceptions remain byte-for-byte equivalent.
-
 <!-- quality-baseline -->
 ```json
 {
   "files": {
-    "src/abi_features.rs": {
-      "branch_mass": 5,
-      "max_lines": 14,
-      "over_100": 0,
-      "over_25": 0,
-      "over_300": 0,
-      "trivial_wrappers": 2
-    },
     "src/action.rs": {
       "branch_mass": 1220,
       "max_lines": 202,
@@ -505,12 +471,12 @@ baseline rows and hygiene exceptions remain byte-for-byte equivalent.
       "trivial_wrappers": 5
     },
     "src/launch.rs": {
-      "branch_mass": 349,
+      "branch_mass": 368,
       "max_lines": 71,
       "over_100": 0,
-      "over_25": 14,
+      "over_25": 13,
       "over_300": 0,
-      "trivial_wrappers": 19
+      "trivial_wrappers": 18
     },
     "src/launch_locks.rs": {
       "branch_mass": 88,
@@ -625,12 +591,12 @@ baseline rows and hygiene exceptions remain byte-for-byte equivalent.
       "trivial_wrappers": 7
     },
     "src/ref_library.rs": {
-      "branch_mass": 1248,
+      "branch_mass": 1238,
       "max_lines": 223,
       "over_100": 8,
-      "over_25": 16,
+      "over_25": 15,
       "over_300": 0,
-      "trivial_wrappers": 9
+      "trivial_wrappers": 10
     },
     "src/ref_library/action_support.rs": {
       "branch_mass": 53,
@@ -769,8 +735,8 @@ baseline rows and hygiene exceptions remain byte-for-byte equivalent.
       "trivial_wrappers": 1
     },
     "src/sched_abi.rs": {
-      "branch_mass": 60,
-      "max_lines": 86,
+      "branch_mass": 52,
+      "max_lines": 74,
       "over_100": 0,
       "over_25": 1,
       "over_300": 0,

@@ -4,7 +4,6 @@
 //! spec. The reference interpreter is a CLI oracle in tests, never a
 //! code dependency.
 
-pub mod abi_features;
 pub mod action;
 pub mod bigint;
 mod call_matching;
@@ -35,7 +34,7 @@ mod qvalidate;
 mod rational;
 pub mod ref_library;
 pub mod sched;
-pub mod sched_abi;
+mod sched_abi;
 pub mod sha256;
 pub mod step;
 pub mod stepcli;

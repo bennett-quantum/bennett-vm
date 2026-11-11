@@ -26,8 +26,8 @@ name = "quality baseline"
 argv = ["python3", "scripts/quality.py"]
 
 [siblings."bennett-isa-spec"]
-sha = "a42a896efa47ca71ca3733d6e28a0e4050f2d471"
-note = "Published explicit launch accuracy contract, additive header and parameter identity vectors"
+sha = "220f4e4dd9ea13cf81f3c28651219710897cd79d"
+note = "Published explicit accuracy and legacy E_ESTIMATE_ACCURACY_REQUIRED policy"
 
 [[siblings."bennett-isa-spec".build]]
 name = "reference interpreter (debug)"

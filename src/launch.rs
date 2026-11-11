@@ -1,4 +1,5 @@
-//! §10 launch C ABI (0.9, with an explicitly named 0.8 estimate entry). Calls on one program must be externally synchronized.
+//! §10 launch C ABI: default provider 0.8, separately selected abi-0-9 provider 0.9.
+//! Calls on one program must be externally synchronized.
 //! Cooperative execution: wait drives RUNNING to the next observable boundary.
 #![allow(
     non_camel_case_types,

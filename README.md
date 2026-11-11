@@ -7,7 +7,7 @@ ISA 0.9 consumption recorded in [SPEC_VERSIONS.toml](SPEC_VERSIONS.toml).
 The published specs define the contracts; the reference interpreter is an
 external CLI oracle in tests.
 
-Commands: check, hash, run-oracle, step-check, run-action, run-cc, reverse
+Commands: check, hash, run-oracle, step-check, run-action, run-cc, reverse-action-batch, reverse
 (all tiers), and run-program. Run bennett-vm help for options. Diagnostics go
 to stderr and exit 1; program faults produce a FAILED JSON run.
 
@@ -108,3 +108,31 @@ The separately selected 0.8 ABI family retains its published behavior.
 ISA 0.9 programs carrying authenticated schedules can be loaded for estimate
 request resolution. Scheduled execution remains a capability gap and fails
 before a run is created; loading a schedule does not authorize ignoring it.
+
+`reverse-action-batch OBJECT ACTION [--range LO..HI] [--format binary|jsonl]`
+streams action forward/inverse checks with one admitted object per process.
+Fixed `--arg`, `--args`, `--token-aliases` and `--adjoint` options match ordinary
+action invocation. Without a range, stdin is JSONL with exactly `mut`, `in`,
+`mem` and `borrowed` entries; each row supplies the complete interface tuple.
+Ranges use arbitrary-precision half-open decimal ranks, ordered by inputs,
+mutable bundles, memory cells and the borrowed pool, last component fastest.
+Workers can use disjoint ranges and validate each stream independently.
+
+Every tuple starts from fresh state and invocation identities, executes the
+selected direction and its inverse, and checks exact phase, workspace release,
+preserved inputs/memory/pool and full restoration. The immediately flushed JCS
+header describes physical bit packing, rank order and fixed record size.
+Binary case records contain kind 1, seven check flags and little-endian packed
+forward/reversed states; JSONL records expose the same flags and hex payloads.
+All seven flags set (127) means the local checks passed. A complete footer gives
+exact case/failure counts; parse, execution or output errors abort without a
+complete footer. Failed local checks still produce records and a complete
+footer, with exit 1. `--flush-each` flushes after every case.
+
+The byte-stream contract is the published
+[reference batch interface](https://github.com/bennett-quantum/bennett-isa-spec/blob/c3df1d32f1ad3139dc863a90085604061ef483de/reference-interpreter/BATCH-REVERSE.md).
+Its independent `bennett-batch-reference` gate pin builds the release oracle;
+`BENNETT_BATCH_ISA_SPEC` resolves only that exact checkout. The mandatory ignored
+batch differential compares complete stdout bytes, including headers/footers.
+The bounded pure-oracle value cache retains only outcomes after literal private
+forward/inverse restoration; `BENNETT_VM_BATCH_CACHE=0` disables this reuse.

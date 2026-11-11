@@ -15,6 +15,9 @@ use crate::object::{Function, Instr, Object};
 use crate::value::{Budget, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 mod allocation_bindings;
+mod prepared;
+mod oracle_cache;
+pub mod batch;
 pub(crate) use allocation_bindings::bind_allocations;
 
 pub type Amp = (f64, f64);
@@ -44,6 +47,8 @@ pub struct GateRequest {
 #[derive(Clone, Debug)]
 pub struct QuantumState {
     pub amps: BTreeMap<BigUint, Amp>,
+    // Pure values belong to a prepared object; this is not quantum entry state.
+    oracle_values: Option<std::rc::Rc<std::cell::RefCell<oracle_cache::VerifiedValues>>>,
     // The physical amplitudes are exact numerators / sqrt(normalization).
     // Keeping the positive common denominator avoids introducing rounded
     // coefficients when measurement selects an arbitrary exact Born weight.
@@ -69,6 +74,7 @@ impl QuantumState {
         amps.insert(BigUint::zero(), (1.0, 0.0));
         QuantumState {
             amps,
+            oracle_values: None,
             exact: BTreeMap::from([(BigUint::zero(), Exact::one())]),
             normalization: Exact::one(),
             normalization_approx: 1.0,
@@ -719,6 +725,9 @@ pub(crate) fn execute_oracle_inner(
             "invalid oracle wire binding (width, shape or overlap)",
         ));
     }
+    let shared = if obj.isa == "0.8" && !obj.has_schedule && sig.args.is_empty() && sig.mem.is_empty() && args.is_empty() && state.target.is_none() {
+        state.oracle_values.clone()
+    } else { None };
     let mut first_error: Option<String> = None;
     let mut outcomes: OutcomeCache = Default::default();
     state.map_basis(|k| {
@@ -747,9 +756,14 @@ pub(crate) fn execute_oracle_inner(
             Some(o) => o.clone(),
             None => {
                 let mut mem = mem_cells.clone();
-                match crate::oracle::run_oracle(obj, callee, &inputs, &mut mem, args, budget) {
-                    Ok(o) => {
-                        let pair = (o.payload.clone(), o.code.clone());
+                let outcome = if let Some(cache) = &shared {
+                    cache.borrow_mut().outcome(obj, callee, &inputs, budget, pred.len())
+                } else {
+                    crate::oracle::run_oracle(obj, callee, &inputs, &mut mem, args, budget)
+                        .map(|o| (o.payload, o.code))
+                };
+                match outcome {
+                    Ok(pair) => {
                         outcomes.insert(key, pair.clone());
                         pair
                     }
@@ -2040,137 +2054,8 @@ pub fn execute_action_with_idle(
     inherited_pred: &[usize],
     idle: &[usize],
 ) -> Result<(), String> {
-    let f = obj
-        .function(name)
-        .ok_or_else(|| diag("5.3", format!("action @{name} is imported; executing an unresolved import needs linking")))?;
-    let bound = (obj.isa == "0.9").then(|| bind_allocations(f));
-    let f = bound.as_ref().unwrap_or(f);
-    if !matches!(
-        f.kind,
-        crate::object::FnKind::Action | crate::object::FnKind::PermAction
-    ) {
-        return Err(diag("5.3", format!("@{name} is not an action")));
-    }
-    let sig = crate::validate::action_sig(obj, name)?;
-    if !action_binding_valid(&sig, muts, ins_b, mems, inherited_pred) {
-        return Err(diag(
-            "3.3",
-            "invalid action wire binding (width, shape or overlap)",
-        ));
-    }
-    let certificate_budget = args
-        .iter()
-        .find_map(|v| {
-            if let Value::Token(b) | Value::TokenId(_, b) = v {
-                Some(*b)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
-    crate::certificate::verify_embedded(
-        obj,
-        name,
-        args,
-        &certificate_budget,
-        state.target.as_deref(),
-    )?;
-    // §9.4: an idle designation excludes the entire active interface and
-    // effective control context, even when no instruction happens to borrow.
-    let active = muts
-        .iter()
-        .chain(ins_b)
-        .flatten()
-        .copied()
-        .chain(mems.iter().flat_map(|r| r.cells.iter().flatten().copied()))
-        .chain(inherited_pred.iter().copied())
-        .collect::<BTreeSet<_>>();
-    let unique = idle.iter().copied().collect::<BTreeSet<_>>();
-    if unique.len() != idle.len()
-        || idle.iter().any(|w| {
-            *w >= state.next_wire
-                || active.contains(w)
-                || (state.target.is_some() && !state.wire_classes.contains_key(w))
-        })
-    {
-        return Err(
-            "§9.4: invalid designated idle set (duplicates, nonlive or active interface)".into(),
-        );
-    }
-    if let Some(t) = &state.target {
-        t.validate_function(f)?;
-    }
-    let mut bundles: HashMap<String, Vec<usize>> = HashMap::new();
-    for (p, wires) in f.lists[0].iter().zip(muts.iter()) {
-        bundles.insert(p.name.clone(), wires.clone());
-    }
-    for (p, wires) in f.lists[1].iter().zip(ins_b.iter()) {
-        bundles.insert(p.name.clone(), wires.clone());
-    }
-    let mut regions: HashMap<String, RegionWires> = HashMap::new();
-    for (p, region) in f.lists[2].iter().zip(mems.iter()) {
-        regions.insert(p.name.clone(), region.clone());
-    }
-    let mut arg_env: HashMap<String, Value> = HashMap::new();
-    for (p, v) in f.lists[3].iter().zip(args.iter()) {
-        arg_env.insert(p.name.clone(), v.clone());
-    }
-    let interface_bundles: BTreeSet<String> = bundles.keys().cloned().collect();
-    let widths = bundle_widths(obj, f);
-    let body_source: Vec<Instr> = f.blocks.iter().flat_map(|b| b.instrs.clone()).collect();
-    let body = if adjoint {
-        adjoint_list(&body_source, &widths, &obj.isa)
-    } else {
-        body_source.clone()
-    };
-    let mut ex = Exec {
-        obj,
-        state,
-        bundles,
-        regions,
-        local_images: BTreeMap::new(),
-        args: arg_env,
-        pred: inherited_pred.to_vec(),
-        borrowed: Vec::new(),
-        idle: idle.to_vec(),
-        func: name.to_string(),
-        exact_required: f.kind == crate::object::FnKind::PermAction,
-        releases: if obj.isa == "0.9" && adjoint {
-            allocation_bindings::release_metadata(f)
-        } else {
-            BTreeMap::new()
-        },
-        iterations: vec![],
-    };
-    // §4.6: all lexical regions exist at entry, including those inside
-    // zero-trip loops or declared after their first use.
-    let mut declarations = Vec::new();
-    for ins in &body_source {
-        collect_qregions(ins, &mut |q| declarations.push(q.clone()));
-    }
-    for q in declarations {
-        ex.create_region(&q)?;
-    }
-    ex.exec_list(&body)?;
-    ex.release_local_regions()?;
-    if ex.pred.len() != inherited_pred.len() {
-        return Err(diag(
-            "3.5",
-            format!("predicate stack of @{name} is not restored at exit"),
-        ));
-    }
-    let leaked: Vec<&String> = ex
-        .bundles
-        .keys()
-        .filter(|k| !interface_bundles.contains(*k))
-        .collect();
-    if !leaked.is_empty() {
-        return Err(diag(
-            "5.1",
-            format!("action @{name} exits with unmatched allocations {leaked:?}"),
-        ));
-    }
-    Ok(())
+    prepared::PreparedAction::new(obj, name, muts, ins_b, mems, inherited_pred, idle)?
+        .execute(state, args, adjoint)
 }
 
 fn collect_qregions(ins: &Instr, out: &mut impl FnMut(&Instr)) {

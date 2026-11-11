@@ -176,8 +176,20 @@ fn published_accuracy_controls_schedule_reuse_and_exact_default_shares() {
                 .unwrap()
         );
         let bindings = effective.document().get("bindings").unwrap();
-        assert_eq!(bindings.get("params_hash").unwrap().as_str(), Some(req.request().params_hash()));
-        assert_eq!(bindings.get("epsilon").unwrap().as_str().unwrap().parse::<Rational>().unwrap(), *req.accuracy().value());
+        assert_eq!(
+            bindings.get("params_hash").unwrap().as_str(),
+            Some(req.request().params_hash())
+        );
+        assert_eq!(
+            bindings
+                .get("epsilon")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .parse::<Rational>()
+                .unwrap(),
+            *req.accuracy().value()
+        );
         if effective.uses_attached() {
             assert_eq!(effective.document(), given.unwrap());
             assert_eq!(
@@ -444,5 +456,52 @@ fn explicit_entry_preserves_all_partitions_and_legacy_unavailable_behavior() {
         );
         assert!(out.is_null());
         assert_eq!(bennett_unload(program), 0);
+    }
+}
+
+#[test]
+fn every_other_request_binding_is_required_for_schedule_reuse() {
+    let vector = read("conformance/cases/G/G-estimate-parameter-hash-09/binding.json");
+    let (object, ids) = oracle();
+    let target = target();
+    let request = request(
+        &object,
+        invocation::decode_budget(vector.get("budget").unwrap()).unwrap(),
+        vector.get("args").unwrap().clone(),
+        vector.get("token_aliases").unwrap().as_arr().unwrap()[1].clone(),
+    );
+    let request = AccuracyRequest::new(request, ExplicitAccuracy::parse("0.1").unwrap());
+    let default = request
+        .effective_schedule(&object, &ids, &target, None)
+        .unwrap();
+    assert!(
+        request
+            .effective_schedule(&object, &ids, &target, Some(default.document()))
+            .unwrap()
+            .uses_attached()
+    );
+    for (field, value) in [
+        ("closure_hash", Json::Str("f".repeat(64))),
+        ("target_hash", Json::Str("f".repeat(64))),
+        ("region", Json::Str("different".into())),
+        ("variant", Json::Str("different".into())),
+        ("inherited_controls", Json::u64(4)),
+        ("budget", json::parse(r#"["3","0","0","0"]"#).unwrap()),
+        ("params_hash", Json::Str("f".repeat(64))),
+        ("token_aliases", json::parse("[0,0,0]").unwrap()),
+    ] {
+        let mut attached = default.document().clone();
+        let Json::Obj(ref mut fields) = attached else {
+            unreachable!()
+        };
+        let Json::Obj(bindings) = fields.get_mut("bindings").unwrap() else {
+            unreachable!()
+        };
+        bindings.insert(field.into(), value);
+        let effective = request
+            .effective_schedule(&object, &ids, &target, Some(&attached))
+            .unwrap();
+        assert!(!effective.uses_attached(), "{field}");
+        assert_eq!(effective.document(), default.document(), "{field}");
     }
 }

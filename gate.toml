@@ -47,8 +47,8 @@ env = { CARGO_BUILD_JOBS = "3" }
 
 [siblings."bennett-batch-reference"]
 repo = "bennett-isa-spec"
-sha = "4fdd20d7206da9371831704133b77bed43447270"
-note = "Immutable reviewed-candidate batch CLI interface/binary; main ISA contract pin is independent"
+sha = "c3df1d32f1ad3139dc863a90085604061ef483de"
+note = "Accepted main batch CLI/interface; independent from VM catalog/contract migration"
 
 [[siblings."bennett-batch-reference".build]]
 name = "batch reference CLI (release)"

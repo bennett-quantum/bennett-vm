@@ -26,8 +26,8 @@ name = "quality baseline"
 argv = ["python3", "scripts/quality.py"]
 
 [siblings."bennett-isa-spec"]
-sha = "3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1"
-note = "Published ISA main with token-alias CLI support and accepted ISA 0.9 lexical repairs"
+sha = "52e98dc0b879b454ce82dabafbffbd75e199efd4"
+note = "Published ISA main: K85/K86-K93 vectors, 0.9 headers and estimate parameter hashing"
 
 [[siblings."bennett-isa-spec".build]]
 name = "reference interpreter (debug)"

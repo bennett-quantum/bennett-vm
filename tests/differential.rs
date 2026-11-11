@@ -2641,7 +2641,7 @@ fn published_d_and_g_cli_cases_differential() {
             compared += 1;
         }
     }
-    assert_eq!(compared, 26, "all 10 D and 16 G CLI cases at the pin must participate");
+    assert_eq!(compared, 54, "all 38 D and 16 G CLI cases at the pin must participate");
 }
 
 use crate::device_fixture;

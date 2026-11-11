@@ -344,11 +344,11 @@ impl Schema {
                     let diagonal = matches!(op, "s" | "sdg" | "t" | "tdg" | "rz" | "cz");
                     let (sources, targets) = match op {
                         "mcx" => (
-                            self.bundles(
-                                &i.operands[0],
-                                &vec![1; list_operand(&i.operands[0])?.len()],
-                                false,
-                            )?,
+                            list_operand(&i.operands[0])?
+                                .iter()
+                                .map(|name| self.bundle(name, self.width(name)?, false))
+                                .collect::<Result<Vec<_>, _>>()?
+                                .concat(),
                             self.bundle(&i.operands[1], 1, true)?,
                         ),
                         "cx" => (

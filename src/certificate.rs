@@ -9,6 +9,7 @@ use crate::{
     value::{Budget, Value},
 };
 use std::collections::{BTreeMap, BTreeSet};
+mod fixed_images;
 mod metadata;
 pub(crate) use metadata::validate_metadata;
 fn err(s: impl std::fmt::Display) -> String {
@@ -53,6 +54,7 @@ struct Domain {
 fn domain_roles(obj: &Object, name: &str, j: &Json, positional: bool) -> Result<Domain, String> {
     let f = obj.function(name).ok_or_else(|| err("unknown region"))?;
     let oracle = f.kind == FnKind::Oracle;
+    fixed_images::validate(f, j)?;
     if !matches!(f.kind, FnKind::Action | FnKind::PermAction | FnKind::Oracle) {
         return Err(err("claims require an oracle or action"));
     }
@@ -159,7 +161,7 @@ fn domain_roles(obj: &Object, name: &str, j: &Json, positional: bool) -> Result<
             .position(|p| p.name == n)
             .ok_or_else(|| err("unknown domain region"))?;
         if !region_seen.insert(k) {
-            return Err(err("duplicate region"));
+            return Err(err("§12.2: duplicate region"));
         }
         let (start, count) = regions[k];
         let cells = field(r, "cells")?;

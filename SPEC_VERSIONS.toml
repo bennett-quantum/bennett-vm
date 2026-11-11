@@ -14,7 +14,7 @@ target = "0.8"
 version = "0.9"
 status = "partial-consumer"
 source = "spec/Bennett-ISA-Spec-0.9.md"
-commit = "52e98dc0b879b454ce82dabafbffbd75e199efd4"
+commit = "a42a896efa47ca71ca3733d6e28a0e4050f2d471"
 ref_envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
 
 [isa_0_8]
@@ -31,3 +31,10 @@ frame_domain_erratum_commit = "3b1090790d82a00ac95d30b8da6b42d1d7a9f5d1"
 feature = "abi-0-9"
 status = "partial-provider-no-token-alias-feature"
 headers_commit = "20ac075c175fd12b2b684186c39c7d44561a353c"
+
+[estimate_accuracy_1]
+contract = "spec/Launch-Estimate-Accuracy-1.md"
+header = "spec/bennett_estimate_accuracy_1.h"
+commit = "a42a896efa47ca71ca3733d6e28a0e4050f2d471"
+feature = "estimate_accuracy/1"
+status = "request-boundary-implemented-feature-unadvertised"

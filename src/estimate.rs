@@ -5,6 +5,8 @@ use crate::{
     target::{Event, LiveInterval, Rational as R, Target},
 };
 use std::collections::BTreeMap;
+mod request;
+pub use request::{AccuracyRequest, EffectiveSchedule, ExplicitAccuracy, ResolvedRequest};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRow {
     pub decimal: String,

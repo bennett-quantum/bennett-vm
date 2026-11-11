@@ -285,6 +285,8 @@ fn c11_launch09_provider_contract() {
         .arg(repo.join("include"))
         .arg("-I")
         .arg(crate::pins::isa().join("include"))
+        .arg("-I")
+        .arg(crate::pins::isa().join("spec"))
         .arg(repo.join("tests/launch_abi09.c"))
         .arg(tmp.join("0.9/debug/libbennett_vm.a"))
         .args(["-ldl", "-lpthread", "-lm", "-o"])
@@ -331,6 +333,7 @@ fn c11_launch09_provider_contract() {
                 .any(|s| s.ends_with(" bennett_sched_features")),
             has_query
         );
+        assert_eq!(symbols.lines().any(|s| s.ends_with(" bennett_estimate_run_at_accuracy")), has_query);
     }
 }
 

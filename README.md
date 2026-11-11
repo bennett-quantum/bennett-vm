@@ -88,3 +88,15 @@ BENNETT_JIT_AUDIT=1 prints native execution counters to stderr.
 The mandatory differential suite compares each optimisation mode and native
 execution with the interpreter and pinned published CLI oracle. Set
 BENNETT_HARNESS_COUNTS=1 and add --nocapture to print comparison counts.
+
+The additive `bennett_estimate_run_at_accuracy` entry is present in the 0.9
+provider. Its declaration comes from the pinned
+`spec/bennett_estimate_accuracy_1.h`; add the pin's `spec/` directory to the
+include path alongside `include/`. The request copies and validates the
+explicit decimal accuracy exactly, binds it independently of the args-only
+parameter hash, and selects a matching schedule or an empty default schedule
+at that requested value. Valid requests still reach the existing unavailable
+estimator boundary. The published feature identifier is `estimate_accuracy/1`;
+it remains unadvertised until complete K12/K91 realization, exact resources
+and certificate production/checking work. Legacy entries without accuracy
+retain their current behavior; their missing-accuracy policy is still pending.

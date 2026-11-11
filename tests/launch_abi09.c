@@ -2,6 +2,7 @@
 #define BENNETT_ABI_FAMILY 9
 #include "bennett_vm.h"
 #include <bennett_sched_0_9.h>
+#include <bennett_estimate_accuracy_1.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,6 +39,14 @@ int main(int argc, char** argv) {
     estimate = (void*)1;
     assert(bennett_estimate_run_with_token_aliases(NULL, "p", 0, "forward", 0,
         (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, &estimate) == BENNETT_E_ARG);
+    assert(estimate == NULL);
+    estimate = (void*)1;
+    assert(bennett_estimate_run_at_accuracy(NULL, "p", 0, "forward", 0,
+        (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, "0.1", &estimate) == BENNETT_E_ARG);
+    assert(estimate == NULL);
+    estimate = (void*)1;
+    assert(bennett_estimate_run_at_accuracy(NULL, "p", 0, "forward", 0,
+        (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, NULL, &estimate) == BENNETT_E_ARG);
     assert(estimate == NULL);
     puts("0.9 published headers, queries and estimate dispatch: PASS");
 }

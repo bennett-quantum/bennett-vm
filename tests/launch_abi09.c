@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 int main(int argc, char** argv) {
-    assert(argc == 2);
+    assert(argc == 3);
     FILE* file = fopen(argv[1], "rb"); assert(file);
     assert(fseek(file, 0, SEEK_END) == 0);
     size_t size = (size_t)ftell(file); rewind(file);
@@ -48,5 +48,28 @@ int main(int argc, char** argv) {
     assert(bennett_estimate_run_at_accuracy(NULL, "p", 0, "forward", 0,
         (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, NULL, &estimate) == BENNETT_E_ARG);
     assert(estimate == NULL);
+    file = fopen(argv[2], "rb"); assert(file);
+    assert(fseek(file, 0, SEEK_END) == 0);
+    size = (size_t)ftell(file); rewind(file);
+    object = malloc(size); assert(object);
+    assert(fread(object, 1, size, file) == size); fclose(file);
+    program = NULL;
+    assert(bennett_load(object, size, NULL, 0, &program) == BENNETT_OK);
+    free(object);
+    assert(bennett_budget(program, "p", 1, 0, 0, 0, &token) == BENNETT_OK);
+    const char* missing = "E_ESTIMATE_ACCURACY_REQUIRED: use bennett_estimate_run_at_accuracy with epsilon_decimal";
+    estimate = (void*)1;
+    assert(bennett_estimate_run(program, "p", token, "forward", 0,
+        (const uint8_t*)"[]", 2, &estimate) == BENNETT_E_ARG);
+    assert(estimate == NULL && strcmp(bennett_last_error(), missing) == 0);
+    estimate = (void*)1;
+    assert(bennett_estimate_run_with_token_aliases(program, "p", token, "forward", 0,
+        (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, &estimate) == BENNETT_E_ARG);
+    assert(estimate == NULL && strcmp(bennett_last_error(), missing) == 0);
+    estimate = (void*)1;
+    assert(bennett_estimate_run_at_accuracy(program, "p", token, "forward", 0,
+        (const uint8_t*)"[]", 2, (const uint8_t*)"[]", 2, "0.1", &estimate) == BENNETT_E_TARGET);
+    assert(estimate == NULL);
+    assert(bennett_unload(program) == BENNETT_OK);
     puts("0.9 published headers, queries and estimate dispatch: PASS");
 }

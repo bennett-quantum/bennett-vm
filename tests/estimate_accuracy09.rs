@@ -26,6 +26,17 @@ fn request(
 ) -> ResolvedRequest {
     ResolvedRequest::new(object, "o", "forward", 3, budget, args, Some(aliases)).unwrap()
 }
+fn native_target() -> Target {
+    let mut value = target().document;
+    let Json::Obj(ref mut fields) = value else {
+        unreachable!()
+    };
+    let Json::Arr(gates) = fields.get_mut("gates").unwrap() else {
+        unreachable!()
+    };
+    gates.push(json::parse(r#"{"classes":["*"],"controls":{"max":"unbounded","min":0},"cost":{"time":1},"epsilon":0,"op":"x"}"#).unwrap());
+    Target::parse(&value.to_jcs()).unwrap()
+}
 #[test]
 fn published_args_only_hash_and_separately_resolved_invocations() {
     let vector = read("conformance/cases/G/G-estimate-parameter-hash-09/binding.json");
@@ -433,7 +444,13 @@ fn explicit_entry_preserves_all_partitions_and_legacy_unavailable_behavior() {
                     aliases.len(),
                     &mut out
                 ),
-                1
+                11
+            );
+            assert_eq!(
+                std::ffi::CStr::from_ptr(bennett_last_error())
+                    .to_str()
+                    .unwrap(),
+                bennett_vm::estimate::MISSING_ACCURACY_DIAGNOSTIC
             );
             assert!(out.is_null());
         }
@@ -503,5 +520,298 @@ fn every_other_request_binding_is_required_for_schedule_reuse() {
             .unwrap();
         assert!(!effective.uses_attached(), "{field}");
         assert_eq!(effective.document(), default.document(), "{field}");
+    }
+}
+
+#[test]
+fn published_legacy_accuracy_resolution_never_invents_a_root_value() {
+    let vector = read("conformance/cases/G/G-estimate-root-accuracy-09/accuracy.json");
+    let binding = read("conformance/cases/G/G-estimate-parameter-hash-09/binding.json");
+    let diagnostic = vector
+        .get("legacy_missing_accuracy")
+        .unwrap()
+        .get("diagnostic")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    let (object, ids) = oracle();
+    let target = target();
+    let request = request(
+        &object,
+        invocation::decode_budget(binding.get("budget").unwrap()).unwrap(),
+        binding.get("args").unwrap().clone(),
+        binding.get("token_aliases").unwrap().as_arr().unwrap()[1].clone(),
+    );
+    let template = AccuracyRequest::new(
+        request.clone(),
+        ExplicitAccuracy::parse(vector.get("request_epsilon").unwrap().as_str().unwrap()).unwrap(),
+    )
+    .effective_schedule(&object, &ids, &target, None)
+    .unwrap();
+    for case in vector.get("legacy_cases").unwrap().as_arr().unwrap() {
+        let descriptor = case.get("schedule").unwrap();
+        let mut document = template.document().clone();
+        let attached = if descriptor == &Json::Null {
+            None
+        } else {
+            let Json::Obj(ref mut fields) = document else {
+                unreachable!()
+            };
+            let Json::Obj(bindings) = fields.get_mut("bindings").unwrap() else {
+                unreachable!()
+            };
+            bindings.insert("epsilon".into(), descriptor.get("epsilon").unwrap().clone());
+            if descriptor.get("other_bindings_match") == Some(&Json::Bool(false)) {
+                bindings.insert("params_hash".into(), Json::Str("f".repeat(64)));
+            }
+            Some(&document)
+        };
+        let accuracy = request.legacy_accuracy(&object, &ids, Some(&target), attached);
+        if case.get("resolution").unwrap().as_str() == Some("missing") {
+            assert_eq!(accuracy.unwrap_err(), diagnostic);
+        } else {
+            let accuracy = accuracy.unwrap();
+            assert_eq!(
+                accuracy.source(),
+                case.get("epsilon").unwrap().as_str().unwrap()
+            );
+            let effective = AccuracyRequest::new(request.clone(), accuracy)
+                .effective_schedule(&object, &ids, &target, attached)
+                .unwrap();
+            assert!(effective.uses_attached());
+            assert_eq!(effective.document(), attached.unwrap());
+            assert_eq!(
+                effective.hash(),
+                bennett_vm::sha256::sha256_hex(attached.unwrap().to_jcs().as_bytes())
+            );
+        }
+    }
+}
+#[test]
+fn legacy_entry_without_schedule_returns_the_exact_published_diagnostic() {
+    use bennett_vm::launch::*;
+    use std::{ffi::CStr, ptr};
+    let vector = read("conformance/cases/G/G-estimate-root-accuracy-09/accuracy.json");
+    let diagnostic = vector
+        .get("legacy_missing_accuracy")
+        .unwrap()
+        .get("diagnostic")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    let raw =
+        crate::source09::source("perm_action @p (t:wire mut) () () (n:i8) ()\n^entry():\nx t");
+    unsafe {
+        let mut program = ptr::null_mut();
+        assert_eq!(
+            bennett_load(raw.as_ptr(), raw.len(), ptr::null(), 0, &mut program),
+            0
+        );
+        let mut token = 0;
+        assert_eq!(
+            bennett_budget(program, c"p".as_ptr(), 1, 0, 0, 0, &mut token),
+            0
+        );
+        let params = br#"["1"]"#;
+        let mut out = ptr::dangling_mut();
+        assert_eq!(
+            bennett_estimate_run_0_9(
+                program,
+                c"p".as_ptr(),
+                token,
+                c"forward".as_ptr(),
+                0,
+                params.as_ptr(),
+                params.len(),
+                &mut out
+            ),
+            11
+        );
+        assert!(out.is_null());
+        assert_eq!(
+            CStr::from_ptr(bennett_last_error()).to_str().unwrap(),
+            diagnostic
+        );
+        out = ptr::dangling_mut();
+        assert_eq!(
+            bennett_estimate_run_with_token_aliases(
+                program,
+                c"p".as_ptr(),
+                token,
+                c"forward".as_ptr(),
+                0,
+                params.as_ptr(),
+                params.len(),
+                b"[]".as_ptr(),
+                2,
+                &mut out
+            ),
+            11
+        );
+        assert!(out.is_null());
+        assert_eq!(
+            CStr::from_ptr(bennett_last_error()).to_str().unwrap(),
+            diagnostic
+        );
+        out = ptr::dangling_mut();
+        assert_eq!(
+            bennett_estimate_run_0_9(
+                program,
+                c"p".as_ptr(),
+                token,
+                c"forward".as_ptr(),
+                0,
+                b"[]".as_ptr(),
+                2,
+                &mut out
+            ),
+            11
+        );
+        assert!(out.is_null());
+        assert_ne!(
+            CStr::from_ptr(bennett_last_error()).to_str().unwrap(),
+            diagnostic
+        ); // argument validity precedes accuracy resolution
+        assert_eq!(bennett_unload(program), 0);
+    }
+}
+
+#[test]
+fn legacy_entries_use_only_matching_schedule_accuracy_at_the_abi_boundary() {
+    use bennett_vm::launch::*;
+    use std::{ffi::CStr, ptr};
+    let vector = read("conformance/cases/G/G-estimate-root-accuracy-09/accuracy.json");
+    let diagnostic = vector
+        .get("legacy_missing_accuracy")
+        .unwrap()
+        .get("diagnostic")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    let source = crate::source09::source(
+        "perm_action @p (t:wire mut) () () (n:i8) ()\n^entry():\nx t\nfn cc @main (q:qreg[1], n:i8) () () () ()\n^entry():\naction_call @p (q) () () (n)\nret",
+    );
+    let (object, ids) = bennett_vm::load(&source, false).unwrap();
+    let target = native_target();
+    let params = json::parse(r#"["1"]"#).unwrap();
+    let budget = Budget {
+        steps: 1,
+        heap: 0,
+        stack: 0,
+        depth: 0,
+    };
+    let request =
+        ResolvedRequest::new(&object, "p", "forward", 0, budget, params.clone(), None).unwrap();
+    let template = AccuracyRequest::new(
+        request,
+        ExplicitAccuracy::parse(vector.get("request_epsilon").unwrap().as_str().unwrap()).unwrap(),
+    )
+    .effective_schedule(&object, &ids, &target, None)
+    .unwrap();
+    for case in vector.get("legacy_cases").unwrap().as_arr().unwrap() {
+        let mut raw = source.clone();
+        let descriptor = case.get("schedule").unwrap();
+        if descriptor != &Json::Null {
+            let mut schedule = template.document().clone();
+            let Json::Obj(ref mut fields) = schedule else {
+                unreachable!()
+            };
+            let Json::Obj(bindings) = fields.get_mut("bindings").unwrap() else {
+                unreachable!()
+            };
+            bindings.insert("epsilon".into(), descriptor.get("epsilon").unwrap().clone());
+            if descriptor.get("other_bindings_match") == Some(&Json::Bool(false)) {
+                bindings.insert("params_hash".into(), Json::Str("f".repeat(64)));
+            }
+            raw.push_str(&format!("\nsection schedule\n{}\n", schedule.to_jcs()));
+        }
+        unsafe {
+            let target_bytes = target.document.to_jcs();
+            let mut program = ptr::null_mut();
+            assert_eq!(
+                bennett_load(
+                    raw.as_ptr(),
+                    raw.len(),
+                    target_bytes.as_ptr(),
+                    target_bytes.len(),
+                    &mut program
+                ),
+                0,
+                "{}",
+                CStr::from_ptr(bennett_last_error()).to_string_lossy()
+            );
+            let mut token = 0;
+            assert_eq!(
+                bennett_budget(program, c"p".as_ptr(), 1, 0, 0, 0, &mut token),
+                0
+            );
+            let mut qreg = 0;
+            assert_eq!(bennett_qreg_new(program, c"fast".as_ptr(), 1, &mut qreg), 0);
+            for aliases in [false, true] {
+                let params_bytes = params.to_jcs();
+                let mut out = ptr::dangling_mut();
+                let code = if aliases {
+                    bennett_estimate_run_with_token_aliases(
+                        program,
+                        c"p".as_ptr(),
+                        token,
+                        c"forward".as_ptr(),
+                        0,
+                        params_bytes.as_ptr(),
+                        params_bytes.len(),
+                        b"[]".as_ptr(),
+                        2,
+                        &mut out,
+                    )
+                } else {
+                    bennett_estimate_run_0_9(
+                        program,
+                        c"p".as_ptr(),
+                        token,
+                        c"forward".as_ptr(),
+                        0,
+                        params_bytes.as_ptr(),
+                        params_bytes.len(),
+                        &mut out,
+                    )
+                };
+                assert!(out.is_null());
+                if case.get("resolution").unwrap().as_str() == Some("missing") {
+                    assert_eq!(code, 11);
+                    assert_eq!(
+                        CStr::from_ptr(bennett_last_error()).to_str().unwrap(),
+                        diagnostic
+                    );
+                } else {
+                    assert_eq!(
+                        code,
+                        1,
+                        "{}",
+                        CStr::from_ptr(bennett_last_error()).to_string_lossy()
+                    );
+                    assert!(
+                        !CStr::from_ptr(bennett_last_error())
+                            .to_str()
+                            .unwrap()
+                            .contains("E_ESTIMATE_ACCURACY_REQUIRED")
+                    );
+                }
+            }
+            if descriptor != &Json::Null {
+                let mut args = ptr::null_mut();
+                assert_eq!(bennett_args_new(2, &mut args), 0);
+                assert_eq!(bennett_args_set_qreg(args, 0, qreg), 0);
+                assert_eq!(bennett_args_set_int(args, 1, 8, [1u8].as_ptr()), 0);
+                let mut run = u64::MAX;
+                assert_eq!(
+                    bennett_run(program, c"main".as_ptr(), args, ptr::null(), 0, &mut run),
+                    10
+                );
+                assert_eq!(run, u64::MAX);
+                bennett_args_free(args);
+            }
+            assert_eq!(bennett_qreg_free(program, qreg), 0); // no quantum effect from failed estimate requests
+            assert_eq!(bennett_unload(program), 0);
+        }
     }
 }

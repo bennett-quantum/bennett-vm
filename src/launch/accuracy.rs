@@ -40,18 +40,34 @@ pub unsafe extern "C" fn bennett_estimate_run_at_accuracy(
             Some(aliases),
         )?;
         let request = AccuracyRequest::new(request, accuracy);
-        if let Some(target) = p.resources.target() {
-            let ids = crate::identity::compute(&p.obj).map_err(|e| error(ARG, e))?;
-            let attached = crate::sched::object_schedule(&p.obj).map_err(|e| error(ARG, e))?;
-            request
-                .effective_schedule(&p.obj, &ids, target, attached.as_ref())
-                .map_err(|e| error(10, e))?;
-        }
-        let function = p
-            .obj
-            .function(request.request().region())
-            .expect("resolved estimate region");
-        // No feature promise or fabricated resource/certificate result at this boundary.
-        estimate_unavailable(p, function)
+        finish(p, request)
     })
+}
+
+pub(super) fn legacy_estimate(
+    p: &bennett_program_t,
+    request: crate::estimate::ResolvedRequest,
+) -> Fallible<()> {
+    let ids = crate::identity::compute(&p.obj).map_err(|e| error(ARG, e))?;
+    let attached = crate::sched::object_schedule(&p.obj).map_err(|e| error(ARG, e))?;
+    let accuracy = request
+        .legacy_accuracy(&p.obj, &ids, p.resources.target(), attached.as_ref())
+        .map_err(|e| error(ARG, e))?;
+    finish(p, AccuracyRequest::new(request, accuracy))
+}
+
+fn finish(p: &bennett_program_t, request: AccuracyRequest) -> Fallible<()> {
+    if let Some(target) = p.resources.target() {
+        let ids = crate::identity::compute(&p.obj).map_err(|e| error(ARG, e))?;
+        let attached = crate::sched::object_schedule(&p.obj).map_err(|e| error(ARG, e))?;
+        request
+            .effective_schedule(&p.obj, &ids, target, attached.as_ref())
+            .map_err(|e| error(10, e))?;
+    }
+    let function = p
+        .obj
+        .function(request.request().region())
+        .expect("resolved estimate region");
+    // No feature promise or fabricated resource/certificate result at this boundary.
+    estimate_unavailable(p, function)
 }

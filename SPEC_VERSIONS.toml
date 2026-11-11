@@ -14,7 +14,7 @@ target = "0.8"
 version = "0.9"
 status = "partial-consumer"
 source = "spec/Bennett-ISA-Spec-0.9.md"
-commit = "a42a896efa47ca71ca3733d6e28a0e4050f2d471"
+commit = "220f4e4dd9ea13cf81f3c28651219710897cd79d"
 ref_envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
 
 [isa_0_8]
@@ -35,6 +35,12 @@ headers_commit = "20ac075c175fd12b2b684186c39c7d44561a353c"
 [estimate_accuracy_1]
 contract = "spec/Launch-Estimate-Accuracy-1.md"
 header = "spec/bennett_estimate_accuracy_1.h"
-commit = "a42a896efa47ca71ca3733d6e28a0e4050f2d471"
+commit = "220f4e4dd9ea13cf81f3c28651219710897cd79d"
 feature = "estimate_accuracy/1"
 status = "request-boundary-implemented-feature-unadvertised"
+
+[legacy_estimate_accuracy]
+contract = "spec/Launch-Estimate-Accuracy-1.md"
+commit = "220f4e4dd9ea13cf81f3c28651219710897cd79d"
+missing_status = "BENNETT_E_ARG"
+missing_diagnostic = "E_ESTIMATE_ACCURACY_REQUIRED"

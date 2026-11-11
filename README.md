@@ -98,5 +98,13 @@ parameter hash, and selects a matching schedule or an empty default schedule
 at that requested value. Valid requests still reach the existing unavailable
 estimator boundary. The published feature identifier is `estimate_accuracy/1`;
 it remains unadvertised until complete K12/K91 realization, exact resources
-and certificate production/checking work. Legacy entries without accuracy
-retain their current behavior; their missing-accuracy policy is still pending.
+and certificate production/checking work. For launch 0.9 legacy entries without accuracy, a schedule matching all other
+request bindings supplies its exact epsilon. Otherwise they return
+`BENNETT_E_ARG` with
+`E_ESTIMATE_ACCURACY_REQUIRED: use bennett_estimate_run_at_accuracy with epsilon_decimal`.
+There is no numerical default; this request diagnostic leaves the output null.
+The separately selected 0.8 ABI family retains its published behavior.
+
+ISA 0.9 programs carrying authenticated schedules can be loaded for estimate
+request resolution. Scheduled execution remains a capability gap and fails
+before a run is created; loading a schedule does not authorize ignoring it.

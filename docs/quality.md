@@ -315,6 +315,25 @@ complete target lowering, exact resource production and bound certificates
 remain incomplete. No successful estimate is claimed. Only the six changed
 implementation rows are refreshed; other baseline entries remain unchanged.
 
+The subsequent 220f4e4 publication defines the legacy policy. A dedicated
+red ABI test observed E_TARGET before the specified E_ARG/missing-accuracy
+result. Both launch 0.9 legacy entries now validate arguments/partitions,
+then resolve epsilon solely from a schedule matching every other request
+binding. Absence/mismatch returns the exact E_ESTIMATE_ACCURACY_REQUIRED
+message and NULL output, without effects or a numerical default. Matching
+0.10 and explicit zero retain the attached schedule's bytes/hash; the 0.8
+provider family is unchanged. The explicit and legacy entries share their
+post-resolution boundary. Full estimation remains unimplemented and the
+feature manifest continues to withhold estimate_accuracy/1.
+
+Legacy matching-schedule ABI tests exposed the old unconditional ref@0.8
+load refusal. ISA 0.9 loading now authenticates the object-versioned library
+and retains the schedule for estimate resolution. A second red observed run
+creation before a schedule consumer existed; scheduled execution now stops
+before creating a run or touching quantum state. This preserves that existing
+capability gap rather than silently discarding a newly loadable schedule.
+The 0.8 scheduled-load path retains its earlier behavior.
+
 <!-- quality-baseline -->
 ```json
 {
@@ -480,8 +499,8 @@ implementation rows are refreshed; other baseline entries remain unchanged.
       "trivial_wrappers": 0
     },
     "src/estimate/request.rs": {
-      "branch_mass": 47,
-      "max_lines": 42,
+      "branch_mass": 61,
+      "max_lines": 44,
       "over_100": 0,
       "over_25": 3,
       "over_300": 0,
@@ -568,16 +587,16 @@ implementation rows are refreshed; other baseline entries remain unchanged.
       "trivial_wrappers": 5
     },
     "src/launch.rs": {
-      "branch_mass": 348,
-      "max_lines": 71,
+      "branch_mass": 353,
+      "max_lines": 74,
       "over_100": 0,
       "over_25": 14,
       "over_300": 0,
       "trivial_wrappers": 19
     },
     "src/launch/accuracy.rs": {
-      "branch_mass": 5,
-      "max_lines": 51,
+      "branch_mass": 4,
+      "max_lines": 39,
       "over_100": 0,
       "over_25": 1,
       "over_300": 0,

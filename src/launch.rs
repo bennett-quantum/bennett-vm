@@ -273,10 +273,11 @@ pub unsafe extern "C" fn bennett_load(
                 .unwrap();
             let ids = crate::identity::compute(&obj).map_err(|e| error(10, e))?;
             crate::sched::validate_entries(&doc, &obj, &ids).map_err(|e| error(10, e))?;
-            return crate::sched::require_library(
-                doc.get("bindings").and_then(|b| b.get("expansion")),
-            )
-            .map_err(|e| error(10, e));
+            let expansion = doc.get("bindings").and_then(|b| b.get("expansion"));
+            if obj.isa != "0.9" {
+                return crate::sched::require_library(expansion).map_err(|e| error(10, e));
+            }
+            crate::sched::require_library_version(expansion, &obj.isa).map_err(|e| error(10, e))?;
         }
         if let Some(t) = &target {
             t.validate_object(&obj).map_err(|e| error(4, e))?;
@@ -537,6 +538,9 @@ pub unsafe fn run_with_options(
             return Err(error(ARG, "§3.3: aliased register operands"));
         }
         let entropy = bytes(entropy, entropy_len)?.to_vec();
+        if p.obj.has_schedule {
+            return Err(error(10, "§11: scheduled execution capability is unavailable"));
+        }
         let r = id();
         let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy)
             .map_err(|e| error(INVALID, e))?;
@@ -1074,12 +1078,7 @@ fn estimate_request(
         params,
         aliases,
     )?;
-    let function = p
-        .obj
-        .function(request.region())
-        .expect("resolved estimate region");
-    // Legacy accuracy policy is pending; preserve the existing estimate boundary.
-    estimate_unavailable(p, function)
+    accuracy::legacy_estimate(p, request)
 }
 
 #[unsafe(no_mangle)]

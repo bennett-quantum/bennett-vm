@@ -6,7 +6,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 mod request;
-pub use request::{AccuracyRequest, EffectiveSchedule, ExplicitAccuracy, ResolvedRequest};
+pub use request::{AccuracyRequest, EffectiveSchedule, ExplicitAccuracy, ResolvedRequest, MISSING_ACCURACY_DIAGNOSTIC};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRow {
     pub decimal: String,

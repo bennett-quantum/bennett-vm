@@ -9,6 +9,9 @@ use crate::{
     value::{Budget, Value},
 };
 
+pub const MISSING_ACCURACY_DIAGNOSTIC: &str =
+    "E_ESTIMATE_ACCURACY_REQUIRED: use bennett_estimate_run_at_accuracy with epsilon_decimal";
+
 #[derive(Clone, Debug)]
 pub struct ResolvedRequest {
     region: String,
@@ -91,6 +94,75 @@ impl ResolvedRequest {
             .get("token_aliases")
             .expect("resolved partition")
     }
+    /// Compare every request binding except accuracy, which legacy callers lack.
+    pub fn matches_schedule_identity(
+        &self,
+        document: &Json,
+        object: &Object,
+        ids: &Identities,
+        target: &Target,
+    ) -> Result<bool, String> {
+        let binding = crate::target::field(document, "bindings")?;
+        let closure = ids
+            .closure
+            .get(self.region())
+            .and_then(Option::as_ref)
+            .ok_or("§10.1: estimate region closure unavailable")?;
+        for (key, expected) in [
+            ("closure_hash", closure.as_str()),
+            ("target_hash", target.hash.as_str()),
+            ("region", self.region()),
+            ("variant", self.variant()),
+            ("params_hash", self.params_hash()),
+        ] {
+            if binding.get(key).and_then(Json::as_str) != Some(expected) {
+                return Ok(false);
+            }
+        }
+        if binding.get("inherited_controls").and_then(Json::as_u64)
+            != Some(self.inherited_controls as u64)
+        {
+            return Ok(false);
+        }
+        let oracle = object
+            .function(self.region())
+            .is_some_and(|f| f.kind == FnKind::Oracle);
+        let inferred = Json::Arr(if oracle { vec![Json::u64(0)] } else { vec![] });
+        if binding.get("token_aliases").unwrap_or(&inferred) != self.token_aliases() {
+            return Ok(false);
+        }
+        let actual = crate::target::arr(crate::target::field(binding, "budget")?)?;
+        let b = self.budget;
+        Ok(actual.len() == 4
+            && actual
+                .iter()
+                .zip([b.steps, b.heap, b.stack, b.depth])
+                .all(|(a, b)| a.as_u64() == Some(b)))
+    }
+    /// A matching schedule is the sole accuracy source for the legacy entries.
+    pub fn legacy_accuracy(
+        &self,
+        object: &Object,
+        ids: &Identities,
+        target: Option<&Target>,
+        attached: Option<&Json>,
+    ) -> Result<ExplicitAccuracy, String> {
+        let (Some(target), Some(attached)) = (target, attached) else {
+            return Err(MISSING_ACCURACY_DIAGNOSTIC.into());
+        };
+        if !self.matches_schedule_identity(attached, object, ids, target)? {
+            return Err(MISSING_ACCURACY_DIAGNOSTIC.into());
+        }
+        let value = attached
+            .get("bindings")
+            .and_then(|b| b.get("epsilon"))
+            .ok_or(MISSING_ACCURACY_DIAGNOSTIC)?;
+        let source = match value {
+            Json::Str(s) | Json::Num(s) => s.as_str(),
+            _ => return Err("§10.1: schedule accuracy must be a decimal".into()),
+        };
+        ExplicitAccuracy::parse(source)
+    }
 }
 fn budget_json(budget: Budget) -> Json {
     Json::Arr(
@@ -166,7 +238,7 @@ impl AccuracyRequest {
     ) -> Result<EffectiveSchedule, String> {
         let expected = self.default_schedule(ids, target)?;
         if let Some(attached) = attached {
-            if self.matches(attached, &expected, object)? {
+            if self.matches(attached, object, ids, target)? {
                 let b = self.bindings();
                 sched::consume(attached, object, ids, target, &b)?;
                 return Ok(EffectiveSchedule::new(attached.clone(), true));
@@ -187,38 +259,20 @@ impl AccuracyRequest {
             epsilon: self.accuracy.value(),
         }
     }
-    fn matches(&self, document: &Json, expected: &Json, object: &Object) -> Result<bool, String> {
-        let binding = crate::target::field(document, "bindings")?;
-        let expected = crate::target::field(expected, "bindings")?;
-        for key in [
-            "closure_hash",
-            "target_hash",
-            "region",
-            "variant",
-            "inherited_controls",
-            "params_hash",
-        ] {
-            if binding.get(key) != expected.get(key) {
-                return Ok(false);
-            }
-        }
-        let oracle = object
-            .function(self.request.region())
-            .is_some_and(|f| f.kind == FnKind::Oracle);
-        let inferred = Json::Arr(if oracle { vec![Json::u64(0)] } else { vec![] });
-        if binding.get("token_aliases").unwrap_or(&inferred) != self.request.token_aliases() {
-            return Ok(false);
-        }
-        let actual = crate::target::arr(crate::target::field(binding, "budget")?)?;
-        let budget = self.request.budget;
-        if actual.len() != 4
-            || actual
-                .iter()
-                .zip([budget.steps, budget.heap, budget.stack, budget.depth])
-                .any(|(a, b)| a.as_u64() != Some(b))
+    fn matches(
+        &self,
+        document: &Json,
+        object: &Object,
+        ids: &Identities,
+        target: &Target,
+    ) -> Result<bool, String> {
+        if !self
+            .request
+            .matches_schedule_identity(document, object, ids, target)?
         {
             return Ok(false);
         }
+        let binding = crate::target::field(document, "bindings")?;
         Ok(
             crate::target::decimal(crate::target::field(binding, "epsilon")?)?
                 == *self.accuracy.value(),

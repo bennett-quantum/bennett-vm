@@ -300,7 +300,9 @@ fn c11_launch09_provider_contract() {
     );
     let object = tmp.join("launch.bisa");
     std::fs::write(&object, fixture()).unwrap();
-    let out = Command::new(exe).arg(object).output().unwrap();
+    let object09 = tmp.join("accuracy09.bisa");
+    std::fs::write(&object09, crate::source09::source("perm_action @p (t:wire mut) () () () ()\n^entry():\nx t")).unwrap();
+    let out = Command::new(exe).arg(object).arg(object09).output().unwrap();
     assert!(
         out.status.success(),
         "stdout={} stderr={}",

@@ -1,0 +1,14 @@
+bennett-object isa=0.8 object=0.8 launch=0.8 sched=0.8 cert=0.8 coverage=0.8 target=0.8 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"aea2c8785854ab166cf7d3382c8193fe43637ecf355259347e79e42c47a12fca","kind":"oracle","name":"f","signature":{"abi":"0.8","args":[],"fault":4,"in":[8,8],"kind":"oracle","mem":[],"tgt":8,"tier":"q"}},"1":{"interface_hash":"aca04b690afda46c67aaa427438806844be60c0642d9d6ceada17a6397224c02","kind":"action","name":"full","signature":{"abi":"0.8","args":["token"],"bounds":[],"in":[8,8],"kind":"action","mem":[],"mut":[8,4],"tier":"q"}}}
+
+section functions
+oracle @f (x:wire[8] in, y:wire[8] in) (t:wire[8]) (fr:wire[4]) () ()
+regs { z:reg[8] }
+^entry():
+z = lift.add x y
+lift.retval z
+action @full (t:wire[8] mut, f:wire[4] mut) (x:wire[8] in, y:wire[8] in) () (tk:token) ()
+^entry():
+oracle_call @f tk (x, y) t f () ()

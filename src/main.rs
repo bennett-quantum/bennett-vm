@@ -23,6 +23,7 @@ bennett-vm reverse <object> <entry> [run-cc options] [--steps N]
 bennett-vm reverse <object> <oracle> --input <x[,y...]> [--budget B[,heap,stack,depth]] [--steps N] [--mem name=hex | --mem-file name=path] [--arg value]
 bennett-vm reverse <object> <action> (--mut <v[,...]> [--in <v[,...]>] [--mem name=hex] | --basis <bits> | --state <bits=re[,im];...>) [--args <a[,...]>] [--adjoint]
 bennett-vm run-action <object> <action> (--mut <v[,...]> [--in <v[,...]>] [--mem name=hex] | --basis <bits> | --state <bits=re[,im];...>) [--args <a[,...]> | --arg value...] [--adjoint]
+bennett-vm reverse-action-batch <object> <action> [--range LO..HI] [--format binary|jsonl] [--flush-each] [--arg value...] [--token-aliases JSON] [--adjoint]\n\
 bennett-vm run-program <object> <cc-entry> [--args <a[,b...]> | --input <a[,b...]> | --arg value...] [--entropy hex] [--replies file] [--tape-out file] [--replay-tape file] [--draws <d[,e...]>] [--budget B[,heap,stack,depth]] [--mem global=hex] [--reverse] [--target file]";
 
 fn read_object(path: &str) -> Result<String, String> {
@@ -58,6 +59,7 @@ fn run(args: &[String]) -> Result<(), String> {
         "reverse" => bennett_vm::cc::cmd_reverse(&args[1..]),
         "run-program" => bennett_vm::launch::cmd_run_program(&args[1..]),
         "step-check" => bennett_vm::stepcli::check(&args[1..]),
+        "reverse-action-batch" => bennett_vm::action::batch::command(&args[1..]),
         "run-action" => bennett_vm::qcli::command(&args[1..], false),
         other => Err(format!("unknown subcommand {other}\n{USAGE}")),
     }

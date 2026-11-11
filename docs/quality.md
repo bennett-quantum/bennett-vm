@@ -334,6 +334,33 @@ before creating a run or touching quantum state. This preserves that existing
 capability gap rather than silently discarding a newly loadable schedule.
 The 0.8 scheduled-load path retains its earlier behavior.
 
+Streamed action reversal admits the object and prepares immutable action setup once,
+then clones a zero-state layout and binds fresh invocation identities for each tuple.
+The ordinary executor serves both the single and batch paths. Each tuple executes
+the selected direction and its inverse with exact phase, layout, preservation and
+restoration checks. A bounded pure-value cache applies only to unscheduled ISA 0.8
+oracles without classical or memory arguments. Every cache miss agrees with the
+ordinary outcome and literally executes the budgeted forward/inverse step machine,
+checking every private state field and empty frames before retaining payload/fault.
+Hits retain the invocation checks and actual coherent XOR on fresh tuple state.
+
+The new CLI first failed its tests as an unknown command. Focused batch tests pass
+10/10, including 2,520 byte-identical rows against accepted reference c3df1d3 in
+both engines/formats/directions and 12 comparisons to ordinary VM reversal with
+faulting inputs. Other witnesses cover noncommuting adjoints, streaming flush,
+invalid-input and broken-pipe aborts, failed-check complete footers, arbitrary-width
+ranges, memory, borrowed wires and token partitions. The independent reference pin
+is separate from the existing main ISA catalog pin. Structural baseline updates
+cover only the six changed implementation files; other entries are retained.
+
+A release measurement streamed and validated framing/flags/counts for 262,144 cases
+per worker on the two-input Int8 addition fixture. With two competing finite VM
+streams and host one-minute load 13.68–15.06, aggregate rates were 85,044 / 169,786 /
+320,204 / 590,969 cases/s at 1 / 2 / 4 / 8 workers. Timed stages consumed 3,932,160
+rows; competitors completed another 4,194,304. These bounded performance runs do
+not establish the full 268,435,456-tuple conformance rung. Independent payload
+correctness is covered by the differential tests above.
+
 <!-- quality-baseline -->
 ```json
 {
@@ -347,18 +374,50 @@ The 0.8 scheduled-load path retains its earlier behavior.
       "trivial_wrappers": 2
     },
     "src/action.rs": {
-      "branch_mass": 1229,
+      "branch_mass": 1211,
       "max_lines": 202,
-      "over_100": 5,
-      "over_25": 27,
+      "over_100": 4,
+      "over_25": 26,
       "over_300": 0,
-      "trivial_wrappers": 10
+      "trivial_wrappers": 11
     },
     "src/action/allocation_bindings.rs": {
       "branch_mass": 200,
       "max_lines": 91,
       "over_100": 0,
       "over_25": 4,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/action/batch.rs": {
+      "branch_mass": 62,
+      "max_lines": 131,
+      "over_100": 1,
+      "over_25": 5,
+      "over_300": 0,
+      "trivial_wrappers": 3
+    },
+    "src/action/batch/layout.rs": {
+      "branch_mass": 83,
+      "max_lines": 80,
+      "over_100": 0,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/action/oracle_cache.rs": {
+      "branch_mass": 16,
+      "max_lines": 45,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 0
+    },
+    "src/action/prepared.rs": {
+      "branch_mass": 57,
+      "max_lines": 91,
+      "over_100": 0,
+      "over_25": 2,
       "over_300": 0,
       "trivial_wrappers": 0
     },
@@ -635,8 +694,8 @@ The 0.8 scheduled-load path retains its earlier behavior.
       "trivial_wrappers": 0
     },
     "src/main.rs": {
-      "branch_mass": 31,
-      "max_lines": 33,
+      "branch_mass": 33,
+      "max_lines": 34,
       "over_100": 0,
       "over_25": 1,
       "over_300": 0,

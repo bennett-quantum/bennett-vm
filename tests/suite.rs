@@ -5,6 +5,7 @@ mod address09;
 mod admission09;
 mod allocation_bindings09;
 mod bound_calls09;
+mod batch_reverse;
 mod certificates;
 mod classical09;
 mod classical09_launch;

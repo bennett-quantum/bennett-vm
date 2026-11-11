@@ -11,6 +11,11 @@ fn region_name<'a>(ids: &'a Identities, hash: &str) -> Result<&'a str, String> {
 }
 
 fn claim_shape(obj: &Object, name: &str, claim: &Json) -> Result<(), String> {
+    if claim.get("kind").and_then(Json::as_str) == Some("structural")
+        && claim.get("rule").and_then(Json::as_str) == Some("adjoint_table")
+        && field(claim, "witness")?.as_obj().is_none_or(|m| !m.is_empty()) {
+        return Err(err("adjoint_table witness must be {}"));
+    }
     if matches!(string(claim, "kind")?, "exhaustive" | "sampled") {
         field(claim, "expected")?;
         let mut domain = field(claim, "domain")?.clone();
@@ -39,7 +44,11 @@ fn claim_shape(obj: &Object, name: &str, claim: &Json) -> Result<(), String> {
     }
     if let Some(invocation) = claim.get("invocation") {
         if invocation.get("args").and_then(Json::as_str) == Some("all") {
-            if invocation.get("token_aliases").and_then(Json::as_str) != Some("all") {
+            let function = obj.function(name).ok_or_else(|| err("unknown claim region"))?;
+            let group = if function.kind == FnKind::Oracle { 4 } else { 3 };
+            let token_args = function.lists[group].iter().any(|p| p.ty == Type::Token);
+            if (token_args || invocation.get("token_aliases").is_some())
+                && invocation.get("token_aliases").and_then(Json::as_str) != Some("all") {
                 return Err(err("K91: universal invocation must quantify token_aliases"));
             }
         } else {

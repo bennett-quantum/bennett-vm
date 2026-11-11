@@ -35,6 +35,7 @@ mod oracle_address09;
 mod oracle_cleanup09;
 #[path = "support/pins.rs"]
 mod pins;
+mod published_adoption09;
 mod ptr_icmp;
 mod qif_adjoint09;
 mod ref09;

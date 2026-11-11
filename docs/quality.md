@@ -242,12 +242,35 @@ unchanged. Source process identifiers remain zero and no litter exception was
 added. This snapshot does not claim the deferred resource-estimation mechanics
 or the loader negotiation that the pinned ISA explicitly leaves undefined.
 
+K85/K93 consumer adoption uses published ISA main 52e98dc. Published positive
+basis columns and inverses failed first at MCX bundle admission; the K85
+case inventory exposed missing role, shape, image and hash checks. The focused
+suite now checks all 28 K85 admission cases, every published K93 basis column
+with exact phase, all nine negative operand cases, mixed source ordering and
+native MCX explicit/inherited control counts. The D/G differential inventory
+increased from 26 to 54 at this pin; no published case is omitted.
+
+MCX operand flattening is shared by the runtime's targeted and untargeted
+paths. Explicit duplicates reject before effective predicate merging. The
+source adapter counts flattened wires while retaining the written operand
+list and source identities. Fixed-image validation is isolated from replay
+verdicts; this change claims K85 admission rather than image-relative proof
+production. Only the six owned implementation rows are refreshed;
+all other structural and hygiene baseline entries are retained.
+
+The current pin also publishes an unchanged token-free arithmetic adjoint
+theorem and a nonempty-witness negative. Admission preserves the unique
+inferred token-free partition and checks the empty adjoint witness before
+replay, while token-bearing universal claims retain explicit quantification.
+The published external-reference MCX witness is checked with exact forward
+and inverse state equality and its original object/closure hashes.
+
 <!-- quality-baseline -->
 ```json
 {
   "files": {
     "src/action.rs": {
-      "branch_mass": 1220,
+      "branch_mass": 1229,
       "max_lines": 202,
       "over_100": 5,
       "over_25": 27,
@@ -328,14 +351,22 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
     },
     "src/certificate.rs": {
       "branch_mass": 485,
-      "max_lines": 164,
+      "max_lines": 165,
       "over_100": 3,
       "over_25": 13,
       "over_300": 0,
       "trivial_wrappers": 7
     },
+    "src/certificate/fixed_images.rs": {
+      "branch_mass": 24,
+      "max_lines": 40,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 1
+    },
     "src/certificate/metadata.rs": {
-      "branch_mass": 69,
+      "branch_mass": 87,
       "max_lines": 64,
       "over_100": 0,
       "over_25": 2,
@@ -711,7 +742,7 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
       "trivial_wrappers": 8
     },
     "src/ref_library/source.rs": {
-      "branch_mass": 2069,
+      "branch_mass": 2079,
       "max_lines": 359,
       "over_100": 7,
       "over_25": 20,

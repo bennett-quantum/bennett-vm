@@ -2168,6 +2168,16 @@ impl Source {
             true,
         )])
     }
+    fn mcx_control_count(&self, controls: &[String]) -> Result<usize, String> {
+        controls.iter().try_fold(0, |count, name| {
+            let width = if name.contains('[') {
+                1
+            } else {
+                *self.widths.get(name).ok_or_else(|| err("unknown MCX control bundle"))?
+            };
+            Ok(count + width)
+        })
+    }
     fn instruction(
         &self,
         i: &Instr,
@@ -2204,7 +2214,7 @@ impl Source {
             } else if op == "mcx" {
                 let controls = crate::validate::list_operand(&operands[0])?;
                 vec![
-                    num(controls.len()),
+                    num(self.mcx_control_count(&controls)?),
                     Json::Arr(controls.iter().map(text).collect()),
                     text(&operands[1]),
                     Json::Arr(vec![]),

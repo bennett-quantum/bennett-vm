@@ -882,6 +882,21 @@ impl<'o> Exec<'o> {
         v
     }
 
+    fn mcx_controls(&self, operand: &str) -> Result<Vec<usize>, String> {
+        let mut wires = vec![];
+        for name in crate::validate::list_operand(operand)? {
+            if self.obj.isa == "0.9" && parse_wire_operand(&name).1.is_none() {
+                wires.extend(self.bundle(&name)?);
+            } else {
+                wires.push(self.wire(&name)?);
+            }
+        }
+        if wires.iter().collect::<BTreeSet<_>>().len() != wires.len() {
+            return Err(diag("3.3", "repeated or overlapping MCX controls"));
+        }
+        Ok(wires)
+    }
+
     fn gate(&mut self, ins: &Instr) -> Result<(), String> {
         if self.state.target.is_some() {
             let op = &ins.op;
@@ -894,17 +909,19 @@ impl<'o> Exec<'o> {
                             .parse::<crate::target::Rational>()?,
                     ),
                 )
-            } else if op == "mcx" {
-                let mut names = crate::validate::list_operand(&ins.operands[0])?;
-                names.push(ins.operands[1].clone());
-                (names, None)
             } else {
                 (ins.operands.clone(), None)
             };
-            let ids = names
-                .iter()
-                .map(|n| self.wire(n))
-                .collect::<Result<Vec<_>, _>>()?;
+            let ids = if op == "mcx" {
+                let mut wires = self.mcx_controls(&ins.operands[0])?;
+                wires.push(self.wire(&ins.operands[1])?);
+                wires
+            } else {
+                names
+                    .iter()
+                    .map(|n| self.wire(n))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
             let own = crate::target::own_controls(op, ids.len())?;
             let mut controls = ids[..own].to_vec();
             controls.extend(&self.pred);
@@ -949,14 +966,9 @@ impl<'o> Exec<'o> {
                 self.state.flip(t, &ctrls);
             }
             "mcx" => {
-                let ctrls_names = crate::validate::list_operand(&ins.operands[0])?;
-                let mut ctrls = pred.clone();
-                for c in &ctrls_names {
-                    ctrls.push(self.wire(c)?);
-                }
+                let explicit = self.mcx_controls(&ins.operands[0])?;
+                let ctrls = self.controls_plus(&explicit);
                 let t = self.wire(&ins.operands[1])?;
-                ctrls.sort_unstable();
-                ctrls.dedup();
                 self.state.flip(t, &ctrls);
             }
             "swap" => {

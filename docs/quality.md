@@ -245,21 +245,22 @@ or the loader negotiation that the pinned ISA explicitly leaves undefined.
 The 618b16f pin defines K91 negotiation; the preceding undefined-negotiation
 statement records the earlier pin.
 
-K91 negotiation candidate: launch/sched queries expose canonical immutable
-empty feature lists. The canonical estimate export takes the 0.9 parameters;
-the explicitly named VM 0.8 compatibility entry retains its four-argument shape.
-This does not complete old-binary packaging or the exact estimator. The current
-public 0.8 headers require migration before shipping the 0.9 provider.
+K91 negotiation providers expose canonical immutable empty feature lists
+only in the explicitly selected launch/sched 0.9 build. The default provider
+preserves the original four-argument canonical estimate symbol; a separate
+`abi-0-9` build supplies the eight-argument symbol using the published
+20ac075 headers. The C consumers compile the actual published family
+headers without remapping symbols. The unchanged 0.8 consumer failed at
+runtime before restoring the old canonical address; the 0.9 packaging probe
+failed before the separate provider build existed. Symbol checks ensure the
+0.8 provider cannot advertise launch/sched 0.9 through K91 queries.
+
 The scheduler authenticates the object-versioned library before reporting its
 remaining target schedule/certificate mechanics. Source catalog reads resolve
-through the gate pin. Both feature lists stay empty while those mechanics are
-pending; no successful estimate is claimed.
-
-Regression evidence: the arity probe failed with E0061, query imports failed
-before their exports existed, and a 0.9 scheduler request reproduced the wrong
-ref@0.8 refusal. The focused query, partition and C ABI tests then passed. A
-standalone five-partition native-X estimate witness remains red (expected
-time/occupancy/peak each 1); it is a capability gap, not an estimate result.
+through the gate pin. Both 0.9 feature lists stay empty while those mechanics
+are pending; no successful estimate is claimed. A standalone five-partition
+native-X estimate witness remains red (expected time/occupancy/peak each 1);
+it is a capability gap, not an estimate result.
 
 Baseline updates cover only src/abi_features.rs, src/launch.rs,
 src/ref_library.rs and src/sched_abi.rs. The two

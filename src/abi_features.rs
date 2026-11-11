@@ -18,11 +18,11 @@ unsafe fn query(manifest: &'static [u8], out: *mut *const u8, len: *mut usize) -
         Ok(())
     })
 }
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "abi-0-9", unsafe(no_mangle))]
 pub unsafe extern "C" fn bennett_launch_features(out: *mut *const u8, len: *mut usize) -> i32 {
     unsafe { query(LAUNCH, out, len) }
 }
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "abi-0-9", unsafe(no_mangle))]
 pub unsafe extern "C" fn bennett_sched_features(out: *mut *const u8, len: *mut usize) -> i32 {
     unsafe { query(SCHED, out, len) }
 }

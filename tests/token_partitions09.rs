@@ -318,7 +318,7 @@ fn alias_aware_estimate_validates_before_the_existing_resource_boundary() {
         let params = br#"[["1","0","0","0"],["2","0","0","0"]]"#;
         let mut out = ptr::null_mut();
         assert_eq!(
-            bennett_estimate_run(
+            bennett_estimate_run_0_9(
                 program,
                 name.as_ptr(),
                 token,
@@ -490,7 +490,7 @@ fn launch09_legacy_estimate_validates_the_complete_parameter_vector() {
         ] {
             let mut out = ptr::dangling_mut();
             assert_eq!(
-                bennett_estimate_run(
+                bennett_estimate_run_0_9(
                     program,
                     c"p".as_ptr(),
                     token,

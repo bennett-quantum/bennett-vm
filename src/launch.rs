@@ -888,7 +888,8 @@ pub unsafe extern "C" fn bennett_tape_next(
     })
 }
 free!(bennett_tape_free, bennett_tape_iter_t);
-#[unsafe(no_mangle)]
+#[cfg_attr(not(feature = "abi-0-9"), unsafe(export_name = "bennett_estimate_run"))]
+#[cfg_attr(feature = "abi-0-9", unsafe(no_mangle))]
 pub unsafe extern "C" fn bennett_estimate_run_0_8(
     p: *mut bennett_program_t,
     region: *const c_char,
@@ -945,9 +946,16 @@ fn estimate_unavailable(p: &bennett_program_t, f: &crate::object::Function) -> F
     ))
 }
 
+// The canonical C symbol belongs to exactly one ABI family per provider.
+#[cfg(not(feature = "abi-0-9"))]
+pub use bennett_estimate_run_0_8 as bennett_estimate_run;
+#[cfg(feature = "abi-0-9")]
+pub use bennett_estimate_run_0_9 as bennett_estimate_run;
+
 /// Launch 0.9's legacy request: complete parameters with token-free inference.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn bennett_estimate_run(
+#[cfg_attr(feature = "abi-0-9", unsafe(export_name = "bennett_estimate_run"))]
+#[cfg_attr(not(feature = "abi-0-9"), unsafe(no_mangle))]
+pub unsafe extern "C" fn bennett_estimate_run_0_9(
     program: *mut bennett_program_t,
     region: *const c_char,
     token: u64,

@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 autotests = false
 
+[features]
+# Select the C provider family at build time; the default preserves old binaries.
+abi-0-9 = []
+
 [dependencies]
 
 [lib]

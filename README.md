@@ -88,3 +88,23 @@ BENNETT_JIT_AUDIT=1 prints native execution counters to stderr.
 The mandatory differential suite compares each optimisation mode and native
 execution with the interpreter and pinned published CLI oracle. Set
 BENNETT_HARNESS_COUNTS=1 and add --nocapture to print comparison counts.
+
+The additive `bennett_estimate_run_at_accuracy` entry is present in the 0.9
+provider. Its declaration comes from the pinned
+`spec/bennett_estimate_accuracy_1.h`; add the pin's `spec/` directory to the
+include path alongside `include/`. The request copies and validates the
+explicit decimal accuracy exactly, binds it independently of the args-only
+parameter hash, and selects a matching schedule or an empty default schedule
+at that requested value. Valid requests still reach the existing unavailable
+estimator boundary. The published feature identifier is `estimate_accuracy/1`;
+it remains unadvertised until complete K12/K91 realization, exact resources
+and certificate production/checking work. For launch 0.9 legacy entries without accuracy, a schedule matching all other
+request bindings supplies its exact epsilon. Otherwise they return
+`BENNETT_E_ARG` with
+`E_ESTIMATE_ACCURACY_REQUIRED: use bennett_estimate_run_at_accuracy with epsilon_decimal`.
+There is no numerical default; this request diagnostic leaves the output null.
+The separately selected 0.8 ABI family retains its published behavior.
+
+ISA 0.9 programs carrying authenticated schedules can be loaded for estimate
+request resolution. Scheduled execution remains a capability gap and fails
+before a run is created; loading a schedule does not authorize ignoring it.

@@ -330,7 +330,7 @@ fn alias_aware_estimate_validates_before_the_existing_resource_boundary() {
             ),
             11
         );
-        for (aliases, expected) in [(b"[0,0]".as_slice(), 11), (b"[0,1]".as_slice(), 5)] {
+        for (aliases, expected) in [(b"[0,0]".as_slice(), 11), (b"[0,1]".as_slice(), 11)] {
             assert_eq!(
                 bennett_estimate_run_with_token_aliases(
                     program,
@@ -347,6 +347,8 @@ fn alias_aware_estimate_validates_before_the_existing_resource_boundary() {
                 expected
             );
             assert!(out.is_null());
+            let diagnostic = std::ffi::CStr::from_ptr(bennett_last_error()).to_str().unwrap();
+            assert_eq!(diagnostic == bennett_vm::estimate::MISSING_ACCURACY_DIAGNOSTIC, aliases == b"[0,1]");
         }
         bennett_unload(program);
     }
@@ -481,7 +483,7 @@ fn launch09_legacy_estimate_validates_the_complete_parameter_vector() {
         );
         assert!(legacy.is_null());
         for (params, variant, expected) in [
-            (r#"["1"]"#, c"forward".as_ptr(), 5), // missing target, not a parameter error
+            (r#"["1"]"#, c"forward".as_ptr(), 11), // published missing-accuracy diagnostic
             ("[]", c"forward".as_ptr(), 11),
             (r#"["256"]"#, c"forward".as_ptr(), 11),
             (r#"["1", "2"]"#, c"forward".as_ptr(), 11),
@@ -503,6 +505,10 @@ fn launch09_legacy_estimate_validates_the_complete_parameter_vector() {
                 expected
             );
             assert!(out.is_null());
+            let valid = params == r#"["1"]"# && !variant.is_null()
+                && std::ffi::CStr::from_ptr(variant).to_bytes() == b"forward";
+            let diagnostic = std::ffi::CStr::from_ptr(bennett_last_error()).to_str().unwrap();
+            assert_eq!(diagnostic == bennett_vm::estimate::MISSING_ACCURACY_DIAGNOSTIC, valid);
         }
         assert_eq!(bennett_unload(program), 0);
     }

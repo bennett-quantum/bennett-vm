@@ -295,6 +295,45 @@ The o7n provider changes are restored on top of K85/K93 adoption; the gate
 retains the current 52e98dc ISA pin. Earlier pin references above identify
 the header/negotiation publication, rather than a downgrade of test inputs.
 
+Launch-estimate request identity and explicit accuracy consume the published
+`a42a896` contracts and vectors. Request construction owns the complete args,
+outer tuple, partition, variant and controls, while `params_hash` hashes only
+the copied canonical args array. The additive accuracy entry owns an exact
+nonnegative decimal independently of that hash. Matching schedules retain
+original bytes/hash; absent or mismatched bindings construct an empty schedule
+with the canonical caller-supplied epsilon. Default-share arithmetic remains
+exact and does not impose a legacy accuracy policy.
+
+New tests first failed for the missing resolved-request API/additive entry;
+a token-free omitted-partition schedule then failed before its inference was
+preserved. Focused witnesses cover published hashes/accuracies, all five
+partitions, exact decimal precision, schedule matching, default shares,
+argument failures and unchanged legacy unavailability. The C consumer includes
+the published additive header and checks provider-family symbol selection.
+The `estimate_accuracy/1` identifier is public but remains unadvertised:
+complete target lowering, exact resource production and bound certificates
+remain incomplete. No successful estimate is claimed. Only the six changed
+implementation rows are refreshed; other baseline entries remain unchanged.
+
+The subsequent 220f4e4 publication defines the legacy policy. A dedicated
+red ABI test observed E_TARGET before the specified E_ARG/missing-accuracy
+result. Both launch 0.9 legacy entries now validate arguments/partitions,
+then resolve epsilon solely from a schedule matching every other request
+binding. Absence/mismatch returns the exact E_ESTIMATE_ACCURACY_REQUIRED
+message and NULL output, without effects or a numerical default. Matching
+0.10 and explicit zero retain the attached schedule's bytes/hash; the 0.8
+provider family is unchanged. The explicit and legacy entries share their
+post-resolution boundary. Full estimation remains unimplemented and the
+feature manifest continues to withhold estimate_accuracy/1.
+
+Legacy matching-schedule ABI tests exposed the old unconditional ref@0.8
+load refusal. ISA 0.9 loading now authenticates the object-versioned library
+and retains the schedule for estimate resolution. A second red observed run
+creation before a schedule consumer existed; scheduled execution now stops
+before creating a run or touching quantum state. This preserves that existing
+capability gap rather than silently discarding a newly loadable schedule.
+The 0.8 scheduled-load path retains its earlier behavior.
+
 <!-- quality-baseline -->
 ```json
 {
@@ -353,7 +392,7 @@ the header/negotiation publication, rather than a downgrade of test inputs.
       "over_100": 4,
       "over_25": 26,
       "over_300": 2,
-      "trivial_wrappers": 29
+      "trivial_wrappers": 30
     },
     "src/cc/frame_work.rs": {
       "branch_mass": 1,
@@ -459,6 +498,14 @@ the header/negotiation publication, rather than a downgrade of test inputs.
       "over_300": 0,
       "trivial_wrappers": 0
     },
+    "src/estimate/request.rs": {
+      "branch_mass": 61,
+      "max_lines": 44,
+      "over_100": 0,
+      "over_25": 3,
+      "over_300": 0,
+      "trivial_wrappers": 3
+    },
     "src/exact.rs": {
       "branch_mass": 236,
       "max_lines": 76,
@@ -540,12 +587,20 @@ the header/negotiation publication, rather than a downgrade of test inputs.
       "trivial_wrappers": 5
     },
     "src/launch.rs": {
-      "branch_mass": 349,
-      "max_lines": 71,
+      "branch_mass": 353,
+      "max_lines": 74,
       "over_100": 0,
       "over_25": 14,
       "over_300": 0,
       "trivial_wrappers": 19
+    },
+    "src/launch/accuracy.rs": {
+      "branch_mass": 4,
+      "max_lines": 39,
+      "over_100": 0,
+      "over_25": 1,
+      "over_300": 0,
+      "trivial_wrappers": 0
     },
     "src/launch_locks.rs": {
       "branch_mass": 88,

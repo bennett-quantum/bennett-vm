@@ -21,6 +21,8 @@ use std::{
     ptr,
     sync::Arc,
 };
+mod accuracy;
+pub use accuracy::bennett_estimate_run_at_accuracy;
 const ARG: i32 = 11;
 const INVALID: i32 = 8;
 const NOT_REV: i32 = 9;
@@ -271,10 +273,11 @@ pub unsafe extern "C" fn bennett_load(
                 .unwrap();
             let ids = crate::identity::compute(&obj).map_err(|e| error(10, e))?;
             crate::sched::validate_entries(&doc, &obj, &ids).map_err(|e| error(10, e))?;
-            return crate::sched::require_library(
-                doc.get("bindings").and_then(|b| b.get("expansion")),
-            )
-            .map_err(|e| error(10, e));
+            let expansion = doc.get("bindings").and_then(|b| b.get("expansion"));
+            if obj.isa != "0.9" {
+                return crate::sched::require_library(expansion).map_err(|e| error(10, e));
+            }
+            crate::sched::require_library_version(expansion, &obj.isa).map_err(|e| error(10, e))?;
         }
         if let Some(t) = &target {
             t.validate_object(&obj).map_err(|e| error(4, e))?;
@@ -535,6 +538,9 @@ pub unsafe fn run_with_options(
             return Err(error(ARG, "§3.3: aliased register operands"));
         }
         let entropy = bytes(entropy, entropy_len)?.to_vec();
+        if p.obj.has_schedule {
+            return Err(error(10, "§11: scheduled execution capability is unavailable"));
+        }
         let r = id();
         let runtime = RuntimeRun::new(p.obj.clone(), &p.resources, name, values, entropy)
             .map_err(|e| error(INVALID, e))?;
@@ -1019,21 +1025,20 @@ unsafe fn text_buffer<'a>(buffer: *const u8, len: usize) -> Fallible<&'a str> {
         .map_err(|_| error(ARG, "§10.1: invalid UTF-8 request buffer"))
 }
 
-fn estimate_request(
+fn resolve_estimate_request(
     p: &bennett_program_t,
     region: &str,
     token: u64,
     variant: &str,
-    _inherited_controls: u32,
+    inherited_controls: u32,
     params: Json,
     aliases: Option<Json>,
-) -> Fallible<()> {
+) -> Fallible<crate::estimate::ResolvedRequest> {
     if p.obj.isa != "0.9" {
         return Err(error(1, "§10.1: launch 0.9 estimate requires ISA 0.9"));
     }
     let name = region.trim_start_matches('@');
-    let f = p
-        .obj
+    p.obj
         .function(name)
         .ok_or_else(|| error(ARG, "§10.1: unknown estimate region"))?;
     if variant.is_empty() {
@@ -1043,23 +1048,37 @@ fn estimate_request(
         .resources
         .token(token)
         .ok_or_else(|| error(ARG, "§10.1: unknown program-scoped token"))?;
-    let mut invocation = Json::obj(vec![
-        ("args", params),
-        (
-            "budget",
-            Json::Arr(
-                [budget.steps, budget.heap, budget.stack, budget.depth]
-                    .iter()
-                    .map(|n| Json::Str(n.to_string()))
-                    .collect(),
-            ),
-        ),
-    ]);
-    if let (Some(aliases), Json::Obj(fields)) = (aliases, &mut invocation) {
-        fields.insert("token_aliases".into(), aliases);
-    }
-    crate::invocation::resolve(&p.obj, name, &invocation).map_err(|e| error(ARG, e))?;
-    estimate_unavailable(p, f)
+    crate::estimate::ResolvedRequest::new(
+        &p.obj,
+        name,
+        variant,
+        inherited_controls,
+        *budget,
+        params,
+        aliases,
+    )
+    .map_err(|e| error(ARG, e))
+}
+
+fn estimate_request(
+    p: &bennett_program_t,
+    region: &str,
+    token: u64,
+    variant: &str,
+    inherited_controls: u32,
+    params: Json,
+    aliases: Option<Json>,
+) -> Fallible<()> {
+    let request = resolve_estimate_request(
+        p,
+        region,
+        token,
+        variant,
+        inherited_controls,
+        params,
+        aliases,
+    )?;
+    accuracy::legacy_estimate(p, request)
 }
 
 #[unsafe(no_mangle)]

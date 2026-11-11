@@ -2094,6 +2094,9 @@ impl Resources {
             self.data.tokens.remove(id);
         }
     }
+    pub(crate) fn target(&self) -> Option<&crate::target::Target> {
+        self.quantum.target.as_deref()
+    }
     pub(crate) fn has_target(&self) -> bool {
         self.quantum.target.is_some()
     }

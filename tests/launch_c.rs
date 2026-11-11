@@ -285,6 +285,8 @@ fn c11_launch09_provider_contract() {
         .arg(repo.join("include"))
         .arg("-I")
         .arg(crate::pins::isa().join("include"))
+        .arg("-I")
+        .arg(crate::pins::isa().join("spec"))
         .arg(repo.join("tests/launch_abi09.c"))
         .arg(tmp.join("0.9/debug/libbennett_vm.a"))
         .args(["-ldl", "-lpthread", "-lm", "-o"])
@@ -298,7 +300,9 @@ fn c11_launch09_provider_contract() {
     );
     let object = tmp.join("launch.bisa");
     std::fs::write(&object, fixture()).unwrap();
-    let out = Command::new(exe).arg(object).output().unwrap();
+    let object09 = tmp.join("accuracy09.bisa");
+    std::fs::write(&object09, crate::source09::source("perm_action @p (t:wire mut) () () () ()\n^entry():\nx t")).unwrap();
+    let out = Command::new(exe).arg(object).arg(object09).output().unwrap();
     assert!(
         out.status.success(),
         "stdout={} stderr={}",
@@ -331,6 +335,7 @@ fn c11_launch09_provider_contract() {
                 .any(|s| s.ends_with(" bennett_sched_features")),
             has_query
         );
+        assert_eq!(symbols.lines().any(|s| s.ends_with(" bennett_estimate_run_at_accuracy")), has_query);
     }
 }
 

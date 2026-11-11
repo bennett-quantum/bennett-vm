@@ -2,6 +2,8 @@
 //! alias-aware estimator and the role's scheduling/metadata pledge are pending.
 #![allow(clippy::missing_safety_doc)]
 use crate::launch::{error, status};
+/// Published launch feature identifier; withheld until the whole estimator works.
+pub const ESTIMATE_ACCURACY_1: &str = "estimate_accuracy/1";
 const LAUNCH: &[u8] = br#"{"abi":"launch/0.9","features":[],"schema":"bennett.abi-features/1"}"#;
 const SCHED: &[u8] = br#"{"abi":"sched/0.9","features":[],"schema":"bennett.abi-features/1"}"#;
 unsafe fn query(manifest: &'static [u8], out: *mut *const u8, len: *mut usize) -> i32 {

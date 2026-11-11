@@ -63,12 +63,12 @@ fn absent_coverage_names_driver_and_invalid_inputs_are_atomic() {
         );
         let mut estimate = ptr::dangling_mut();
         assert_eq!(
-            bennett_estimate_run(p, c("missing").as_ptr(), token, &mut estimate),
+            bennett_estimate_run_0_8(p, c("missing").as_ptr(), token, &mut estimate),
             11
         );
         assert!(estimate.is_null());
         assert_eq!(
-            bennett_estimate_run(p, c("toggle").as_ptr(), token, &mut estimate),
+            bennett_estimate_run_0_8(p, c("toggle").as_ptr(), token, &mut estimate),
             5
         );
         assert!(
@@ -116,7 +116,7 @@ fn target_estimate_refusal_and_empty_coverage_have_exact_contracts() {
         );
         let mut estimate = ptr::dangling_mut();
         assert_eq!(
-            bennett_estimate_run(p, c("toggle").as_ptr(), tk, &mut estimate),
+            bennett_estimate_run_0_8(p, c("toggle").as_ptr(), tk, &mut estimate),
             5
         );
         assert!(estimate.is_null());
@@ -127,7 +127,7 @@ fn target_estimate_refusal_and_empty_coverage_have_exact_contracts() {
                 .contains("bennett-estimate")
         );
         assert_eq!(
-            bennett_estimate_run(p, c("bell").as_ptr(), tk, &mut estimate),
+            bennett_estimate_run_0_8(p, c("bell").as_ptr(), tk, &mut estimate),
             11
         ); // different region's token
         let mut coverage = ptr::null_mut();

@@ -133,13 +133,23 @@ fn fixture() -> String {
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_launch_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tmp = repo.join(".tmp/c-abi");
+    let tmp = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join(".tmp"))
+        .join("c-abi");
     std::fs::create_dir_all(&tmp).unwrap();
     let object = tmp.join("launch.bisa");
     std::fs::write(&object, fixture()).unwrap();
     // Separate target directory avoids recursively taking cargo test's lock.
     let build = Command::new("cargo")
-        .args(["build", "--offline", "-j3", "--lib", "--manifest-path"])
+        .args([
+            "build",
+            "--offline",
+            "-j3",
+            "--lib",
+            "--no-default-features",
+            "--manifest-path",
+        ])
         .arg(repo.join("Cargo.toml"))
         .arg("--target-dir")
         .arg(tmp.join("target"))
@@ -183,7 +193,10 @@ fn c11_launch_contract() {
 #[ignore = "published oracle or C ABI suite; mandatory in the gate"]
 fn c11_sched_contract() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tmp = repo.join(".tmp/sched-abi");
+    let tmp = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join(".tmp"))
+        .join("sched-abi");
     std::fs::create_dir_all(&tmp).unwrap();
     let root = crate::pins::isa().join("conformance/cases");
     let raw = std::fs::read_to_string(root.join("objects/inc8.bisa")).unwrap();
@@ -199,7 +212,14 @@ fn c11_sched_contract() {
     )
     .unwrap();
     let out = Command::new("cargo")
-        .args(["build", "--offline", "-j3", "--lib", "--manifest-path"])
+        .args([
+            "build",
+            "--offline",
+            "-j3",
+            "--lib",
+            "--no-default-features",
+            "--manifest-path",
+        ])
         .arg(repo.join("Cargo.toml"))
         .arg("--target-dir")
         .arg(tmp.join("target"))
@@ -241,4 +261,96 @@ fn c11_sched_contract() {
         String::from_utf8_lossy(&out.stderr)
     );
     println!("{}", String::from_utf8_lossy(&out.stdout));
+}
+
+#[test]
+#[ignore = "published oracle or C ABI suite; mandatory in the gate"]
+fn c11_launch09_provider_contract() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmp = Path::new(&std::env::var_os("TMPDIR").unwrap()).join("c-abi09");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let out = Command::new("bash")
+        .arg(repo.join("scripts/build-abi-providers.sh"))
+        .arg(&tmp)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let exe = tmp.join("launch09-abi");
+    let out = Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-I"])
+        .arg(repo.join("include"))
+        .arg("-I")
+        .arg(crate::pins::isa().join("include"))
+        .arg(repo.join("tests/launch_abi09.c"))
+        .arg(tmp.join("0.9/debug/libbennett_vm.a"))
+        .args(["-ldl", "-lpthread", "-lm", "-o"])
+        .arg(&exe)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let object = tmp.join("launch.bisa");
+    std::fs::write(&object, fixture()).unwrap();
+    let out = Command::new(exe).arg(object).output().unwrap();
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&out.stdout));
+    for (family, has_query) in [("0.8", false), ("0.9", true)] {
+        let out = Command::new("nm")
+            .args(["-D", "--defined-only"])
+            .arg(tmp.join(family).join("debug/libbennett_vm.so"))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let symbols = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            symbols
+                .lines()
+                .any(|s| s.ends_with(" bennett_estimate_run"))
+        );
+        assert_eq!(
+            symbols
+                .lines()
+                .any(|s| s.ends_with(" bennett_launch_features")),
+            has_query
+        );
+        assert_eq!(
+            symbols
+                .lines()
+                .any(|s| s.ends_with(" bennett_sched_features")),
+            has_query
+        );
+    }
+}
+
+#[test]
+fn vm_header_requires_consistent_family_selection() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmp = Path::new(&std::env::var_os("TMPDIR").unwrap()).join("header-families");
+    std::fs::create_dir_all(&tmp).unwrap();
+    for (index, (source, valid)) in [
+        ("#include <bennett_vm.h>\n#include <bennett_vm.h>\n", true),
+        ("#define BENNETT_ABI_FAMILY 9\n#include <bennett_vm.h>\n#include <bennett_vm.h>\n", true),
+        ("#define BENNETT_ABI_FAMILY 7\n#include <bennett_vm.h>\n", false),
+        ("#include <bennett_vm.h>\n#define BENNETT_ABI_FAMILY 9\n#include <bennett_vm.h>\n", false),
+        ("#define BENNETT_ABI_FAMILY 9\n#include <bennett_vm.h>\n#undef BENNETT_ABI_FAMILY\n#define BENNETT_ABI_FAMILY 8\n#include <bennett_vm.h>\n", false),
+    ].into_iter().enumerate() {
+        let input = tmp.join(format!("family-{index}.c"));
+        std::fs::write(&input, source).unwrap();
+        let out = Command::new("cc").args(["-std=c11", "-fsyntax-only", "-I"])
+            .arg(repo.join("include")).arg("-I").arg(crate::pins::isa().join("include"))
+            .arg(input).output().unwrap();
+        assert_eq!(out.status.success(), valid, "probe {index}: {}", String::from_utf8_lossy(&out.stderr));
+    }
 }

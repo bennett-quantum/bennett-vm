@@ -354,14 +354,6 @@ impl<V: Clone> Seq<V> {
     pub(crate) fn same_root(&self, other: &Self) -> bool {
         self.0.same_root(&other.0)
     }
-    pub(crate) fn last_mut(&mut self) -> Option<&mut V> {
-        self.len().checked_sub(1).and_then(|i| self.get_mut(i))
-    }
-    pub(crate) fn pop(&mut self) -> Option<V> {
-        let value = self.last()?.clone();
-        self.truncate(self.len() - 1);
-        Some(value)
-    }
     pub(crate) fn last(&self) -> Option<&V> {
         self.len().checked_sub(1).and_then(|i| self.get(i))
     }

@@ -180,7 +180,11 @@ pub struct Function {
 
 impl Function {
     pub fn block(&self, name: &str) -> Option<&Block> {
-        self.blocks.iter().find(|b| b.name == name)
+        self.blocks.iter().find(|b| {
+            #[cfg(test)]
+            crate::block_scaling::record(1);
+            b.name == name
+        })
     }
     /// All instructions flattened in text order (nested lines included).
     pub fn flat_instrs<'a>(&'a self, out: &mut Vec<&'a Instr>) {
@@ -200,6 +204,30 @@ impl Function {
         let mut v = Vec::new();
         self.flat_instrs(&mut v);
         v.len()
+    }
+}
+
+/// Borrowed lookup table for a validation pass. It cannot outlive or become
+/// stale with respect to the public, mutable function representation.
+pub(crate) struct BlockIndex<'a>(std::collections::HashMap<&'a str, &'a Block>);
+impl<'a> BlockIndex<'a> {
+    pub(crate) fn new(f: &'a Function) -> Self {
+        #[cfg(test)]
+        crate::block_scaling::record(f.blocks.len() as u64);
+        // Reverse collection preserves Function::block's first-match behavior
+        // even before the duplicate-name validator has rejected an object.
+        Self(
+            f.blocks
+                .iter()
+                .rev()
+                .map(|b| (b.name.as_str(), b))
+                .collect(),
+        )
+    }
+    pub(crate) fn get(&self, name: &str) -> Option<&'a Block> {
+        #[cfg(test)]
+        crate::block_scaling::record(1);
+        self.0.get(name).copied()
     }
 }
 

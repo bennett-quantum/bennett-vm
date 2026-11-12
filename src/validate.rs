@@ -3,7 +3,7 @@
 
 use crate::bigint::BigUint;
 use crate::json::Json;
-use crate::object::{FnKind, Function, Object, Param, Type};
+use crate::object::{BlockIndex as Blocks, FnKind, Function, Instr, Object, Param, Type};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn err(rule: &str, msg: impl std::fmt::Display) -> String {
@@ -1075,11 +1075,12 @@ fn validate_function(obj: &Object, f: &Function) -> Result<(), String> {
             }
         }
     }
+    let blocks = Blocks::new(f);
     validate_terminators(obj, f)?;
     let mut flat = Vec::new();
     f.flat_instrs(&mut flat);
     for ins in &flat {
-        validate_instr(obj, f, ins)?;
+        validate_instr(obj, f, ins, &blocks)?;
     }
     if matches!(f.kind, FnKind::Action | FnKind::PermAction) {
         let found = collect_bounds(f);
@@ -1269,7 +1270,12 @@ fn lhs_n(f: &Function, ins: &crate::object::Instr, want: usize) -> Result<(), St
     Ok(())
 }
 
-fn validate_instr(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<(), String> {
+fn validate_instr(
+    obj: &Object,
+    f: &Function,
+    ins: &crate::object::Instr,
+    blocks: &Blocks<'_>,
+) -> Result<(), String> {
     if obj.isa == "0.9" && matches!(f.kind, FnKind::Oracle | FnKind::Lproc) {
         crate::instances::validate_writes(f, ins)?;
     }
@@ -1330,7 +1336,7 @@ fn validate_instr(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Res
             }
         }
     }
-    validate_opcode(obj, f, ins)
+    validate_opcode(obj, f, ins, blocks)
 }
 
 fn is_gate(op: &str) -> bool {
@@ -1343,7 +1349,7 @@ fn suffix_width(op: &str, prefix: &str) -> Option<usize> {
     n.parse::<usize>().ok()
 }
 
-fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<(), String> {
+fn validate_opcode(obj: &Object, f: &Function, ins: &Instr, ix: &Blocks<'_>) -> Result<(), String> {
     let op = ins.op.as_str();
     // Adj/ctl wrap one region call.
     if op == "adj" || op == "ctl" {
@@ -1474,7 +1480,7 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             }
             lhs_n(f, ins, 0)
         }
-        crate::object::Op::Br => validate_br(obj, f, ins),
+        crate::object::Op::Br => validate_br(obj, f, ins, ix),
         crate::object::Op::Call => validate_call(obj, f, ins),
         crate::object::Op::Ret => {
             let (_, results) = cc_sig(obj, &f.name)?;
@@ -1600,7 +1606,7 @@ fn validate_opcode(obj: &Object, f: &Function, ins: &crate::object::Instr) -> Re
             arity(f, ins, 2)?;
             lhs_n(f, ins, 0)
         }
-        _ => validate_lifted_or_q(obj, f, ins),
+        _ => validate_lifted_or_q(obj, f, ins, ix),
     }
 }
 
@@ -1618,7 +1624,12 @@ fn callee_kind(obj: &Object, f: &Function, token: &str) -> Result<(String, Strin
     Ok((name, kind))
 }
 
-fn validate_br(_obj: &Object, f: &Function, ins: &crate::object::Instr) -> Result<(), String> {
+fn validate_br(
+    _obj: &Object,
+    f: &Function,
+    ins: &crate::object::Instr,
+    blocks: &Blocks<'_>,
+) -> Result<(), String> {
     lhs_n(f, ins, 0)?;
     let targets: Vec<&String> = match ins.operands.len() {
         1 => vec![&ins.operands[0]],
@@ -1633,7 +1644,7 @@ fn validate_br(_obj: &Object, f: &Function, ins: &crate::object::Instr) -> Resul
     for t in targets {
         let (name, args) = branch_target(t)
             .ok_or_else(|| err("4.1", format!("malformed br target {t:?} in @{}", f.name)))?;
-        let block = f.block(&name).ok_or_else(|| {
+        let block = blocks.get(&name).ok_or_else(|| {
             err(
                 "3.4",
                 format!("br in @{} targets unknown block ^{name}", f.name),
@@ -1806,6 +1817,7 @@ fn validate_lifted_or_q(
     obj: &Object,
     f: &Function,
     ins: &crate::object::Instr,
+    blocks: &Blocks<'_>,
 ) -> Result<(), String> {
     let op = ins.op.as_str();
     match op {
@@ -1820,7 +1832,7 @@ fn validate_lifted_or_q(
                         format!("lift.label operand {t:?} in @{} is not a block", f.name),
                     )
                 })?;
-                if !args.is_empty() || f.block(&name).is_none() {
+                if !args.is_empty() || blocks.get(&name).is_none() {
                     return Err(err(
                         "4.2",
                         format!("lift.label in @{} names unknown block ^{name}", f.name),
@@ -2003,26 +2015,26 @@ fn validate_lifted_or_q(
         "qjump" => {
             arity(f, ins, 1)?;
             lhs_n(f, ins, 0)?;
-            check_q_target(f, &ins.operands[0])
+            check_q_target(f, &ins.operands[0], blocks)
         }
         "qbranch" => {
             arity(f, ins, 3)?;
             lhs_n(f, ins, 0)?;
-            check_q_target(f, &ins.operands[1])?;
-            check_q_target(f, &ins.operands[2])
+            check_q_target(f, &ins.operands[1], blocks)?;
+            check_q_target(f, &ins.operands[2], blocks)
         }
         _ => validate_q(obj, f, ins),
     }
 }
 
-fn check_q_target(f: &Function, token: &str) -> Result<(), String> {
+fn check_q_target(f: &Function, token: &str, blocks: &Blocks<'_>) -> Result<(), String> {
     let name = token.strip_prefix('^').ok_or_else(|| {
         err(
             "4.2",
             format!("branch target {token:?} in @{} must be a ^block", f.name),
         )
     })?;
-    if f.block(name).is_none() {
+    if blocks.get(name).is_none() {
         return Err(err(
             "3.6",
             format!("branch in @{} targets unknown block ^{name}", f.name),

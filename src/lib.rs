@@ -119,3 +119,7 @@ mod step_scaling;
 
 #[cfg(test)]
 mod history_work;
+
+#[cfg(test)]
+#[path = "../tests/block_scaling.rs"]
+mod block_scaling;

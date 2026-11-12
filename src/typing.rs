@@ -1,5 +1,5 @@
 //! Static CC/R operand schemas and SSA types (§3.3, §4.1, §4.7).
-use crate::object::{FnKind, Function, Object, Type};
+use crate::object::{BlockIndex, FnKind, Function, Object, Type};
 use crate::validate::{action_sig, branch_target, cc_sig, err, list_operand, oracle_sig};
 use std::collections::BTreeMap;
 fn check(ok: bool, why: &str) -> Result<(), String> {
@@ -102,7 +102,7 @@ pub fn classical(obj: &Object, f: &Function) -> Result<(), String> {
     if !matches!(f.kind, FnKind::Cc | FnKind::R) {
         return Ok(());
     }
-    let mut env = BTreeMap::new();
+    let (blocks, mut env) = (BlockIndex::new(f), BTreeMap::new());
     for p in &f.lists[0] {
         bind(&mut env, &p.name, p.ty.clone())?;
     }
@@ -216,8 +216,8 @@ pub fn classical(obj: &Object, f: &Function) -> Result<(), String> {
                             for target in targets {
                                 let (n, args) = branch_target(target)
                                     .ok_or_else(|| err("4.1", "malformed branch"))?;
-                                let b = f
-                                    .block(&n)
+                                let b = blocks
+                                    .get(&n)
                                     .ok_or_else(|| err("4.1", "unknown branch block"))?;
                                 same_list(
                                     &env,

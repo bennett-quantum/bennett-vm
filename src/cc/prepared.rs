@@ -74,38 +74,38 @@ impl Machine {
         let value = match op {
             ValueOp::Const => Value::int(width()?, crate::oracle::parse_const(&xs[0], width()?)?),
             ValueOp::Binary(base) | ValueOp::Divide(base) => {
-                let a = get!(self.read(&xs[0]));
-                let b = get!(self.bits(&xs[1]));
+                let a = get!(self.read_ref(&xs[0]));
+                let b = get!(self.bits_ref(&xs[1]));
                 let w = a.width(self.obj.ptr_width).unwrap();
                 let bits = a.bits().unwrap();
                 if matches!(op, ValueOp::Divide(_)) {
-                    if let Some(code) = value::div_fault(base, bits, &b, w) {
+                    if let Some(code) = value::div_fault(base, bits, b, w) {
                         return Ok(PreparedValue::Fault(code));
                     }
-                    Value::int(w, value::divop(base, bits, &b, w))
+                    Value::int(w, value::divop(base, bits, b, w))
                 } else {
-                    Value::int(w, value::binop(base, bits, &b, w)?)
+                    Value::int(w, value::binop(base, bits, b, w)?)
                 }
             }
             ValueOp::Compare => {
-                let a = get!(self.read(&xs[0]));
-                let b = get!(self.bits(&xs[1]));
+                let a = get!(self.read_ref(&xs[0]));
+                let b = get!(self.bits_ref(&xs[1]));
                 Value::int(
                     1,
                     u(value::icmp(
                         ins.op.split('.').nth(1).unwrap(),
                         a.bits().unwrap(),
-                        &b,
+                        b,
                         a.width(self.obj.ptr_width).unwrap(),
                     ) as u64),
                 )
             }
             ValueOp::Select => {
-                let predicate = get!(self.bits(&xs[0]));
+                let predicate = get!(self.bits_ref(&xs[0]));
                 get!(self.read(&xs[if predicate.is_zero() { 2 } else { 1 }]))
             }
             ValueOp::Cast(cast) => {
-                let a = get!(self.read(&xs[0]));
+                let a = get!(self.read_ref(&xs[0]));
                 let bits = a.bits().unwrap();
                 let w = match cast {
                     Cast::ToPtr => self.obj.ptr_width,
@@ -342,3 +342,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/value_read_work.rs"]
+mod read_work;

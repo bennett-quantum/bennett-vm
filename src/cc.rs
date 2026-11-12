@@ -280,10 +280,16 @@ fn strs(xs: &[String]) -> Json {
 fn vals(xs: &[Value]) -> Json {
     Json::Arr(xs.iter().map(Value::to_json).collect())
 }
-fn current(env: &Environment, k: &Key) -> Option<Value> {
+fn current_ref<'a>(env: &'a Environment, k: &Key) -> Option<&'a Value> {
     #[cfg(test)]
     REGISTER_READS.with(|n| n.set(n.get() + 1));
-    env.get(k).and_then(|v| v.last()).map(|(_, v)| v.clone())
+    env.get(k).and_then(|v| v.last()).map(|(_, v)| v)
+}
+fn current(env: &Environment, k: &Key) -> Option<Value> {
+    let current = current_ref(env, k);
+    let value = current?;
+    let cloned = value.clone();
+    Some(cloned)
 }
 fn is_nan(v: &Value) -> bool {
     matches!(v, Value::F64(f) if f.is_nan())
@@ -509,11 +515,23 @@ impl Machine {
     fn read(&self, name: &str) -> Result<Value, u64> {
         current(&self.env, &(self.stack.last().unwrap().id, name.into())).ok_or(4)
     }
+    fn read_ref(&self, name: &str) -> Result<&Value, u64> {
+        let id = self.stack.last().unwrap().id;
+        let key = (id, name.into());
+        let value = current_ref(&self.env, &key);
+        value.ok_or(4)
+    }
+    fn bits_ref(&self, name: &str) -> Result<&BigUint, u64> {
+        let value = self.read_ref(name)?;
+        let bits = value.bits();
+        let bits = bits.ok_or(4u64)?;
+        Ok(bits)
+    }
     fn bits(&self, name: &str) -> Result<BigUint, u64> {
-        self.read(name)?.bits().cloned().ok_or(4)
+        self.read_ref(name)?.bits().cloned().ok_or(4)
     }
     fn number(&self, name: &str) -> Result<u64, u64> {
-        self.bits(name)?.to_u64().ok_or(4)
+        self.bits_ref(name)?.to_u64().ok_or(4)
     }
     fn dimension(&self, name: &str) -> Result<BigUint, u64> {
         if crate::validate::is_int_literal(name) {

@@ -111,6 +111,7 @@ fn disabled_trace_copies_no_unreported_pre_values() {
     let before = crate::block_scaling::value_copies();
     let activations = ACTIVATION_COPIES.with(std::cell::Cell::get);
     let bytes = METADATA_BYTES.with(std::cell::Cell::get);
+    let instructions = crate::instruction_work::copies();
     for _ in 0..1024 {
         run.step().unwrap();
     }
@@ -126,4 +127,10 @@ fn disabled_trace_copies_no_unreported_pre_values() {
         "diagnostic activation copied without an observer"
     );
     assert_eq!(bytes, 0, "immutable activation metadata copied");
+    let instructions = crate::instruction_work::copies() - instructions;
+    eprintln!("installed instruction copies={instructions}");
+    assert_eq!(
+        instructions, 0,
+        "installed instructions copied during execution"
+    );
 }

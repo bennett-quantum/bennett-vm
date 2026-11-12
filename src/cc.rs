@@ -739,9 +739,10 @@ impl Machine {
         }
     }
     fn step_row(&mut self, effective: Option<&Instr>) -> Result<(), String> {
+        let obj = self.obj.clone();
         let activation = self.stack.last().unwrap();
         let row = effective.unwrap_or_else(|| {
-            &self.obj.functions[activation.function_index].blocks[activation.block].instrs
+            &obj.functions[activation.function_index].blocks[activation.block].instrs
                 [activation.index]
         });
         let op = match effective {
@@ -752,8 +753,7 @@ impl Machine {
             }
         };
         if let Some(op) = op {
-            let row = row.clone();
-            return self.step_prepared(&row, op);
+            return self.step_prepared(row, op);
         }
         // Unmigrated launch rows and CLI replay retain their prior transactions.
         let checkpoint = (self.stateful || (self.effects.replay.is_some() && row.op == "effect"))
@@ -775,8 +775,7 @@ impl Machine {
         let ins = block
             .instrs
             .get(a.index)
-            .ok_or_else(|| err("instruction pointer fell off block"))?
-            .clone();
+            .ok_or_else(|| err("instruction pointer fell off block"))?;
         let before = self.data.clone();
         let wire_boundary = self.quantum.wire_count();
         self.pending_region = None;
@@ -788,7 +787,7 @@ impl Machine {
         self.definitions.clear();
         self.stack.last_mut().unwrap().index += 1;
         self.quantum.classical_event()?;
-        let fault = self.exec(effective.unwrap_or(&ins))?;
+        let fault = self.exec(effective.unwrap_or(ins))?;
         if let Some(code) = fault {
             self.data = before.clone();
             self.fault = Some(code);

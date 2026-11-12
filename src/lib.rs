@@ -123,3 +123,7 @@ mod history_work;
 #[cfg(test)]
 #[path = "../tests/block_scaling.rs"]
 mod block_scaling;
+
+#[cfg(test)]
+#[path = "../tests/instruction_work.rs"]
+mod instruction_work;

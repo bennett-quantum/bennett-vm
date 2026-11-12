@@ -120,7 +120,8 @@ pub struct Param {
     pub role: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug)]
 pub struct Instr {
     pub lhs: Vec<String>,
     pub op: Op,

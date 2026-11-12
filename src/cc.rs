@@ -136,12 +136,12 @@ struct Frame {
     classes_before: Map<usize, String>,
     classes_after: Map<usize, String>,
     wire_boundary: usize,
-    region: Option<Invocation>,
+    region: Option<Box<Invocation>>,
     definitions: Vec<(Key, InstanceId)>,
     next_activation: u64,
     memory_keys: BTreeSet<BigUint>,
-    data: Option<Data>,
-    after: Option<Data>,
+    data: Option<Box<Data>>,
+    after: Option<Box<Data>>,
     control: Seq<Activation>,
     pure: bool,
     events: FrameEvents,
@@ -652,7 +652,7 @@ impl Machine {
                 let next_handle = self.data.next_handle;
                 let mut writes = std::mem::take(&mut self.data.writes);
                 writes.extend(frame.memory_keys.iter().cloned());
-                self.data = d.clone();
+                self.data = d.as_ref().clone();
                 if self.obj.isa == "0.9" {
                     self.data.next_handle = self.data.next_handle.max(next_handle);
                 }
@@ -796,7 +796,7 @@ impl Machine {
                 classes_before,
                 classes_after: self.quantum.wire_classes.clone(),
                 wire_boundary,
-                region: self.pending_region.take(),
+                region: self.pending_region.take().map(Box::new),
                 definitions: self.definitions.clone(),
                 next_activation,
                 memory_keys: addresses,
@@ -808,8 +808,8 @@ impl Machine {
                         !before.tokens.contains_key(id) && self.data.tokens.contains_key(id)
                     })
                     .collect(),
-                data: (!pure(&ins.op)).then_some(before),
-                after: self.stateful.then(|| self.data.clone()),
+                data: (!pure(&ins.op)).then_some(before).map(Box::new),
+                after: self.stateful.then(|| self.data.clone()).map(Box::new),
                 control,
                 pure: frame_pure,
                 events,
@@ -3165,3 +3165,7 @@ mod scaling_tests {
         assert_eq!(run.machine.next_activation, 1);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/frame_storage_work.rs"]
+mod frame_storage_work;

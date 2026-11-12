@@ -9,6 +9,7 @@ autotests = false
 abi-0-9 = []
 
 [dependencies]
+sha2 = "0.10.9"
 
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]

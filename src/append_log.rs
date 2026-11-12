@@ -1,6 +1,7 @@
 //! Immutable append tails: constant-work append, shared checkpoints, ordered export.
 use std::rc::Rc;
 
+#[cfg_attr(not(test), derive(Clone))]
 #[derive(Debug)]
 struct Entry<T> {
     value: T,
@@ -48,6 +49,25 @@ impl<T> AppendLog<T> {
     }
     pub(crate) fn last(&self) -> Option<&T> {
         self.tail.as_ref().map(|e| &e.value)
+    }
+    pub(crate) fn last_mut(&mut self) -> Option<&mut T>
+    where
+        T: Clone,
+    {
+        let tail = self.tail.as_mut()?;
+        let entry = Rc::make_mut(tail);
+        let value = &mut entry.value;
+        Some(value)
+    }
+    pub(crate) fn pop_value(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        let tail = self.tail.take()?;
+        let value = tail.value.clone();
+        self.tail = tail.previous.clone();
+        self.len -= 1;
+        Some(value)
     }
     pub(crate) fn push(&mut self, value: T) {
         #[cfg(test)]
@@ -166,3 +186,7 @@ mod tests {
         assert_eq!(log, before);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/append_log_work.rs"]
+mod work;

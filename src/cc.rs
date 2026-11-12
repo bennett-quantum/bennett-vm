@@ -114,6 +114,8 @@ struct Data {
     tokens: Map<u64, (String, value::Budget)>,
     writes: BTreeSet<BigUint>,
 }
+type ControlStack = crate::append_log::AppendLog<Activation>;
+
 #[derive(Clone, Debug, PartialEq)]
 struct Activation {
     id: u64,
@@ -142,7 +144,7 @@ struct Frame {
     memory_keys: BTreeSet<BigUint>,
     data: Option<Box<Data>>,
     after: Option<Box<Data>>,
-    control: Seq<Activation>,
+    control: ControlStack,
     pure: bool,
     events: FrameEvents,
     marker: bool,
@@ -174,7 +176,7 @@ struct Machine {
     obj: std::sync::Arc<Object>,
     data: Data,
     env: Environment,
-    stack: Seq<Activation>,
+    stack: ControlStack,
     history: History<Frame, Segment>,
     trace: TraceLog,
     next_activation: u64,
@@ -977,7 +979,7 @@ impl Machine {
                 let values = get!(self.operands(xs));
                 let function = &obj.functions[self.stack.last().unwrap().function_index];
                 get!(self.transfer(&values, &function.lists[1]));
-                let a = self.stack.pop().unwrap();
+                let a = self.stack.pop_value().unwrap();
                 if let Some(start) = a.call_start {
                     self.history.complete(
                         start,
@@ -1936,8 +1938,8 @@ fn first_difference(
     b: &Environment,
     da: &Data,
     db: &Data,
-    entry_stack: &Seq<Activation>,
-    stack: &Seq<Activation>,
+    entry_stack: &ControlStack,
+    stack: &ControlStack,
     next_activation: u64,
     quantum_identity: bool,
     fault: Option<u64>,

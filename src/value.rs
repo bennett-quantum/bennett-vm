@@ -60,7 +60,8 @@ impl Budget {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug, PartialEq)]
 pub enum Value {
     Int {
         width: usize,
@@ -106,28 +107,18 @@ impl Value {
         }
     }
     pub fn to_json(&self) -> Json {
-        match self {
-            Value::Int { width, bits } => Json::obj(vec![
-                ("type", Json::Str(format!("i{width}"))),
-                ("value", Json::Str(bits.to_decimal())),
-            ]),
-            Value::Ptr(bits) => Json::obj(vec![
-                ("type", Json::Str("ptr".into())),
-                ("value", Json::Str(bits.to_decimal())),
-            ]),
-            Value::F64(v) => Json::obj(vec![
-                ("type", Json::Str("f64".into())),
-                ("value", Json::Num(crate::json::format_f64(*v))),
-            ]),
-            Value::Token(b) | Value::TokenId(_, b) => Json::obj(vec![
-                ("type", Json::Str("token".into())),
-                ("value", b.to_json()),
-            ]),
-            Value::Qreg(id) => Json::obj(vec![
-                ("type", Json::Str("qreg".into())),
-                ("value", Json::u64(*id)),
-            ]),
-        }
+        #[cfg(test)]
+        crate::block_scaling::record_json_value();
+        let value = match self {
+            Value::Int { bits, .. } | Value::Ptr(bits) => Json::Str(bits.to_decimal()),
+            Value::F64(v) => Json::Num(crate::json::format_f64(*v)),
+            Value::Token(b) | Value::TokenId(_, b) => b.to_json(),
+            Value::Qreg(id) => Json::u64(*id),
+        };
+        Json::obj(vec![
+            ("type", Json::Str(self.type_name())),
+            ("value", value),
+        ])
     }
     /// Debug-shaped rendering used in `first_difference` strings.
     pub fn debug_shape(&self) -> String {

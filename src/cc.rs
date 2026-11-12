@@ -123,7 +123,7 @@ struct Activation {
     index: usize,
     dest: Vec<String>,
     call_start: Option<usize>,
-    args: Vec<Value>,
+    args: std::rc::Rc<Vec<Value>>,
 }
 #[derive(Clone, Default)]
 struct FrameEvents {
@@ -970,7 +970,7 @@ impl Machine {
                     index: 0,
                     dest: ins.lhs.clone(),
                     call_start: Some(self.history.len()),
-                    args: values,
+                    args: std::rc::Rc::new(values),
                 });
             }
             "ret" => {
@@ -986,7 +986,7 @@ impl Machine {
                             start,
                             end: self.history.len(),
                             name: a.function,
-                            args: a.args,
+                            args: a.args.as_ref().clone(),
                             results: values.clone(),
                         },
                     );
@@ -1762,7 +1762,7 @@ fn command(args: &[String], mode: Mode, loaded: Option<Object>) -> Result<(), St
             index: 0,
             dest: vec![],
             call_start: None,
-            args: values,
+            args: std::rc::Rc::new(values),
         }]
         .into_iter()
         .collect(),
@@ -2184,7 +2184,7 @@ impl RuntimeRun {
                     index: 0,
                     dest: vec![],
                     call_start: None,
-                    args,
+                    args: std::rc::Rc::new(args),
                 }]
                 .into_iter()
                 .collect(),
@@ -3169,3 +3169,7 @@ mod scaling_tests {
 #[cfg(test)]
 #[path = "../tests/frame_storage_work.rs"]
 mod frame_storage_work;
+
+#[cfg(test)]
+#[path = "../tests/activation_work.rs"]
+mod activation_work;

@@ -13,8 +13,8 @@ pub(super) struct TraceRow {
     memory: Vec<(BigUint, u8, u8)>,
 }
 impl TraceRow {
-    // Preserve the fallible value conversions and source-row checks when the
-    // CLI will not report a trace; JSON containers add no validation.
+    // Preserve fallible conversions and source-row checks for unreported rows.
+    // Only f64 conversion can fail; integer decimal formatting is not a check.
     fn check_json(&self, obj: &Object) {
         #[cfg(test)]
         reverse_work::record_validation();
@@ -23,6 +23,7 @@ impl TraceRow {
         self.registers
             .iter()
             .flat_map(|(_, pre, post)| pre.iter().chain(post))
+            .filter(|value| matches!(value, Value::F64(_)))
             .for_each(|value| {
                 let _ = value.to_json();
             });

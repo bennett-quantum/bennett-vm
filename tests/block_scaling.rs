@@ -2,6 +2,8 @@ use std::cell::Cell;
 thread_local! {
     static WORK: Cell<Option<u64>> = const { Cell::new(None) };
     static COPIES: Cell<u64> = const { Cell::new(0) };
+    static JSON_VALUES: Cell<u64> = const { Cell::new(0) };
+    static VALUE_COPIES: Cell<u64> = const { Cell::new(0) };
 }
 pub(crate) fn record(n: u64) {
     WORK.with(|w| w.set(w.get().map(|total| total + n)));
@@ -151,6 +153,33 @@ impl Clone for object::Object {
             has_schedule: self.has_schedule,
             has_certificate: self.has_certificate,
             has_coverage: self.has_coverage,
+        }
+    }
+}
+
+pub(crate) fn record_json_value() {
+    JSON_VALUES.with(|n| n.set(n.get() + 1));
+}
+pub(crate) fn json_values() -> u64 {
+    JSON_VALUES.with(Cell::get)
+}
+
+pub(crate) fn value_copies() -> u64 {
+    VALUE_COPIES.with(Cell::get)
+}
+impl Clone for crate::value::Value {
+    fn clone(&self) -> Self {
+        VALUE_COPIES.with(|n| n.set(n.get() + 1));
+        match self {
+            Self::Int { width, bits } => Self::Int {
+                width: *width,
+                bits: bits.clone(),
+            },
+            Self::Ptr(bits) => Self::Ptr(bits.clone()),
+            Self::F64(v) => Self::F64(*v),
+            Self::Token(b) => Self::Token(*b),
+            Self::TokenId(id, b) => Self::TokenId(*id, *b),
+            Self::Qreg(id) => Self::Qreg(*id),
         }
     }
 }

@@ -11,6 +11,7 @@ fn reverse_trace_checks_rows_without_retaining_unreported_json() {
     let mut trace = TraceLog::cli(&Mode::Reverse).unwrap();
     let before = crate::step_scaling::trace_builds();
     let validations = VALIDATIONS.with(std::cell::Cell::get);
+    let values = crate::block_scaling::json_values();
     for step in 0..1024 {
         trace.record(
             TraceRow {
@@ -18,7 +19,11 @@ fn reverse_trace_checks_rows_without_retaining_unreported_json() {
                 function: "main".into(),
                 block: 0,
                 index: 0,
-                registers: vec![],
+                registers: vec![(
+                    (0, "i".into()),
+                    Some(Value::int(64, u(step))),
+                    Some(Value::int(64, u(step + 1))),
+                )],
                 memory: vec![],
             },
             &obj,
@@ -26,6 +31,11 @@ fn reverse_trace_checks_rows_without_retaining_unreported_json() {
     }
     assert_eq!(crate::step_scaling::trace_builds() - before, 0);
     assert_eq!(VALIDATIONS.with(std::cell::Cell::get) - validations, 1024);
+    assert_eq!(
+        crate::block_scaling::json_values() - values,
+        0,
+        "unreported integer values formatted"
+    );
     assert_eq!(trace.project(&obj).len(), 0, "unreported rows retained");
 }
 

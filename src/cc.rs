@@ -1557,10 +1557,10 @@ fn command(args: &[String], mode: Mode, loaded: Option<Object>) -> Result<(), St
     let state_output = cliargs::state_output(&opts)?;
     let tape_out = opts.one("tape-out")?;
     let effects = EffectJournal::read(opts.one("replay-tape")?)?;
-    let obj = loaded.map_or_else(
+    let obj = std::sync::Arc::new(loaded.map_or_else(
         || crate::load(&cliargs::read_object(&opts.positional[0])?, false).map(|(obj, _)| obj),
         Ok,
-    )?;
+    )?);
     if obj.isa != "0.9" && opts.one("token-aliases")?.is_some() {
         return Err("unknown option --token-aliases".into());
     }
@@ -1750,7 +1750,7 @@ fn command(args: &[String], mode: Mode, loaded: Option<Object>) -> Result<(), St
         quantum,
         quantum_events: Seq::new(),
         pending_region: None,
-        obj: std::sync::Arc::new(obj.clone()),
+        obj: obj.clone(),
         data,
         nan_registers: nan_keys(&env),
         env,

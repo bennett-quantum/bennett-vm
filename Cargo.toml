@@ -20,3 +20,8 @@ path = "tests/suite.rs"
 
 [profile.test]
 debug = "line-tables-only"
+
+# Crypto intrinsics need optimized code generation even when the VM's
+# validation and execution retain the debug profile's checks.
+[profile.dev.package.sha2]
+opt-level = 3

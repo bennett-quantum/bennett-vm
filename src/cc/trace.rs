@@ -65,7 +65,7 @@ impl TraceRow {
 pub(super) enum TraceLog {
     Disabled,
     Deferred(crate::append_log::AppendLog<TraceRow>),
-    Observed(crate::append_log::AppendLog<Json>),
+    Observed(Option<crate::append_log::AppendLog<Json>>),
 }
 impl TraceLog {
     /// CLI defaults retain eager diagnostic behavior. BENNETT_VM_TRACE=off
@@ -78,36 +78,44 @@ impl TraceLog {
         };
         Ok(if *mode == Mode::Program {
             Self::Disabled
+        } else if enabled {
+            // Reverse reports no trace. Keep conversion diagnostics, then drop
+            // each row instead of retaining JSON that can never be projected.
+            Self::Observed((*mode != Mode::Reverse).then(crate::append_log::AppendLog::new))
         } else {
-            Self::new(enabled)
+            Self::new(false)
         })
     }
     pub(super) fn new(observed: bool) -> Self {
-        if observed {
-            Self::Observed(crate::append_log::AppendLog::new())
-        } else {
-            Self::Deferred(crate::append_log::AppendLog::new())
-        }
+        let json_rows = crate::append_log::AppendLog::new();
+        let typed_rows = crate::append_log::AppendLog::new();
+        let eager = Self::Observed(Some(json_rows));
+        observed
+            .then_some(eager)
+            .unwrap_or(Self::Deferred(typed_rows))
     }
     pub(super) fn record(&mut self, row: TraceRow, obj: &Object) {
         match self {
             Self::Disabled => unreachable!("disabled trace received a row"),
             Self::Deferred(rows) => rows.push(row),
-            Self::Observed(rows) => rows.push(row.to_json(obj)),
+            Self::Observed(rows) => {
+                let json = row.to_json(obj);
+                let _ = rows.as_mut().map(|rows| rows.push(json));
+            }
         }
     }
     pub(super) fn project(&self, obj: &Object) -> Vec<Json> {
         match self {
             Self::Disabled => vec![],
             Self::Deferred(rows) => rows.iter().map(|row| row.to_json(obj)).collect(),
-            Self::Observed(rows) => rows.to_vec(),
+            Self::Observed(rows) => rows.as_ref().map_or_else(Vec::new, |rows| rows.to_vec()),
         }
     }
     pub(super) fn truncate(&mut self, n: usize) {
         match self {
             Self::Disabled => (),
             Self::Deferred(rows) => rows.truncate(n),
-            Self::Observed(rows) => rows.truncate(n),
+            Self::Observed(rows) => rows.iter_mut().for_each(|rows| rows.truncate(n)),
         }
     }
 }
@@ -296,3 +304,7 @@ mod tests {
         assert_eq!(reports[0], reports[1]);
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/reverse_trace_work.rs"]
+mod reverse_work;

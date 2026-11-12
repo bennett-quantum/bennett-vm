@@ -268,7 +268,8 @@ pub struct Layout {
     pub json: Json,
 }
 
-#[derive(Clone, Debug)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug)]
 pub struct Object {
     pub isa: String,
     pub text: String,

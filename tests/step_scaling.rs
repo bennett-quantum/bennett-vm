@@ -381,7 +381,7 @@ thread_local! {
 pub(crate) fn record_trace_json_build() {
     TRACE_BUILDS.with(|count| count.set(count.get() + 1));
 }
-fn trace_builds() -> u64 {
+pub(crate) fn trace_builds() -> u64 {
     TRACE_BUILDS.with(std::cell::Cell::get)
 }
 

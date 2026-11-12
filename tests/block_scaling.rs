@@ -1,6 +1,7 @@
 use std::cell::Cell;
 thread_local! {
     static WORK: Cell<Option<u64>> = const { Cell::new(None) };
+    static COPIES: Cell<u64> = const { Cell::new(0) };
 }
 pub(crate) fn record(n: u64) {
     WORK.with(|w| w.set(w.get().map(|total| total + n)));
@@ -9,6 +10,7 @@ struct Probe;
 impl Probe {
     fn start() -> Self {
         WORK.with(|w| assert!(w.replace(Some(0)).is_none()));
+        COPIES.with(|c| c.set(0));
         Self
     }
     fn visits(&self) -> u64 {
@@ -120,8 +122,35 @@ fn retained_reverse_validates_the_dispatched_object_once() {
     std::fs::remove_file(path).unwrap();
     result.unwrap();
     let visits = probe.visits();
+    assert_eq!(
+        COPIES.with(Cell::get),
+        0,
+        "installed object was deep-cloned"
+    );
     assert!(
         visits <= 5 * 128,
         "{visits} block visits: dispatched object was validated twice"
     );
+}
+
+impl Clone for object::Object {
+    fn clone(&self) -> Self {
+        if WORK.with(|w| w.get().is_some()) {
+            COPIES.with(|c| c.set(c.get() + 1));
+        }
+        Self {
+            isa: self.isa.clone(),
+            text: self.text.clone(),
+            ptr_width: self.ptr_width,
+            symbols: self.symbols.clone(),
+            imports: self.imports.clone(),
+            functions: self.functions.clone(),
+            data: self.data.clone(),
+            devices: self.devices.clone(),
+            layout: self.layout.clone(),
+            has_schedule: self.has_schedule,
+            has_certificate: self.has_certificate,
+            has_coverage: self.has_coverage,
+        }
+    }
 }

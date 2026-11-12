@@ -1,4 +1,8 @@
 use super::*;
+thread_local! { static VALIDATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+pub(super) fn record_validation() {
+    VALIDATIONS.with(|n| n.set(n.get() + 1));
+}
 
 #[test]
 fn reverse_trace_checks_rows_without_retaining_unreported_json() {
@@ -6,6 +10,7 @@ fn reverse_trace_checks_rows_without_retaining_unreported_json() {
     let obj = crate::object::parse(source).unwrap();
     let mut trace = TraceLog::cli(&Mode::Reverse).unwrap();
     let before = crate::step_scaling::trace_builds();
+    let validations = VALIDATIONS.with(std::cell::Cell::get);
     for step in 0..1024 {
         trace.record(
             TraceRow {
@@ -19,7 +24,8 @@ fn reverse_trace_checks_rows_without_retaining_unreported_json() {
             &obj,
         );
     }
-    assert_eq!(crate::step_scaling::trace_builds() - before, 1024);
+    assert_eq!(crate::step_scaling::trace_builds() - before, 0);
+    assert_eq!(VALIDATIONS.with(std::cell::Cell::get) - validations, 1024);
     assert_eq!(trace.project(&obj).len(), 0, "unreported rows retained");
 }
 

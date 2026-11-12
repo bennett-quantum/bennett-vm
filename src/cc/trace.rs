@@ -13,6 +13,20 @@ pub(super) struct TraceRow {
     memory: Vec<(BigUint, u8, u8)>,
 }
 impl TraceRow {
+    // Preserve the fallible value conversions and source-row checks when the
+    // CLI will not report a trace; JSON containers add no validation.
+    fn check_json(&self, obj: &Object) {
+        #[cfg(test)]
+        reverse_work::record_validation();
+        let block = &obj.function(&self.function).unwrap().blocks[self.block];
+        let _ = &block.instrs[self.index];
+        self.registers
+            .iter()
+            .flat_map(|(_, pre, post)| pre.iter().chain(post))
+            .for_each(|value| {
+                let _ = value.to_json();
+            });
+    }
     fn to_json(&self, obj: &Object) -> Json {
         #[cfg(test)]
         crate::step_scaling::record_trace_json_build();
@@ -98,10 +112,9 @@ impl TraceLog {
         match self {
             Self::Disabled => unreachable!("disabled trace received a row"),
             Self::Deferred(rows) => rows.push(row),
-            Self::Observed(rows) => {
-                let json = row.to_json(obj);
-                let _ = rows.as_mut().map(|rows| rows.push(json));
-            }
+            Self::Observed(rows) => rows
+                .as_mut()
+                .map_or_else(|| row.check_json(obj), |rows| rows.push(row.to_json(obj))),
         }
     }
     pub(super) fn project(&self, obj: &Object) -> Vec<Json> {
@@ -152,7 +165,9 @@ impl Machine {
             .filter_map(|a| {
                 let pre = *before.memory.get(a).unwrap_or(&0);
                 let post = *self.data.memory.get(a).unwrap_or(&0);
-                (pre != post).then(|| (a.clone(), pre, post))
+                (pre != post)
+                    .then_some((a, pre, post))
+                    .map(|(a, pre, post)| (a.clone(), pre, post))
             })
             .collect();
         TraceRow {

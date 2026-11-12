@@ -143,7 +143,6 @@ impl Machine {
         #[cfg(test)]
         preparation_boundary(PreparationStage::Capacity)?;
 
-        let a = self.stack.last().unwrap().clone();
         let mut frame = Frame {
             classes_before: self.quantum.wire_classes.clone(),
             classes_after: self.quantum.wire_classes.clone(),
@@ -178,7 +177,11 @@ impl Machine {
             }
         }
         if !matches!(self.trace, TraceLog::Disabled) {
-            let row = self.trace_row(&a, &self.data, &frame.memory_keys);
+            let row = self.trace_row(
+                frame.control.last().unwrap(),
+                &self.data,
+                &frame.memory_keys,
+            );
             self.trace.record(row, &self.obj);
         }
         self.history.push(frame, pure, false);

@@ -173,7 +173,7 @@ impl Machine {
             .collect();
         TraceRow {
             step: self.steps,
-            function: a.function.clone(),
+            function: a.function.to_string(),
             block: a.block,
             index: a.index,
             registers,

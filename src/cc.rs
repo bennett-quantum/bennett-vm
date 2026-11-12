@@ -116,14 +116,15 @@ struct Data {
 }
 type ControlStack = crate::append_log::AppendLog<Activation>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug, PartialEq)]
 struct Activation {
     id: u64,
-    function: String,
+    function: std::rc::Rc<str>,
     function_index: usize,
     block: usize,
     index: usize,
-    dest: Vec<String>,
+    dest: std::rc::Rc<Vec<String>>,
     call_start: Option<usize>,
     args: std::rc::Rc<Vec<Value>>,
 }
@@ -499,9 +500,10 @@ impl Data {
 }
 impl Machine {
     fn note_register(&mut self, key: &Key) {
-        if !self.register_changes.contains_key(key) {
+        if !matches!(self.trace, TraceLog::Disabled) {
             self.register_changes
-                .insert(key.clone(), current(&self.env, key));
+                .entry(key.clone())
+                .or_insert_with_key(|key| current(&self.env, key));
         }
     }
     fn read(&self, name: &str) -> Result<Value, u64> {
@@ -748,7 +750,7 @@ impl Machine {
         result
     }
     fn step_row_inner(&mut self, effective: Option<&Instr>) -> Result<(), String> {
-        let a = self.stack.last().unwrap().clone();
+        let a = self.stack.last().unwrap();
         let obj = self.obj.clone();
         let f = &obj.functions[a.function_index];
         let block = &f.blocks[a.block];
@@ -776,8 +778,10 @@ impl Machine {
         }
         let addresses = self.data.writes.clone();
         if !matches!(self.trace, TraceLog::Disabled) {
-            self.trace
-                .record(self.trace_row(&a, &before, &addresses), &obj);
+            self.trace.record(
+                self.trace_row(control.last().unwrap(), &before, &addresses),
+                &obj,
+            );
         }
         let events = if self.stateful && !pure(&ins.op) && ins.op != "uncall" {
             FrameEvents {
@@ -970,7 +974,7 @@ impl Machine {
                     function_index,
                     block: 0,
                     index: 0,
-                    dest: ins.lhs.clone(),
+                    dest: std::rc::Rc::new(ins.lhs.clone()),
                     call_start: Some(self.history.len()),
                     args: std::rc::Rc::new(values),
                 });
@@ -987,7 +991,7 @@ impl Machine {
                         Segment {
                             start,
                             end: self.history.len(),
-                            name: a.function,
+                            name: a.function.to_string(),
                             args: a.args.as_ref().clone(),
                             results: values.clone(),
                         },
@@ -1762,7 +1766,7 @@ fn command(args: &[String], mode: Mode, loaded: Option<Object>) -> Result<(), St
             function_index,
             block: 0,
             index: 0,
-            dest: vec![],
+            dest: std::rc::Rc::new(vec![]),
             call_start: None,
             args: std::rc::Rc::new(values),
         }]
@@ -2184,7 +2188,7 @@ impl RuntimeRun {
                     function_index,
                     block: 0,
                     index: 0,
-                    dest: vec![],
+                    dest: std::rc::Rc::new(vec![]),
                     call_start: None,
                     args: std::rc::Rc::new(args),
                 }]

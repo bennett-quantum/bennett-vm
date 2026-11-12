@@ -1502,10 +1502,11 @@ fn apply_invocation(
 }
 
 pub fn cmd_run_cc(args: &[String], reverse: bool) -> Result<(), String> {
-    command(args, if reverse { Mode::Reverse } else { Mode::Cc })
+    command(args, if reverse { Mode::Reverse } else { Mode::Cc }, None)
 }
 pub fn cmd_reverse(args: &[String]) -> Result<(), String> {
     // Dispatch by entry kind before scanning tier-specific options.
+    let mut loaded = None;
     if args.len() >= 2 {
         let (obj, _) = crate::load(&cliargs::read_object(&args[0])?, false)?;
         if let Some(f) = obj.function(cliargs::entry_name(&args[1]))
@@ -1516,11 +1517,12 @@ pub fn cmd_reverse(args: &[String]) -> Result<(), String> {
             }
             return crate::stepcli::reverse(args);
         }
+        loaded = Some(obj);
     }
-    command(args, Mode::Reverse)
+    command(args, Mode::Reverse, loaded)
 }
 pub fn cmd_program(args: &[String]) -> Result<(), String> {
-    command(args, Mode::Program)
+    command(args, Mode::Program, None)
 }
 #[derive(PartialEq)]
 enum Mode {
@@ -1528,7 +1530,7 @@ enum Mode {
     Reverse,
     Program,
 }
-fn command(args: &[String], mode: Mode) -> Result<(), String> {
+fn command(args: &[String], mode: Mode, loaded: Option<Object>) -> Result<(), String> {
     let opts = cliargs::scan_opts(
         args,
         &[
@@ -1555,7 +1557,10 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
     let state_output = cliargs::state_output(&opts)?;
     let tape_out = opts.one("tape-out")?;
     let effects = EffectJournal::read(opts.one("replay-tape")?)?;
-    let (obj, _) = crate::load(&cliargs::read_object(&opts.positional[0])?, false)?;
+    let obj = loaded.map_or_else(
+        || crate::load(&cliargs::read_object(&opts.positional[0])?, false).map(|(obj, _)| obj),
+        Ok,
+    )?;
     if obj.isa != "0.9" && opts.one("token-aliases")?.is_some() {
         return Err("unknown option --token-aliases".into());
     }
@@ -1584,9 +1589,6 @@ fn command(args: &[String], mode: Mode) -> Result<(), String> {
             "unimplemented: reverse {} (§3.6 / exact action reversal)",
             f.kind.kind_str()
         ));
-    }
-    if mode == Mode::Program && f.kind != FnKind::Cc {
-        return Err("§10: E_ARG: run-program requires a CC entry".into());
     }
     if mode != Mode::Program && opts.flags.contains("reverse") {
         return Err(err("--reverse is a run-program option"));

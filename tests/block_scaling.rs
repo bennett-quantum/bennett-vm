@@ -90,3 +90,38 @@ fn indexed_lookup_preserves_first_match_and_rebuilds_after_edits() {
         );
     }
 }
+
+#[test]
+fn retained_reverse_validates_the_dispatched_object_once() {
+    let obj = object(128);
+    let ids = crate::identity::compute(&obj).unwrap();
+    let symbol = &obj.symbols["main"];
+    let symbols = Json::obj(vec![(
+        "0",
+        Json::obj(vec![
+            ("name", Json::Str("main".into())),
+            ("kind", Json::Str("cc".into())),
+            ("signature", symbol.signature.clone()),
+            ("interface_hash", Json::Str(ids.interface["main"].clone())),
+        ]),
+    )]);
+    let text = obj
+        .text
+        .replacen("\n{}\n", &format!("\n{}\n", symbols.to_jcs()), 1);
+    let path = std::env::temp_dir().join(format!("reverse-load-{}.bisa", std::process::id()));
+    std::fs::write(&path, text).unwrap();
+    let probe = Probe::start();
+    let result = crate::cc::cmd_reverse(&[
+        path.to_str().unwrap().into(),
+        "main".into(),
+        "--steps".into(),
+        "0".into(),
+    ]);
+    std::fs::remove_file(path).unwrap();
+    result.unwrap();
+    let visits = probe.visits();
+    assert!(
+        visits <= 5 * 128,
+        "{visits} block visits: dispatched object was validated twice"
+    );
+}
